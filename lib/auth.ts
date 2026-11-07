@@ -18,8 +18,8 @@ declare module "next-auth" {
 
 const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: DrizzleAdapter(db),
+const authConfig = {
+  ...((!ENABLE_DEV_AUTH) && { adapter: DrizzleAdapter(db) }),
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
@@ -75,7 +75,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     strategy: ENABLE_DEV_AUTH ? "jwt" : "database",
   },
   callbacks: {
-    async signIn({ account, profile }) {
+    async signIn({ account, profile }: { account: any; profile?: any }) {
       if (account?.provider === "google") {
         const email = profile?.email;
         if (!email?.endsWith("@vendasta.com")) {
@@ -84,10 +84,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user }: { token: any; user: any }) {
       if (user) {
         token.id = user.id;
-        token.role = (user as any).role || "employee";
+        token.role = user.role || "employee";
 
         const [employee] = await db
           .select({ id: employees.id })
@@ -99,7 +99,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return token;
     },
-    async session({ session, token, user }) {
+    async session({ session, token, user }: { session: any; token?: any; user?: any }) {
       if (session.user) {
         if (token) {
           // JWT strategy (credentials)
@@ -109,7 +109,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         } else if (user) {
           // Database strategy (Google OAuth)
           session.user.id = user.id;
-          session.user.role = (user as any).role || "employee";
+          session.user.role = user.role || "employee";
 
           const [employee] = await db
             .select({ id: employees.id })
@@ -127,4 +127,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     signIn: "/auth/signin",
     error: "/auth/error",
   },
-});
+} as any;
+
+export const { handlers, signIn, signOut, auth } = NextAuth(authConfig);

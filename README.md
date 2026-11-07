@@ -171,6 +171,7 @@ AUTH_GOOGLE_ID=<your-google-client-id>
 AUTH_GOOGLE_SECRET=<your-google-client-secret>
 AUTH_URL=https://your-domain.vercel.app
 BAMBOO_API_KEYS=<your-api-keys-comma-separated>
+SEED_TOKEN=<secure-random-string-for-seed-api>
 ```
 
 ### 5. Run Migrations
@@ -187,11 +188,49 @@ npm run db:migrate
 
 ### 6. Seed Data
 
+You have two options to seed the database:
+
+**Option A: Using the Seed API (Recommended for Production)**
+
+1. Set the `SEED_TOKEN` environment variable in Vercel to a secure random string
+2. After deployment, trigger the seed via API:
+
 ```bash
+curl -X POST https://your-domain.vercel.app/api/admin/seed \
+  -H "Content-Type: application/json" \
+  -H "X-Seed-Token: YOUR_SEED_TOKEN_HERE"
+```
+
+To reset and re-seed (⚠️ destructive, deletes all data):
+
+```bash
+curl -X POST https://your-domain.vercel.app/api/admin/seed \
+  -H "Content-Type: application/json" \
+  -H "X-Seed-Token: YOUR_SEED_TOKEN_HERE" \
+  -d '{"reset": true}'
+```
+
+**Option B: Using Local Shell**
+
+```bash
+# Connect to your database
+vercel env pull .env.local
 npm run db:seed
+
+# Or reset and re-seed
+npm run db:seed -- --reset
 ```
 
 Your app is now live at `https://your-domain.vercel.app`!
+
+### Seed API Security
+
+The `/api/admin/seed` endpoint:
+- Requires a secret `X-Seed-Token` header matching the `SEED_TOKEN` environment variable
+- Returns 404 when `SEED_TOKEN` is not configured
+- Is safe to call multiple times (idempotent unless `--reset` is used)
+- Supports `{"reset": true}` in request body to truncate tables before seeding
+- Should only be used in trusted environments (never expose the token)
 
 ## Role-Based Access Control
 
@@ -312,6 +351,7 @@ The following features are stubbed or partially implemented for future developme
 | `AUTH_URL` | Yes (prod) | Public app URL |
 | `ENABLE_DEV_AUTH` | No | Set to `true` to enable dev login bypass |
 | `BAMBOO_API_KEYS` | Yes | Comma-separated list of valid API keys |
+| `SEED_TOKEN` | No | Secret token for `/api/admin/seed` endpoint (disables endpoint if unset) |
 
 ## Contributing
 

@@ -1,15 +1,51 @@
 import { db } from "../lib/db";
 import * as schema from "../lib/db/schema";
+import { sql } from "drizzle-orm";
 
 const VENDASTA_DOMAIN = "vendasta.com";
 
 async function seed() {
   console.log("🌱 Seeding database...");
 
+  const shouldReset = process.argv.includes("--reset");
+  
+  if (shouldReset) {
+    console.log("⚠️  Resetting database (--reset flag detected)...");
+    
+    await db.execute(sql`TRUNCATE TABLE audit_logs CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employee_tasks CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE task_templates CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employee_notes CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE emergency_contacts CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE time_off_requests CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE time_off_balances CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE time_off_policies CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE equity_grants CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE bonus_details CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE compensation_history CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE job_history CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employee_teams CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employees CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE seats CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE teams CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE job_levels CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE job_families CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE divisions CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE departments CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE locations CASCADE`);
+    
+    console.log("✅ Database reset complete");
+  }
+
   console.log("Creating locations...");
-  const [saskatoon, chennai, bocaRaton, toronto, remote] = await db
-    .insert(schema.locations)
-    .values([
+  
+  const existingLocations = await db.select().from(schema.locations);
+  let saskatoon, chennai, bocaRaton, toronto, remote;
+  
+  if (existingLocations.length === 0) {
+    [saskatoon, chennai, bocaRaton, toronto, remote] = await db
+      .insert(schema.locations)
+      .values([
       {
         name: "Saskatoon HQ",
         address: "200 - 333 3rd Avenue North",
@@ -62,12 +98,25 @@ async function seed() {
       },
     ])
     .returning();
+  } else {
+    console.log("  Locations already exist, using existing...");
+    saskatoon = existingLocations.find(l => l.name === "Saskatoon HQ")!;
+    chennai = existingLocations.find(l => l.name === "Chennai HQ")!;
+    bocaRaton = existingLocations.find(l => l.name === "Boca Raton")!;
+    toronto = existingLocations.find(l => l.name === "Toronto")!;
+    remote = existingLocations.find(l => l.name === "Remote")!;
+  }
 
   console.log("Creating departments...");
-  const [tech, services, sales, marketing, financeAdmin, peopleOps, product] =
-    await db
-      .insert(schema.departments)
-      .values([
+  
+  const existingDepts = await db.select().from(schema.departments);
+  let tech, services, sales, marketing, financeAdmin, peopleOps, product;
+  
+  if (existingDepts.length === 0) {
+    [tech, services, sales, marketing, financeAdmin, peopleOps, product] =
+      await db
+        .insert(schema.departments)
+        .values([
         {
           name: "Technology",
           description: "Engineering and technical operations",
@@ -92,6 +141,16 @@ async function seed() {
         { name: "Product", description: "Product management and design" },
       ])
       .returning();
+  } else {
+    console.log("  Departments already exist, using existing...");
+    tech = existingDepts.find(d => d.name === "Technology")!;
+    services = existingDepts.find(d => d.name === "Vendasta Services")!;
+    sales = existingDepts.find(d => d.name === "Sales")!;
+    marketing = existingDepts.find(d => d.name === "Marketing")!;
+    financeAdmin = existingDepts.find(d => d.name === "Finance & Admin")!;
+    peopleOps = existingDepts.find(d => d.name === "People Operations")!;
+    product = existingDepts.find(d => d.name === "Product")!;
+  }
 
   console.log("Creating divisions...");
   const [rdDiv, supportDiv, channelSalesDiv, corpMarketingDiv, financeDiv] =
@@ -153,9 +212,14 @@ async function seed() {
     .returning();
 
   console.log("Creating CEO...");
-  const [ceo] = await db
-    .insert(schema.employees)
-    .values([
+  
+  const existingCEO = await db.select().from(schema.employees).where(sql`email = 'brendan.king@vendasta.com'`).limit(1);
+  let ceo;
+  
+  if (existingCEO.length === 0) {
+    [ceo] = await db
+      .insert(schema.employees)
+      .values([
       {
         employeeNumber: "E001",
         firstName: "Brendan",
@@ -174,11 +238,23 @@ async function seed() {
       },
     ])
     .returning();
+  } else {
+    console.log("  CEO already exists, using existing...");
+    ceo = existingCEO[0];
+  }
 
   console.log("Creating C-suite and VPs...");
-  const executives = await db
-    .insert(schema.employees)
-    .values([
+  
+  const existingExecs = await db.select().from(schema.employees).where(
+    sql`email IN ('jean.parchewsky@vendasta.com', 'david.chen@vendasta.com', 'sarah.martinez@vendasta.com', 'raj.patel@vendasta.com')`
+  );
+  
+  let executives = existingExecs;
+  
+  if (existingExecs.length === 0) {
+    executives = await db
+      .insert(schema.employees)
+      .values([
       {
         employeeNumber: "E002",
         firstName: "Jean",
@@ -252,6 +328,16 @@ async function seed() {
       },
     ])
     .returning();
+  } else {
+    console.log("  Executives already exist, skipping...");
+  }
+
+  const existingEmpCount = await db.$count(schema.employees);
+  const shouldSkipEmployees = existingEmpCount > 10;
+  
+  if (shouldSkipEmployees) {
+    console.log(`  ${existingEmpCount} employees already exist, skipping employee creation...`);
+  }
 
   console.log("Creating managers and employees...");
   const employeesData = [];
@@ -401,9 +487,19 @@ async function seed() {
     ],
   };
 
+  const usedEmails = new Set<string>();
+
   for (let i = 0; i < 80; i++) {
-    const firstName = firstNames[i % firstNames.length];
-    const lastName = lastNames[Math.floor(i / 2) % lastNames.length];
+    let firstName = firstNames[i % firstNames.length];
+    let lastName = lastNames[Math.floor(i / 2) % lastNames.length];
+    let email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${VENDASTA_DOMAIN}`;
+    
+    let suffix = 1;
+    while (usedEmails.has(email)) {
+      email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}${suffix}@${VENDASTA_DOMAIN}`;
+      suffix++;
+    }
+    usedEmails.add(email);
     const dept =
       i < 35
         ? tech
@@ -475,7 +571,7 @@ async function seed() {
       employeeNumber: `E${String(empNumber++).padStart(3, "0")}`,
       firstName,
       lastName,
-      email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${VENDASTA_DOMAIN}`,
+      email,
       jobTitle,
       departmentId: dept.id,
       divisionId:
@@ -502,10 +598,18 @@ async function seed() {
     });
   }
 
-  const allEmployees = await db
-    .insert(schema.employees)
-    .values(employeesData)
-    .returning();
+  let allEmployees: any[] = [];
+  
+  if (!shouldSkipEmployees) {
+    allEmployees = await db
+      .insert(schema.employees)
+      .values(employeesData)
+      .returning();
+  } else {
+    allEmployees = await db.select().from(schema.employees).where(
+      sql`email NOT IN ('brendan.king@vendasta.com', 'jean.parchewsky@vendasta.com', 'david.chen@vendasta.com', 'sarah.martinez@vendasta.com', 'raj.patel@vendasta.com')`
+    );
+  }
 
   console.log("Creating seats (VOS accountability chart)...");
   const ceoSeat = await db
