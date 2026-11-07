@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { runSeed } from "@/lib/seed";
 
-const execAsync = promisify(exec);
-
-const SEED_TOKEN = process.env.SEED_TOKEN;
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
+  const SEED_TOKEN = process.env.SEED_TOKEN;
+
   if (!SEED_TOKEN) {
     return NextResponse.json(
       { error: "Seed endpoint is disabled (SEED_TOKEN not configured)" },
@@ -28,20 +27,13 @@ export async function POST(request: NextRequest) {
 
     console.log("Starting database seed...", { reset });
 
-    const command = reset ? "npm run db:seed -- --reset" : "npm run db:seed";
+    const result = await runSeed({ reset });
 
-    const { stdout, stderr } = await execAsync(command, {
-      env: { ...process.env },
-      cwd: process.cwd(),
-    });
-
-    console.log("Seed output:", stdout);
-    if (stderr) console.error("Seed stderr:", stderr);
+    console.log("Seed completed:", result);
 
     return NextResponse.json({
-      success: true,
+      ...result,
       message: "Database seeded successfully",
-      output: stdout,
     });
   } catch (error: any) {
     console.error("Seed failed:", error);
@@ -50,8 +42,7 @@ export async function POST(request: NextRequest) {
         success: false,
         error: "Seed failed",
         message: error.message,
-        output: error.stdout || "",
-        stderr: error.stderr || "",
+        stack: error.stack,
       },
       { status: 500 }
     );
