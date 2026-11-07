@@ -793,9 +793,9 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       {
         employeeId: employee.id,
         templateId: templates[0].id,
+        taskType: "onboarding",
         title: "IT Setup",
         description: "Provision laptop and accounts",
-        category: "onboarding" as const,
         dueDate: new Date(Date.now() + 86400000).toISOString().split("T")[0],
         status: (i % 3 === 0 ? "completed" : "pending") as
           | "completed"
@@ -805,9 +805,9 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       {
         employeeId: employee.id,
         templateId: templates[1].id,
+        taskType: "onboarding",
         title: "HR Paperwork",
         description: "Complete tax forms",
-        category: "onboarding" as const,
         dueDate: new Date(Date.now() + 259200000).toISOString().split("T")[0],
         status: "pending" as const,
         completedAt: null,
