@@ -64,12 +64,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                 id: user.id,
                 email: user.email,
                 name: user.name,
+                role: (user as any).role || "employee",
               };
             },
           }),
         ]
       : []),
   ],
+  session: {
+    strategy: ENABLE_DEV_AUTH ? "jwt" : "database",
+  },
   callbacks: {
     async signIn({ account, profile }) {
       if (account?.provider === "google") {
@@ -80,10 +84,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return true;
     },
-    async session({ session, user }) {
-      if (session.user) {
-        session.user.id = user.id;
-        session.user.role = (user as any).role || "employee";
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.role = (user as any).role || "employee";
 
         const [employee] = await db
           .select({ id: employees.id })
@@ -91,7 +95,30 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           .where(eq(employees.userId, user.id))
           .limit(1);
 
-        session.user.employeeId = employee?.id || null;
+        token.employeeId = employee?.id || null;
+      }
+      return token;
+    },
+    async session({ session, token, user }) {
+      if (session.user) {
+        if (token) {
+          // JWT strategy (credentials)
+          session.user.id = token.id as string;
+          session.user.role = (token.role as string) || "employee";
+          session.user.employeeId = (token.employeeId as number) || null;
+        } else if (user) {
+          // Database strategy (Google OAuth)
+          session.user.id = user.id;
+          session.user.role = (user as any).role || "employee";
+
+          const [employee] = await db
+            .select({ id: employees.id })
+            .from(employees)
+            .where(eq(employees.userId, user.id))
+            .limit(1);
+
+          session.user.employeeId = employee?.id || null;
+        }
       }
       return session;
     },

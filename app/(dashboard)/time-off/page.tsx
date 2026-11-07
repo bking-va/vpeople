@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { TimeOffActions } from "@/components/time-off-actions";
 
 export default async function TimeOffPage() {
   const session = await auth();
@@ -121,26 +122,7 @@ export default async function TimeOffPage() {
                       <p className="text-sm text-muted-foreground">{req.notes}</p>
                     )}
                   </div>
-                  <div className="flex gap-2">
-                    <form
-                      action={async () => {
-                        "use server";
-                      }}
-                    >
-                      <Button size="sm" variant="outline">
-                        Approve
-                      </Button>
-                    </form>
-                    <form
-                      action={async () => {
-                        "use server";
-                      }}
-                    >
-                      <Button size="sm" variant="destructive">
-                        Deny
-                      </Button>
-                    </form>
-                  </div>
+                  <TimeOffActions requestId={req.id} />
                 </div>
               );
             })}
