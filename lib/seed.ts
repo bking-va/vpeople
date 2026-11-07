@@ -110,6 +110,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
 
   const departmentValues = [
     {
+      name: "Senior Leadership",
+      description: "Executive leadership team",
+    },
+    {
       name: "Technology",
       description: "Engineering and technical operations",
     },
@@ -138,6 +142,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     .from(schema.departments)
     .where(inArray(schema.departments.name, departmentNames));
 
+  const seniorLeadership = allDepartments.find((d) => d.name === "Senior Leadership")!;
   const tech = allDepartments.find((d) => d.name === "Technology")!;
   const services = allDepartments.find((d) => d.name === "Vendasta Services")!;
   const sales = allDepartments.find((d) => d.name === "Sales")!;
@@ -153,6 +158,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   console.log("Creating divisions...");
 
   const divisionValues = [
+    { name: "Executive", description: "Executive leadership" },
     { name: "R&D", description: "Research and Development" },
     { name: "Support", description: "Customer Support" },
     {
@@ -177,6 +183,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     .from(schema.divisions)
     .where(inArray(schema.divisions.name, divisionNames));
 
+  const executiveDiv = allDivisions.find((d) => d.name === "Executive")!;
   const rdDiv = allDivisions.find((d) => d.name === "R&D")!;
   const supportDiv = allDivisions.find((d) => d.name === "Support")!;
   const channelSalesDiv = allDivisions.find((d) => d.name === "Channel Sales")!;
@@ -270,7 +277,8 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     lastName: "King",
     email: `brendan.king@${VENDASTA_DOMAIN}`,
     jobTitle: "Chief Executive Officer",
-    departmentId: financeAdmin.id,
+    departmentId: seniorLeadership.id,
+    divisionId: executiveDiv.id,
     locationId: saskatoon.id,
     hireDate: "2008-03-15",
     employmentStatus: "full_time" as const,
@@ -674,52 +682,87 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     const seatsData = [
       {
         title: "Chief Executive Officer",
-        employeeId: ceo.id,
-        reportingToSeatId: null,
-        departmentId: financeAdmin.id,
-        isVacant: false,
+        assignedEmployeeId: ceo.id,
+        parentSeatId: null,
+        accountabilities: [
+          "Set company vision and strategy",
+          "Lead executive team",
+          "Ensure company profitability and growth",
+          "Build and maintain company culture",
+        ],
+        isOpen: false,
       },
       {
         title: "Chief People Officer",
-        employeeId: executives[0]?.id || null,
-        reportingToSeatId: 1,
-        departmentId: peopleOps.id,
-        isVacant: false,
+        assignedEmployeeId: executives[0]?.id || null,
+        parentSeatId: 1,
+        accountabilities: [
+          "Develop and execute people strategy",
+          "Own recruiting and retention",
+          "Manage performance management systems",
+          "Ensure compliance with employment law",
+        ],
+        isOpen: !executives[0],
       },
       {
         title: "Chief Technology Officer",
-        employeeId: executives[1]?.id || null,
-        reportingToSeatId: 1,
-        departmentId: tech.id,
-        isVacant: false,
+        assignedEmployeeId: executives[1]?.id || null,
+        parentSeatId: 1,
+        accountabilities: [
+          "Define technical architecture and strategy",
+          "Lead engineering teams",
+          "Ensure system reliability and security",
+          "Drive technical innovation",
+        ],
+        isOpen: !executives[1],
       },
       {
         title: "VP of Sales",
-        employeeId: executives[2]?.id || null,
-        reportingToSeatId: 1,
-        departmentId: sales.id,
-        isVacant: false,
+        assignedEmployeeId: executives[2]?.id || null,
+        parentSeatId: 1,
+        accountabilities: [
+          "Hit quarterly sales targets",
+          "Build and scale sales team",
+          "Develop sales processes and playbooks",
+          "Own customer acquisition strategy",
+        ],
+        isOpen: !executives[2],
       },
       {
         title: "Director of Engineering - India",
-        employeeId: executives[3]?.id || null,
-        reportingToSeatId: 3,
-        departmentId: tech.id,
-        isVacant: false,
+        assignedEmployeeId: executives[3]?.id || null,
+        parentSeatId: 3,
+        accountabilities: [
+          "Manage India engineering team",
+          "Deliver on product roadmap commitments",
+          "Build engineering culture in Chennai",
+          "Partner with product on feature delivery",
+        ],
+        isOpen: !executives[3],
       },
       {
         title: "Engineering Manager - Phoenix",
-        employeeId: allEmployees[0]?.id || null,
-        reportingToSeatId: 3,
-        departmentId: tech.id,
-        isVacant: allEmployees.length === 0,
+        assignedEmployeeId: allEmployees[0]?.id || null,
+        parentSeatId: 3,
+        accountabilities: [
+          "Lead Phoenix team delivery",
+          "Mentor and grow engineers",
+          "Ensure code quality and technical excellence",
+          "Own sprint planning and execution",
+        ],
+        isOpen: allEmployees.length === 0,
       },
       {
         title: "Support Manager",
-        employeeId: null,
-        reportingToSeatId: 1,
-        departmentId: services.id,
-        isVacant: true,
+        assignedEmployeeId: null,
+        parentSeatId: 1,
+        accountabilities: [
+          "Manage support team and queue",
+          "Hit SLA targets",
+          "Improve customer satisfaction scores",
+          "Build support knowledge base",
+        ],
+        isOpen: true,
       },
     ];
 

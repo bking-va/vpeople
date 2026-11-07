@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatCurrency, calculateTenure } from "@/lib/utils";
+import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import Link from "next/link";
 
@@ -140,7 +141,7 @@ export default async function EmployeeProfilePage({
           <h1 className="text-3xl font-bold">{displayName}</h1>
           <p className="text-muted-foreground">{employee.jobTitle}</p>
         </div>
-        <Badge>{employee.employmentStatus}</Badge>
+        <Badge>{formatEmploymentStatus(employee.employmentStatus)}</Badge>
       </div>
 
       <Card>
@@ -271,7 +272,7 @@ export default async function EmployeeProfilePage({
               <InfoField label="Location" value={loc[0]?.name} />
               <InfoField label="Job Family" value={family[0]?.name} />
               <InfoField label="Job Level" value={level[0]?.code} />
-              <InfoField label="Employment Status" value={employee.employmentStatus} />
+              <InfoField label="Employment Status" value={formatEmploymentStatus(employee.employmentStatus)} />
               <InfoField label="Hire Date" value={formatDate(employee.hireDate)} />
               {employee.terminationDate && (
                 <InfoField

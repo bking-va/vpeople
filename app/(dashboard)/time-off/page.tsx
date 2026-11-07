@@ -70,6 +70,9 @@ export default async function TimeOffPage() {
     (r) => r.request.employeeId !== employeeId
   );
 
+  const isManager = reportIds.length > 0;
+  const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -77,9 +80,16 @@ export default async function TimeOffPage() {
           <h1 className="text-3xl font-bold">Time Off</h1>
           <p className="text-muted-foreground">Manage time off requests and balances</p>
         </div>
-        <Button asChild>
-          <Link href={`/people/${employeeId}#time-off`}>View My Balances</Link>
-        </Button>
+        <div className="flex gap-2">
+          {(isManager || isAdmin) && (
+            <Button asChild variant="outline">
+              <Link href="/time-off/approvals">View All Approvals</Link>
+            </Button>
+          )}
+          <Button asChild>
+            <Link href={`/people/${employeeId}#time-off`}>View My Balances</Link>
+          </Button>
+        </div>
       </div>
 
       {pendingApprovals.length > 0 && (
