@@ -19,60 +19,45 @@ declare module "next-auth" {
 const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
 
 const authConfig = {
-  ...((!ENABLE_DEV_AUTH) && { adapter: DrizzleAdapter(db) }),
+  trustHost: true,
+  adapter: ENABLE_DEV_AUTH ? undefined : DrizzleAdapter(db),
   providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      allowDangerousEmailAccountLinking: true,
-    }),
-    ...(ENABLE_DEV_AUTH
+    ...( ENABLE_DEV_AUTH
       ? [
           Credentials({
+            id: "credentials",
             name: "Dev Login",
             credentials: {
               email: { label: "Email", type: "email" },
             },
             async authorize(credentials) {
-              if (!credentials?.email) return null;
-
-              const email = credentials.email as string;
-              if (!email.endsWith("@vendasta.com")) {
+              const email = credentials?.email as string;
+              
+              if (!email?.endsWith("@vendasta.com")) {
                 return null;
               }
 
-              let [user] = await db
-                .select()
-                .from(users)
-                .where(eq(users.email, email))
-                .limit(1);
-
-              if (!user) {
-                [user] = await db
-                  .insert(users)
-                  .values({
-                    id: `dev-${Date.now()}`,
-                    email,
-                    name: email.split("@")[0],
-                    emailVerified: new Date(),
-                    role: "employee",
-                  })
-                  .returning();
-              }
-
+              const userId = `dev-${email.replace("@vendasta.com", "")}`;
+              
               return {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                role: (user as any).role || "employee",
+                id: userId,
+                email: email,
+                name: email.split("@")[0],
+                image: null,
+                role: "employee",
               };
             },
           }),
         ]
       : []),
+    Google({
+      clientId: process.env.AUTH_GOOGLE_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      allowDangerousEmailAccountLinking: true,
+    }),
   ],
   session: {
-    strategy: ENABLE_DEV_AUTH ? "jwt" : "database",
+    strategy: ENABLE_DEV_AUTH ? ("jwt" as const) : ("database" as const),
   },
   callbacks: {
     async signIn({ account, profile }: { account: any; profile?: any }) {
@@ -88,14 +73,7 @@ const authConfig = {
       if (user) {
         token.id = user.id;
         token.role = user.role || "employee";
-
-        const [employee] = await db
-          .select({ id: employees.id })
-          .from(employees)
-          .where(eq(employees.userId, user.id))
-          .limit(1);
-
-        token.employeeId = employee?.id || null;
+        token.employeeId = null;
       }
       return token;
     },
