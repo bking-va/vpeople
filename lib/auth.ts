@@ -31,20 +31,39 @@ const authConfig = {
               email: { label: "Email", type: "email" },
             },
             async authorize(credentials) {
-              const email = credentials?.email as string;
-              
-              if (!email?.endsWith("@vendasta.com")) {
+              if (!credentials?.email) {
                 return null;
               }
 
-              const userId = `dev-${email.replace("@vendasta.com", "")}`;
-              
+              const email = credentials.email as string;
+              if (!email.endsWith("@vendasta.com")) {
+                return null;
+              }
+
+              let [user] = await db
+                .select()
+                .from(users)
+                .where(eq(users.email, email))
+                .limit(1);
+
+              if (!user) {
+                [user] = await db
+                  .insert(users)
+                  .values({
+                    id: `dev-${Date.now()}`,
+                    email,
+                    name: email.split("@")[0],
+                    emailVerified: new Date(),
+                    role: "employee",
+                  })
+                  .returning();
+              }
+
               return {
-                id: userId,
-                email: email,
-                name: email.split("@")[0],
-                image: null,
-                role: "employee",
+                id: user.id,
+                email: user.email!,
+                name: user.name!,
+                role: user.role || "employee",
               };
             },
           }),
@@ -73,7 +92,14 @@ const authConfig = {
       if (user) {
         token.id = user.id;
         token.role = user.role || "employee";
-        token.employeeId = null;
+
+        const [employee] = await db
+          .select({ id: employees.id })
+          .from(employees)
+          .where(eq(employees.email, user.email))
+          .limit(1);
+
+        token.employeeId = employee?.id || null;
       }
       return token;
     },
