@@ -868,6 +868,43 @@ export const enpsSurveyParticipants = pgTable(
   })
 );
 
+export const timesheetStatusEnum = pgEnum("timesheet_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+]);
+
+export const timeClocks = pgTable("time_clocks", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  clockIn: timestamp("clock_in").notNull(),
+  clockOut: timestamp("clock_out"),
+  breakMinutes: integer("break_minutes").default(0),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const timesheets = pgTable("timesheets", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  weekStartDate: date("week_start_date").notNull(),
+  weekEndDate: date("week_end_date").notNull(),
+  totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
+  status: timesheetStatusEnum("status").default("draft").notNull(),
+  submittedAt: timestamp("submitted_at"),
+  reviewedBy: integer("reviewed_by").references(() => employees.id),
+  reviewedAt: timestamp("reviewed_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),
 }));

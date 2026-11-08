@@ -71,6 +71,13 @@
       "when": 1794154533447,
       "tag": "0009_typical_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794154821374,
+      "tag": "0010_uneven_silver_fox",
+      "breakpoints": true
     }
   ]
 }

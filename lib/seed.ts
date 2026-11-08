@@ -1296,6 +1296,155 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.insert(schema.candidates).values(candidatesData);
   }
 
+  console.log("Creating training courses...");
+  
+  const trainingCoursesData = [
+    {
+      name: "Information Security Awareness",
+      description: "Annual mandatory security training covering data protection, phishing awareness, and security best practices.",
+      duration: 60,
+      isRequired: true,
+      category: "Compliance",
+      createdBy: ceo.id,
+    },
+    {
+      name: "Leadership Development Program",
+      description: "Comprehensive leadership training for managers and aspiring leaders.",
+      duration: 480,
+      isRequired: false,
+      category: "Leadership",
+      createdBy: ceo.id,
+    },
+    {
+      name: "Diversity and Inclusion Training",
+      description: "Building an inclusive workplace through awareness and actionable practices.",
+      duration: 90,
+      isRequired: true,
+      category: "Culture",
+      createdBy: ceo.id,
+    },
+    {
+      name: "Time Management Skills",
+      description: "Practical techniques for prioritization, planning, and productivity.",
+      duration: 120,
+      isRequired: false,
+      category: "Professional Development",
+      createdBy: ceo.id,
+    },
+    {
+      name: "Workplace Harassment Prevention",
+      description: "Required annual training on recognizing and preventing workplace harassment.",
+      duration: 45,
+      isRequired: true,
+      category: "Compliance",
+      createdBy: ceo.id,
+    },
+  ];
+
+  const insertedCourses = await db
+    .insert(schema.trainingCourses)
+    .values(trainingCoursesData)
+    .returning();
+
+  console.log("Creating training completions...");
+  
+  // Assign completions to random employees
+  const trainingCompletions = [];
+  for (const course of insertedCourses) {
+    const completionCount = course.isRequired ? Math.floor(allEmployees.length * 0.85) : Math.floor(allEmployees.length * 0.30);
+    const selectedEmployees = allEmployees.slice(0, completionCount);
+    
+    for (const emp of selectedEmployees) {
+      trainingCompletions.push({
+        courseId: course.id,
+        employeeId: emp.id,
+        completedAt: new Date(Date.now() - Math.random() * 180 * 24 * 60 * 60 * 1000), // Random date in last 6 months
+        score: Math.floor(Math.random() * 20) + 80, // 80-100
+        status: "completed" as const,
+      });
+    }
+  }
+
+  if (trainingCompletions.length > 0) {
+    await db.insert(schema.trainingCompletions).values(trainingCompletions);
+  }
+
+  console.log("Creating eNPS survey...");
+  
+  const [enpsSurvey] = await db
+    .insert(schema.enpsSurveys)
+    .values({
+      name: "Q4 2026 Employee Net Promoter Score",
+      question: "On a scale of 0-10, how likely are you to recommend Vendasta as a great place to work?",
+      isActive: true,
+    })
+    .returning();
+
+  // Create participant records for all active employees
+  const enpsParticipants = allEmployees.map((emp) => ({
+    surveyId: enpsSurvey.id,
+    employeeId: emp.id,
+    hasResponded: Math.random() < 0.65, // 65% response rate
+    respondedAt: Math.random() < 0.65 ? new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000) : null,
+  }));
+
+  await db.insert(schema.enpsSurveyParticipants).values(enpsParticipants);
+
+  // Create anonymous responses for those who responded
+  const enpsResponses = enpsParticipants
+    .filter((p) => p.hasResponded)
+    .map(() => {
+      const score = Math.random() < 0.7 ? Math.floor(Math.random() * 2) + 9 : Math.floor(Math.random() * 11); // 70% promoters
+      return {
+        surveyId: enpsSurvey.id,
+        score,
+        comment: score >= 9 ? "Great company culture and growth opportunities!" : score <= 6 ? "Some areas could be improved." : null,
+      };
+    });
+
+  if (enpsResponses.length > 0) {
+    await db.insert(schema.enpsResponses).values(enpsResponses);
+  }
+
+  console.log("Creating sample documents...");
+  
+  const documentsData = [
+    {
+      employeeId: ceo.id,
+      title: "Employment Agreement - CEO",
+      category: "contract" as const,
+      status: "signed" as const,
+      signedAt: new Date("2020-01-15"),
+      signedBy: ceo.id,
+      uploadedBy: ceo.id,
+    },
+    {
+      employeeId: executives[0]?.id || ceo.id,
+      title: "2026 Performance Review",
+      category: "performance" as const,
+      status: "draft" as const,
+      uploadedBy: ceo.id,
+    },
+    {
+      employeeId: allEmployees[5]?.id || ceo.id,
+      title: "Signed NDA",
+      category: "policy" as const,
+      status: "signed" as const,
+      signedAt: new Date("2025-06-01"),
+      signedBy: allEmployees[5]?.id || ceo.id,
+      uploadedBy: ceo.id,
+    },
+    {
+      employeeId: allEmployees[10]?.id || ceo.id,
+      title: "Benefits Enrollment Form 2027",
+      category: "benefits" as const,
+      status: "pending_signature" as const,
+      uploadedBy: allEmployees[10]?.id || ceo.id,
+    },
+  ];
+
+  await db.insert(schema.documents).values(documentsData);
+
   console.log("Creating holidays...");
 
   const holidaysData = [
@@ -1350,6 +1499,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   console.log(`Created ${requests.length} time off requests`);
   console.log(`Created ${taskData.length} onboarding tasks`);
   console.log(`Created ${jobOpeningsCreated} job openings`);
+  console.log(`Created ${insertedCourses.length} training courses`);
+  console.log(`Created ${trainingCompletions.length} training completions`);
+  console.log(`Created 1 eNPS survey with ${enpsParticipants.length} participants`);
+  console.log(`Created ${documentsData.length} sample documents`);
 
   return {
     success: true,
@@ -1360,6 +1513,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       requests: requests.length,
       tasks: taskData.length,
       jobOpenings: jobOpeningsCreated,
+      trainingCourses: insertedCourses.length,
+      trainingCompletions: trainingCompletions.length,
+      enpsSurveys: 1,
+      documents: documentsData.length,
     },
   };
 }
