@@ -1,6 +1,6 @@
 import { db } from "./db";
 import * as schema from "./db/schema";
-import { sql, eq, inArray } from "drizzle-orm";
+import { sql, eq, inArray, and } from "drizzle-orm";
 import { runMigrations } from "./migrate";
 
 const VENDASTA_DOMAIN = "vendasta.com";
@@ -520,6 +520,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   console.log("Creating managers and employees...");
   const employeesData = [];
   let empNumber = 6;
+  const departmentDirectors: Record<number, number | null> = {}; // Track first employee per dept
 
   const firstNames = [
     "Emma",
@@ -703,6 +704,8 @@ export async function runSeed(options: { reset?: boolean } = {}) {
                 : remote;
 
       const isManager = i % 10 === 0;
+      const isFirstInDept = !departmentDirectors[dept.id];
+      
       // Department heads (executives)
       const deptHead =
         dept.id === tech.id
@@ -717,7 +720,8 @@ export async function runSeed(options: { reset?: boolean } = {}) {
                   ? ceo.id // Product reports to CEO for now
                   : executives[0]?.id; // CPO for people ops
       
-      const managerId = deptHead;
+      // First person in each department reports to exec, rest report to that director
+      const managerId = isFirstInDept ? deptHead : departmentDirectors[dept.id];
 
       const titles =
         dept.id === tech.id
@@ -792,6 +796,34 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       .insert(schema.employees)
       .values(employeesData)
       .onConflictDoNothing();
+    
+    console.log("Fixing reporting structure - routing through department directors...");
+    // Get all non-executive employees by department
+    for (const dept of [tech, services, sales, marketing, product, peopleOps]) {
+      const deptEmployees = await db
+        .select()
+        .from(schema.employees)
+        .where(
+          and(
+            eq(schema.employees.departmentId, dept.id),
+            sql`${schema.employees.id} NOT IN (${ceo.id}, ${executives[0]?.id || 0}, ${executives[1]?.id || 0}, ${executives[2]?.id || 0}, ${executives[3]?.id || 0})`
+          )
+        )
+        .orderBy(schema.employees.id);
+      
+      if (deptEmployees.length > 1) {
+        // First employee is the director - others report to them
+        const directorId = deptEmployees[0].id;
+        const teamMemberIds = deptEmployees.slice(1).map(e => e.id);
+        
+        if (teamMemberIds.length > 0) {
+          await db
+            .update(schema.employees)
+            .set({ managerId: directorId })
+            .where(inArray(schema.employees.id, teamMemberIds));
+        }
+      }
+    }
   }
 
   // Get all employees including CEO and executives for time-off balances
@@ -1266,7 +1298,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
 
   console.log("✅ Seeding completed!");
   console.log(
-    `Created ${allEmployees.length + executives.length + 1} employees`
+    `Created ${allEmployees.length} employees`
   );
   console.log(`Created ${policies.length} time off policies`);
   console.log(`Created ${balances.length} time off balances`);
@@ -1277,7 +1309,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   return {
     success: true,
     counts: {
-      employees: allEmployees.length + executives.length + 1,
+      employees: allEmployees.length,
       policies: policies.length,
       balances: balances.length,
       requests: requests.length,

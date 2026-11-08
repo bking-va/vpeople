@@ -1,9 +1,13 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
+import { jobOpenings, candidates, offerLetters } from "@/lib/db/schema";
+import { eq, sql, and } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Briefcase, Users, FileText, TrendingUp } from "lucide-react";
+import Link from "next/link";
 
 export default async function HiringPage() {
   const session = await auth();
@@ -12,6 +16,57 @@ export default async function HiringPage() {
   }
 
   const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
+
+  // Fetch real data
+  const [openPositions] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(jobOpenings)
+    .where(eq(jobOpenings.status, "open"));
+
+  const [activeCandidates] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(candidates);
+
+  const [offersThisMonth] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(offerLetters);
+
+  const allOpenings = await db
+    .select({
+      id: jobOpenings.id,
+      title: jobOpenings.title,
+      status: jobOpenings.status,
+      employmentType: jobOpenings.employmentType,
+      openDate: jobOpenings.openDate,
+    })
+    .from(jobOpenings)
+    .orderBy(jobOpenings.createdAt);
+
+  const candidatesByStage = await db
+    .select({
+      stage: candidates.stage,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(candidates)
+    .groupBy(candidates.stage);
+
+  const candidatesBySource = await db
+    .select({
+      source: candidates.source,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(candidates)
+    .groupBy(candidates.source);
+
+  const stageCounts: Record<string, number> = {};
+  candidatesByStage.forEach((row) => {
+    stageCounts[row.stage] = row.count;
+  });
+
+  const sourceCounts: Record<string, number> = {};
+  candidatesBySource.forEach((row) => {
+    sourceCounts[row.source] = row.count;
+  });
 
   return (
     <div className="space-y-6">
@@ -35,8 +90,10 @@ export default async function HiringPage() {
             <Briefcase className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">No active openings</p>
+            <div className="text-2xl font-bold">{openPositions?.count || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {openPositions?.count === 0 ? "No active openings" : "Active openings"}
+            </p>
           </CardContent>
         </Card>
 
@@ -46,7 +103,7 @@ export default async function HiringPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
+            <div className="text-2xl font-bold">{activeCandidates?.count || 0}</div>
             <p className="text-xs text-muted-foreground">In pipeline</p>
           </CardContent>
         </Card>
@@ -57,8 +114,8 @@ export default async function HiringPage() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">This month</p>
+            <div className="text-2xl font-bold">{offersThisMonth?.count || 0}</div>
+            <p className="text-xs text-muted-foreground">Total offers</p>
           </CardContent>
         </Card>
 
@@ -82,16 +139,39 @@ export default async function HiringPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12">
-            <Briefcase className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Open Positions</h3>
-            <p className="text-muted-foreground mb-4">
-              Create your first job opening to start receiving applications
-            </p>
-            {isAdmin && (
-              <Button>Create Job Opening</Button>
-            )}
-          </div>
+          {allOpenings.length === 0 ? (
+            <div className="text-center py-12">
+              <Briefcase className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Open Positions</h3>
+              <p className="text-muted-foreground mb-4">
+                Create your first job opening to start receiving applications
+              </p>
+              {isAdmin && (
+                <Button>Create Job Opening</Button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {allOpenings.map((opening) => (
+                <Link
+                  key={opening.id}
+                  href={`/hiring/openings/${opening.id}`}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent"
+                >
+                  <div>
+                    <div className="font-medium">{opening.title}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {opening.employmentType}
+                      {opening.openDate && ` • Posted ${new Date(opening.openDate).toLocaleDateString()}`}
+                    </div>
+                  </div>
+                  <Badge variant={opening.status === "open" ? "default" : "secondary"}>
+                    {opening.status}
+                  </Badge>
+                </Link>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -107,19 +187,19 @@ export default async function HiringPage() {
             <div className="space-y-2">
               <div className="flex justify-between items-center p-2">
                 <span>New Applications</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{stageCounts["new"] || 0}</Badge>
               </div>
               <div className="flex justify-between items-center p-2">
                 <span>Phone Screen</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{stageCounts["phone_screen"] || 0}</Badge>
               </div>
               <div className="flex justify-between items-center p-2">
                 <span>Interview</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{stageCounts["interview"] || 0}</Badge>
               </div>
               <div className="flex justify-between items-center p-2">
                 <span>Offer</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{stageCounts["offer"] || 0}</Badge>
               </div>
             </div>
           </CardContent>
@@ -136,19 +216,19 @@ export default async function HiringPage() {
             <div className="space-y-2">
               <div className="flex justify-between items-center p-2">
                 <span>LinkedIn</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{sourceCounts["linkedin"] || 0}</Badge>
               </div>
               <div className="flex justify-between items-center p-2">
                 <span>Indeed</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{sourceCounts["indeed"] || 0}</Badge>
               </div>
               <div className="flex justify-between items-center p-2">
                 <span>Referral</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{sourceCounts["referral"] || 0}</Badge>
               </div>
               <div className="flex justify-between items-center p-2">
                 <span>Direct</span>
-                <Badge variant="outline">0</Badge>
+                <Badge variant="outline">{sourceCounts["direct"] || 0}</Badge>
               </div>
             </div>
           </CardContent>

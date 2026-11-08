@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Button } from "./ui/button";
-import { Users, Building2, LayoutGrid, Calendar, ListTodo, Settings, Briefcase } from "lucide-react";
+import { Users, Building2, LayoutGrid, Calendar, ListTodo, Settings, Briefcase, FileText, BookOpen, Clock, BarChart3, MessageSquare } from "lucide-react";
 
 export async function Nav() {
   const session = await auth();
