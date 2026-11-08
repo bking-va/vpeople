@@ -1,5 +1,8 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
+import { enpsSurveys, enpsResponses } from "@/lib/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MessageSquare, TrendingUp, Users, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +14,35 @@ export default async function ENPSPage() {
   }
 
   const isAdmin = session.user.role === "admin" || session.user.role === "full_admin";
+
+  const surveys = await db
+    .select()
+    .from(enpsSurveys)
+    .where(eq(enpsSurveys.isActive, true));
+
+  let enpsScore = null;
+  let responseRate = 0;
+  let promoters = 0;
+  let detractors = 0;
+  let totalResponses = 0;
+
+  if (surveys.length > 0 && isAdmin) {
+    const activeSurvey = surveys[0];
+    const responses = await db
+      .select()
+      .from(enpsResponses)
+      .where(eq(enpsResponses.surveyId, activeSurvey.id));
+
+    totalResponses = responses.length;
+    promoters = responses.filter((r) => r.score >= 9).length;
+    detractors = responses.filter((r) => r.score <= 6).length;
+
+    if (totalResponses > 0) {
+      enpsScore = Math.round(((promoters - detractors) / totalResponses) * 100);
+      // Assume 85 employees for response rate calculation
+      responseRate = Math.round((totalResponses / 85) * 100);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -30,8 +62,12 @@ export default async function ENPSPage() {
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">--</div>
-                <p className="text-xs text-muted-foreground">No surveys yet</p>
+                <div className="text-2xl font-bold">
+                  {enpsScore !== null ? enpsScore : "--"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {enpsScore !== null ? "Current score" : "No surveys yet"}
+                </p>
               </CardContent>
             </Card>
 
@@ -41,8 +77,10 @@ export default async function ENPSPage() {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">0%</div>
-                <p className="text-xs text-muted-foreground">0 / 0 responses</p>
+                <div className="text-2xl font-bold">{responseRate}%</div>
+                <p className="text-xs text-muted-foreground">
+                  {totalResponses} responses
+                </p>
               </CardContent>
             </Card>
 
@@ -52,7 +90,7 @@ export default async function ENPSPage() {
                 <Star className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">0</div>
+                <div className="text-2xl font-bold">{promoters}</div>
                 <p className="text-xs text-muted-foreground">Scores 9-10</p>
               </CardContent>
             </Card>
@@ -63,7 +101,7 @@ export default async function ENPSPage() {
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">0</div>
+                <div className="text-2xl font-bold">{detractors}</div>
                 <p className="text-xs text-muted-foreground">Scores 0-6</p>
               </CardContent>
             </Card>

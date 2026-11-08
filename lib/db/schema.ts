@@ -775,6 +775,51 @@ export const documents = pgTable("documents", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const trainingCourses = pgTable("training_courses", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"),
+  durationHours: decimal("duration_hours", { precision: 5, scale: 2 }),
+  isRequired: boolean("is_required").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const trainingCompletions = pgTable("training_completions", {
+  id: serial("id").primaryKey(),
+  courseId: integer("course_id")
+    .notNull()
+    .references(() => trainingCourses.id, { onDelete: "cascade" }),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  completedAt: timestamp("completed_at").notNull(),
+  expiresAt: timestamp("expires_at"),
+  certificateUrl: text("certificate_url"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const enpsSurveys = pgTable("enps_surveys", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  question: text("question").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  closedAt: timestamp("closed_at"),
+});
+
+export const enpsResponses = pgTable("enps_responses", {
+  id: serial("id").primaryKey(),
+  surveyId: integer("survey_id")
+    .notNull()
+    .references(() => enpsSurveys.id, { onDelete: "cascade" }),
+  score: integer("score").notNull(), // 0-10
+  comment: text("comment"),
+  responseHash: text("response_hash").notNull().unique(), // Anonymous tracking
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),
 }));

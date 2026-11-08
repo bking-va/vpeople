@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { employees, timeOffRequests, departments, divisions } from "@/lib/db/schema";
 import { eq, sql, and, gte } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BarChart3, Users, Calendar, TrendingUp } from "lucide-react";
 
 export default async function ReportsPage() {
@@ -164,18 +166,36 @@ export default async function ReportsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Custom Report Builder</CardTitle>
-            <CardDescription>Build your own reports</CardDescription>
+            <CardTitle>Export Reports</CardTitle>
+            <CardDescription>Download data as CSV</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-8">
-              <BarChart3 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Custom Reports</h3>
-              <p className="text-muted-foreground mb-4">
-                Create custom reports with specific fields and filters
-              </p>
-              <div className="p-3 border rounded-lg bg-muted">
-                <p className="text-sm">Coming soon: Drag-and-drop report builder</p>
+            <div className="space-y-3">
+              <div className="p-4 border rounded-lg hover:bg-accent">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">Employee Directory Export</div>
+                    <div className="text-sm text-muted-foreground">
+                      All employees with contact and job information
+                    </div>
+                  </div>
+                  <Button asChild variant="outline" size="sm">
+                    <a href="/api/reports/export?type=employees" download>
+                      Export CSV
+                    </a>
+                  </Button>
+                </div>
+              </div>
+              <div className="p-4 border rounded-lg hover:bg-accent">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">Custom Report Builder</div>
+                    <div className="text-sm text-muted-foreground">
+                      Select fields and filters to create custom reports
+                    </div>
+                  </div>
+                  <Badge variant="secondary">Coming Soon</Badge>
+                </div>
               </div>
             </div>
           </CardContent>
