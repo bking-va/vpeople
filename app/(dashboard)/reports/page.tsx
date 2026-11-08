@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Users, Calendar, TrendingUp } from "lucide-react";
+import Link from "next/link";
 
 export default async function ReportsPage() {
   const session = await auth();
@@ -140,10 +141,10 @@ export default async function ReportsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <div className="p-3 border rounded-lg hover:bg-accent cursor-pointer">
+              <Link href="/reports/headcount" className="block p-3 border rounded-lg hover:bg-accent">
                 <div className="font-medium">Headcount Report</div>
-                <div className="text-sm text-muted-foreground">Active employees by department</div>
-              </div>
+                <div className="text-sm text-muted-foreground">Active employees by department, location, and status</div>
+              </Link>
               <div className="p-3 border rounded-lg hover:bg-accent cursor-pointer">
                 <div className="font-medium">New Hires Report</div>
                 <div className="text-sm text-muted-foreground">Recent hires by period</div>

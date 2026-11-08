@@ -92,6 +92,10 @@ export default async function SettingsPage() {
                 <p className="font-medium">Departments & Divisions</p>
                 <p className="text-sm text-muted-foreground">View and manage org structure</p>
               </Link>
+              <Link href="/settings/job-titles" className="block p-2 hover:bg-accent rounded">
+                <p className="font-medium">Job Titles</p>
+                <p className="text-sm text-muted-foreground">Maintain the list of job titles</p>
+              </Link>
             </div>
           </CardContent>
         </Card>

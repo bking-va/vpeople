@@ -28,6 +28,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { ClockWidget } from "@/components/clock-widget";
+import { getWhosOut } from "@/lib/whos-out";
+import { isOutOnDate } from "@/lib/date-overlap";
 
 export default async function HomePage() {
   const session = await auth();
@@ -291,6 +293,15 @@ export default async function HomePage() {
     .sort((a, b) => new Date(b.hireDate!).getTime() - new Date(a.hireDate!).getTime())
     .slice(0, 5);
 
+  const todayKey = today.toISOString().split("T")[0];
+  const weekEnd = new Date(today);
+  weekEnd.setDate(today.getDate() + 7);
+  const weekEndKey = weekEnd.toISOString().split("T")[0];
+  const whosOut = await getWhosOut(todayKey, weekEndKey);
+  const outToday = whosOut.filter(
+    (item) => item.startDate && item.endDate && isOutOnDate(item.startDate, item.endDate, todayKey)
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -527,6 +538,44 @@ export default async function HomePage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Who's Out */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Who&apos;s Out</CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {outToday.length > 0 ? (
+              <div className="space-y-2">
+                {outToday.slice(0, 5).map((item) => (
+                  <div key={item.requestId} className="text-sm">
+                    {item.employeeId ? (
+                      <Link href={`/people/${item.employeeId}`} className="text-primary hover:underline">
+                        {item.preferredName || item.firstName} {item.lastName}
+                      </Link>
+                    ) : (
+                      <span>Unknown</span>
+                    )}
+                    <span className="text-muted-foreground text-xs ml-1">
+                      {item.policyName || "Time off"}
+                    </span>
+                  </div>
+                ))}
+                <Button asChild size="sm" variant="outline" className="w-full mt-2">
+                  <Link href="/time-off/calendar">View calendar</Link>
+                </Button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm text-muted-foreground">Nobody is out today</p>
+                <Button asChild size="sm" variant="outline" className="w-full mt-2">
+                  <Link href="/time-off/calendar">View calendar</Link>
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Quick Links */}
         <Card>

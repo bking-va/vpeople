@@ -15,7 +15,7 @@ import {
   approvalRequestSteps,
   auditLogs,
 } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
 
 // Use real Postgres connection with configured DATABASE_URL
@@ -205,8 +205,22 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
       );
     expect(parseFloat(balanceBefore.balance)).toBe(25.0);
 
-    // Step 1: Manager approval (should NOT deduct balance)
+    // Step 1: Manager approval (should NOT deduct balance, but must write audit)
     await approveStep(approvalResult.requestId!, 1, testManager.id);
+
+    const step1Audit = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.employeeId, testManager.id),
+          eq(auditLogs.action, "approval_step_approved")
+        )
+      )
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1);
+    expect(step1Audit.length).toBe(1);
+    expect(step1Audit[0].entityType).toBe("time_off_request");
 
     const [balanceAfterStep1] = await db
       .select()
@@ -239,6 +253,33 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
       .from(timeOffRequests)
       .where(eq(timeOffRequests.id, request.id));
     expect(finalRequest.status).toBe("approved");
+
+    const step2Audit = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.employeeId, testAdmin.id),
+          eq(auditLogs.action, "approval_step_approved")
+        )
+      )
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1);
+    expect(step2Audit.length).toBe(1);
+
+    const [timeOffAudit] = await db
+      .select()
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.employeeId, testAdmin.id),
+          eq(auditLogs.action, "time_off_approved")
+        )
+      )
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1);
+    expect(timeOffAudit).toBeDefined();
+    expect(timeOffAudit.entityType).toBe("time_off_request");
   });
 
   test("balance deduction is atomic (fails if balance update fails)", async () => {

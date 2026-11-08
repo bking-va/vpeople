@@ -145,6 +145,15 @@ export const divisions = pgTable("divisions", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const jobTitles = pgTable("job_titles", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull().unique(),
+  description: text("description"),
+  department: text("department"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),

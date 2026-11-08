@@ -1,203 +1,66 @@
-import { describe, test, expect } from "vitest";
-import { createAuditLog } from "@/lib/audit";
-import { db } from "@/lib/db";
-import { auditLogs, users } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { redactAuditLogForViewer } from "@/lib/audit-redaction";
 
-describe("Audit Redaction", () => {
-  test("redacts sensitive compensation fields at write time", async () => {
-    // Create a test user for audit
-    const [testUser] = await db
-      .insert(users)
-      .values({
-        id: "test-audit-user",
-        name: "Test User",
-        email: "test.audit@test.com",
-      })
-      .onConflictDoNothing()
-      .returning();
+describe("Audit redaction (read-time)", () => {
+  const changes = {
+    payRate: "100000",
+    payType: "salary",
+    bonus: "20000",
+    equity: "5000",
+    sin: "123-456-789",
+    ssn: "987-65-4321",
+    bankAccount: "123456789",
+    routingNumber: "021000021",
+    jobTitle: "Engineer",
+    firstName: "Jane",
+    nested: { payRate: "95000", department: "Engineering" },
+  };
 
-    await createAuditLog({
-      userId: testUser.id,
-      action: "compensation_updated",
-      entityType: "employee",
-      entityId: "999",
-      changes: {
-        payRate: "100000",
-        payType: "salary",
-        bonus: "20000",
-        equity: "5000",
-        normalField: "visible",
-      },
+  test("shows compensation amounts to viewers with canViewCompensation", () => {
+    const result = redactAuditLogForViewer(changes, {
+      canViewCompensation: true,
+      canViewSensitivePersonalInfo: false,
+      canViewBankInfo: false,
     });
 
-    // Fetch the audit log
-    const [log] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.userId, testUser.id))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-
-    expect(log).toBeDefined();
-    const changes = log.changes as any;
-
-    // Sensitive fields should be redacted
-    expect(changes.payRate).toBe("[REDACTED]");
-    expect(changes.payType).toBe("[REDACTED]");
-    expect(changes.bonus).toBe("[REDACTED]");
-    expect(changes.equity).toBe("[REDACTED]");
-
-    // Normal fields should not be redacted
-    expect(changes.normalField).toBe("visible");
-
-    // Clean up
-    await db.delete(auditLogs).where(eq(auditLogs.id, log.id));
-    await db.delete(users).where(eq(users.id, testUser.id));
+    expect(result.payRate).toBe("100000");
+    expect(result.payType).toBe("salary");
+    expect(result.bonus).toBe("20000");
+    expect(result.equity).toBe("5000");
+    expect(result.nested.payRate).toBe("95000");
+    expect(result.sin).toBe("[REDACTED]");
+    expect(result.bankAccount).toBe("[REDACTED]");
+    expect(result.jobTitle).toBe("Engineer");
   });
 
-  test("redacts personal identifier fields at write time", async () => {
-    const [testUser] = await db
-      .insert(users)
-      .values({
-        id: "test-audit-user-2",
-        name: "Test User 2",
-        email: "test.audit2@test.com",
-      })
-      .onConflictDoNothing()
-      .returning();
-
-    await createAuditLog({
-      userId: testUser.id,
-      action: "employee_updated",
-      entityType: "employee",
-      entityId: "999",
-      changes: {
-        sin: "123-456-789",
-        ssn: "987-65-4321",
-        passport: "A12345678",
-        email: "employee@test.com",
-        firstName: "John",
-      },
+  test("redacts compensation amounts when viewer cannot view compensation", () => {
+    const result = redactAuditLogForViewer(changes, {
+      canViewCompensation: false,
+      canViewSensitivePersonalInfo: true,
+      canViewBankInfo: true,
     });
 
-    const [log] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.userId, testUser.id))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-
-    expect(log).toBeDefined();
-    const changes = log.changes as any;
-
-    // Sensitive fields should be redacted
-    expect(changes.sin).toBe("[REDACTED]");
-    expect(changes.ssn).toBe("[REDACTED]");
-    expect(changes.passport).toBe("[REDACTED]");
-
-    // Normal fields should not be redacted
-    expect(changes.email).toBe("employee@test.com");
-    expect(changes.firstName).toBe("John");
-
-    // Clean up
-    await db.delete(auditLogs).where(eq(auditLogs.id, log.id));
-    await db.delete(users).where(eq(users.id, testUser.id));
+    expect(result.payRate).toBe("[REDACTED]");
+    expect(result.payType).toBe("[REDACTED]");
+    expect(result.bonus).toBe("[REDACTED]");
+    expect(result.nested.payRate).toBe("[REDACTED]");
+    expect(result.nested.department).toBe("Engineering");
+    expect(result.sin).toBe("123-456-789");
+    expect(result.bankAccount).toBe("123456789");
+    expect(result.firstName).toBe("Jane");
   });
 
-  test("redacts banking fields at write time", async () => {
-    const [testUser] = await db
-      .insert(users)
-      .values({
-        id: "test-audit-user-3",
-        name: "Test User 3",
-        email: "test.audit3@test.com",
-      })
-      .onConflictDoNothing()
-      .returning();
+  test("does not redact non-sensitive fields", () => {
+    const result = redactAuditLogForViewer(
+      { firstName: "Jane", lastName: "Doe", jobTitle: "Senior Engineer" },
+      {
+        canViewCompensation: false,
+        canViewSensitivePersonalInfo: false,
+        canViewBankInfo: false,
+      }
+    );
 
-    await createAuditLog({
-      userId: testUser.id,
-      action: "banking_updated",
-      entityType: "employee",
-      entityId: "999",
-      changes: {
-        bankAccount: "123456789",
-        bankAccountNumber: "987654321",
-        routingNumber: "123456789",
-        iban: "GB82WEST12345698765432",
-        jobTitle: "Engineer",
-      },
-    });
-
-    const [log] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.userId, testUser.id))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-
-    expect(log).toBeDefined();
-    const changes = log.changes as any;
-
-    // Banking fields should be redacted
-    expect(changes.bankAccount).toBe("[REDACTED]");
-    expect(changes.bankAccountNumber).toBe("[REDACTED]");
-    expect(changes.routingNumber).toBe("[REDACTED]");
-    expect(changes.iban).toBe("[REDACTED]");
-
-    // Normal fields should not be redacted
-    expect(changes.jobTitle).toBe("Engineer");
-
-    // Clean up
-    await db.delete(auditLogs).where(eq(auditLogs.id, log.id));
-    await db.delete(users).where(eq(users.id, testUser.id));
-  });
-
-  test("does not redact non-sensitive fields", async () => {
-    const [testUser] = await db
-      .insert(users)
-      .values({
-        id: "test-audit-user-4",
-        name: "Test User 4",
-        email: "test.audit4@test.com",
-      })
-      .onConflictDoNothing()
-      .returning();
-
-    await createAuditLog({
-      userId: testUser.id,
-      action: "employee_updated",
-      entityType: "employee",
-      entityId: "999",
-      changes: {
-        firstName: "Jane",
-        lastName: "Doe",
-        jobTitle: "Senior Engineer",
-        department: "Engineering",
-        location: "Toronto",
-      },
-    });
-
-    const [log] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.userId, testUser.id))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-
-    expect(log).toBeDefined();
-    const changes = log.changes as any;
-
-    // All fields should be visible
-    expect(changes.firstName).toBe("Jane");
-    expect(changes.lastName).toBe("Doe");
-    expect(changes.jobTitle).toBe("Senior Engineer");
-    expect(changes.department).toBe("Engineering");
-    expect(changes.location).toBe("Toronto");
-
-    // Clean up
-    await db.delete(auditLogs).where(eq(auditLogs.id, log.id));
-    await db.delete(users).where(eq(users.id, testUser.id));
+    expect(result.firstName).toBe("Jane");
+    expect(result.lastName).toBe("Doe");
+    expect(result.jobTitle).toBe("Senior Engineer");
   });
 });

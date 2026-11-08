@@ -27,7 +27,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Turnover chart - Missing
 - [x] Location charts ✅ Done
 - [x] Celebrations (birthdays and anniversaries) ✅ Done
-- [ ] Who's Out calendar - Missing
+- [x] Who's Out calendar ✅ Done (dashboard widget of who's out today + /time-off/calendar month view)
 - [x] Company Links ✅ Done
 - [x] New team members widget ✅ Done
 - [ ] People without raise in 12+ months - Missing
@@ -53,9 +53,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [ ] Alternate emails (can add via Settings)
   - [ ] Languages (can add via Settings)
   - [ ] Disabilities (can add via Settings)
-- [ ] Address fields
-- [ ] Contact information
-- [ ] Social links
+- [x] Address fields ✅ Done (street, city, province, postal, country on personal tab)
+- [x] Contact information ✅ Done (work/mobile/home phone, personal email)
+- [x] Social links ✅ Done (LinkedIn, Twitter, GitHub)
 - [ ] Visa table
 - [ ] Education table
 
@@ -123,7 +123,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Divisions (basic)
 - [x] Teams (basic)
 - [x] Locations with addresses (basic)
-- [ ] Job Titles
+- [x] Job Titles ✅ Done (settings list + CRUD API at /settings/job-titles)
 - [ ] Job Profiles (family/level)
 - [ ] Employment Statuses
 - [ ] Comp Change Reasons
@@ -179,6 +179,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Workflow step builder UI ✅ Done
   - [x] Seeded workflow steps ✅ Done (time_off, compensation_change, job_info_change)
   - [x] Unified approvals dashboard (/approvals) ✅ Done (b33c7ec)
+  - [x] /approvals shows only the current pending step ✅ Done
+  - [x] Blocked approvers (self-approval and requester final approval) are hidden ✅ Done
+  - [x] Audit entry on every approve/reject step, same transaction ✅ Done
   - [x] Approval/rejection actions for all workflow types ✅ Done (b33c7ec)
 - [ ] Information Updates (by location) - Missing
 - [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled, balance deducted atomically)
@@ -222,7 +225,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 5. Time Off
 
 - [x] Basic policies (seeded, not editable)
-- [x] Policy management UI (create, edit policies) ✅ Done (631648c - Settings page + CRUD API + integration tests)
+- [x] Policy management UI (create, edit policies) ✅ Done (4f22048 - Settings page + CRUD API + integration tests)
 - [ ] Categories
 - [ ] Accrual rules that run on schedule
 - [ ] Carryover rules
@@ -236,10 +239,10 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [ ] Armenia
 - [ ] Holiday calendars per country
 - [ ] Year views
-- [ ] Employee request submission with balance check
+- [x] Employee request submission with balance check ✅ Done (POST /api/time-off/requests rejects insufficient balance)
 - [x] Manager approve/deny actions (basic)
 - [ ] Balance history and audit trail
-- [ ] Who's-out calendar view
+- [x] Who's-out calendar view ✅ Done (/time-off/calendar + dashboard widget)
 
 ---
 
@@ -377,7 +380,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 11. Reports
 
 ### Standard Reports
-- [ ] Headcount report
+- [x] Headcount report ✅ Done (/reports/headcount + CSV export by department/location/status)
 - [ ] Turnover report
 - [ ] Additions/Terminations report
 - [ ] Pay by Title
@@ -389,7 +392,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Employee creation/termination logged
   - [x] Time off approval/denial logged
   - [x] Job info updates logged
-  - [x] Sensitive field redaction (salary, SIN, SSN, bank)
+  - [x] Sensitive field redaction (salary, SIN, SSN, bank) — stored unredacted; redacted at read time. Comp viewers with canViewCompensation see amounts.
 - [ ] Change History
 - [ ] Missing Data report
 - [ ] Point-in-Time report

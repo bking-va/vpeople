@@ -12,7 +12,12 @@ import {
   auditLogs,
 } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { createApprovalRequest, approveStep } from "@/lib/approvals";
+import {
+  createApprovalRequest,
+  approveStep,
+  rejectStep,
+  getVisiblePendingApprovals,
+} from "@/lib/approvals";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required for integration tests");
@@ -132,8 +137,11 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
 
   afterAll(async () => {
     try {
-      if (testAdmin?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
-      if (testAdmin?.id) await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
+      const actorIds = [testAdmin?.id, testManager?.id, testCEO?.id, testEmployee?.id].filter(Boolean);
+      for (const id of actorIds) {
+        await db.delete(auditLogs).where(eq(auditLogs.employeeId, id));
+        await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, id));
+      }
       if (testWorkflow?.id) {
         await db.delete(approvalWorkflowSteps).where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
         await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
@@ -267,15 +275,16 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     // Approve step 2 (different admin) - this triggers comp insert + audit log
     await approveStep(approvalResult.requestId!, 2, testAdmin.id);
     
-    // Verify audit log was created (proves atomicity)
+    // Verify both step and compensation audit logs were created
     const auditLog = await db
       .select()
       .from(auditLogs)
-      .where(eq(auditLogs.employeeId, testAdmin.id))
+      .where(eq(auditLogs.action, "compensation_updated"))
       .orderBy(desc(auditLogs.createdAt))
       .limit(1);
     
     expect(auditLog.length).toBe(1);
+    expect(auditLog[0].employeeId).toBe(testAdmin.id);
     expect(auditLog[0].action).toBe("compensation_updated");
   });
 
@@ -384,5 +393,173 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     await expect(
       approveStep(approvalResult.requestId!, 1, testManager.id)
     ).rejects.toThrow("Step has already been processed");
+  });
+
+  test("/approvals only shows the current step to an admin", async () => {
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testCEO.id,
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "100000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-02-01",
+        changeReason: "Merit increase",
+      },
+    });
+
+    const adminVisibleWhileStep1Pending = await getVisiblePendingApprovals(
+      testAdmin.id,
+      true
+    );
+    expect(
+      adminVisibleWhileStep1Pending.some(
+        (item) => item.request.id === approvalResult.requestId
+      )
+    ).toBe(false);
+
+    const managerVisible = await getVisiblePendingApprovals(testManager.id, false);
+    expect(
+      managerVisible.some((item) => item.request.id === approvalResult.requestId)
+    ).toBe(true);
+
+    await approveStep(approvalResult.requestId!, 1, testManager.id);
+
+    const adminVisibleAfterStep1 = await getVisiblePendingApprovals(
+      testAdmin.id,
+      true
+    );
+    expect(
+      adminVisibleAfterStep1.some(
+        (item) => item.request.id === approvalResult.requestId
+      )
+    ).toBe(true);
+  });
+
+  test("blocked approvers do not see their own compensation change on /approvals", async () => {
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testCEO.id,
+      requesterId: testAdmin.id,
+      metadata: {
+        employeeId: testCEO.id,
+        payRate: "251000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-02-01",
+        changeReason: "Board approval",
+      },
+    });
+
+    const ceoVisible = await getVisiblePendingApprovals(testCEO.id, true);
+    expect(
+      ceoVisible.some((item) => item.request.id === approvalResult.requestId)
+    ).toBe(false);
+  });
+
+  test("requester does not see their submitted request on /approvals at the final step", async () => {
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testAdmin.id,
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "101000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-02-02",
+        changeReason: "Merit increase",
+      },
+    });
+
+    await approveStep(approvalResult.requestId!, 1, testManager.id);
+
+    const requesterVisible = await getVisiblePendingApprovals(testAdmin.id, true);
+    expect(
+      requesterVisible.some((item) => item.request.id === approvalResult.requestId)
+    ).toBe(false);
+
+    const otherAdminVisible = await getVisiblePendingApprovals(testCEO.id, true);
+    expect(
+      otherAdminVisible.some((item) => item.request.id === approvalResult.requestId)
+    ).toBe(true);
+  });
+
+  test("reject writes an audit log in the same transaction", async () => {
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testCEO.id,
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "102000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-02-03",
+        changeReason: "Merit increase",
+      },
+    });
+
+    await rejectStep(approvalResult.requestId!, 1, testManager.id, "Not this cycle");
+
+    const [rejectLog] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "approval_step_rejected"))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1);
+
+    expect(rejectLog).toBeDefined();
+    expect(rejectLog.employeeId).toBe(testManager.id);
+    expect(rejectLog.entityType).toBe("compensation_change");
+
+    const [updated] = await db
+      .select()
+      .from(approvalRequests)
+      .where(eq(approvalRequests.id, approvalResult.requestId!));
+    expect(updated.status).toBe("rejected");
+  });
+
+  test("compensation audit stores unredacted payRate for later permission-aware display", async () => {
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testCEO.id,
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "103000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-02-04",
+        changeReason: "Merit increase",
+      },
+    });
+
+    await approveStep(approvalResult.requestId!, 1, testManager.id);
+    await approveStep(approvalResult.requestId!, 2, testAdmin.id);
+
+    const [compLog] = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "compensation_updated"))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(1);
+
+    expect(compLog).toBeDefined();
+    const changes = compLog.changes as Record<string, unknown>;
+    expect(changes.payRate).toBe("103000");
+    expect(changes.payRate).not.toBe("[REDACTED]");
   });
 });

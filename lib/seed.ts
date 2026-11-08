@@ -112,6 +112,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE teams CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_levels CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_families CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE job_titles CASCADE`);
     await db.execute(sql`TRUNCATE TABLE divisions CASCADE`);
     await db.execute(sql`TRUNCATE TABLE departments CASCADE`);
     await db.execute(sql`TRUNCATE TABLE locations CASCADE`);
@@ -126,7 +127,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE rate_limits CASCADE`);
     await db.execute(sql`TRUNCATE TABLE webhooks CASCADE`);
 
-    console.log("✅ Database reset complete (51 tables truncated)");
+    console.log("✅ Database reset complete (52 tables truncated)");
   }
 
   console.log("Creating locations...");
@@ -233,6 +234,19 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     .select()
     .from(schema.departments)
     .where(inArray(schema.departments.name, departmentNames));
+
+  console.log("Creating job titles...");
+  await db
+    .insert(schema.jobTitles)
+    .values([
+      { title: "Chief Executive Officer", department: "Senior Leadership", description: "Company CEO" },
+      { title: "Software Engineer", department: "Technology", description: "Builds and maintains product" },
+      { title: "Senior Software Engineer", department: "Technology", description: "Leads technical delivery" },
+      { title: "Account Executive", department: "Sales", description: "Owns new business" },
+      { title: "Customer Success Manager", department: "Vendasta Services", description: "Owns customer outcomes" },
+      { title: "People Operations Specialist", department: "People Operations", description: "Supports employees" },
+    ])
+    .onConflictDoNothing();
 
   const seniorLeadership = allDepartments.find((d) => d.name === "Senior Leadership")!;
   const tech = allDepartments.find((d) => d.name === "Technology")!;

@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { toast } from "sonner";
 
 interface TimeOffPolicyFormProps {
   policy?: {
@@ -55,11 +54,9 @@ export function TimeOffPolicyForm({ policy }: TimeOffPolicyFormProps) {
       const url = policy
         ? `/api/settings/time-off-policies/${policy.id}`
         : `/api/settings/time-off-policies`;
-      
-      const method = policy ? "PUT" : "POST";
 
       const response = await fetch(url, {
-        method,
+        method: policy ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
@@ -75,11 +72,10 @@ export function TimeOffPolicyForm({ policy }: TimeOffPolicyFormProps) {
         throw new Error(data.error || "Failed to save policy");
       }
 
-      toast.success(policy ? "Policy updated successfully" : "Policy created successfully");
       router.push("/settings/time-off-policies");
       router.refresh();
     } catch (error: any) {
-      toast.error(error.message);
+      alert(error.message);
     } finally {
       setIsSubmitting(false);
     }

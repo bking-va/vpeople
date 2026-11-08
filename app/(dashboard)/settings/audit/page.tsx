@@ -6,7 +6,7 @@ import { eq, desc } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
-import { redactAuditLogForViewer } from "@/lib/audit";
+import { redactAuditLogForViewer } from "@/lib/audit-redaction";
 
 export default async function AuditLogPage() {
   const session = await auth();

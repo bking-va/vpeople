@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { rejectStep } from "@/lib/approvals";
+import { httpStatusForApprovalError } from "@/lib/approval-errors";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -46,31 +47,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Failed to reject request:", error);
-    
-    // Return 409 for already-processed steps
-    if (error.message?.includes("already been processed")) {
+    const status = httpStatusForApprovalError(error.message);
+    if (status === 500) {
       return NextResponse.json(
-        { error: error.message },
-        { status: 409 }
+        { error: "Failed to reject request", message: error.message },
+        { status: 500 }
       );
     }
-    
-    // Return 403 for authorization errors
-    if (
-      error.message?.includes("not authorized") ||
-      error.message?.includes("cannot approve") ||
-      error.message?.includes("earlier steps are still pending") ||
-      error.message?.includes("your own")
-    ) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 403 }
-      );
-    }
-    
-    return NextResponse.json(
-      { error: "Failed to reject request", message: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message }, { status });
   }
 }

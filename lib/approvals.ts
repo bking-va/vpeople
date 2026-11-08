@@ -11,8 +11,11 @@ import {
   jobHistory,
   timeOffBalances,
 } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { createAuditLog } from "@/lib/audit";
+import { isApproverBlockedFromActing } from "@/lib/approval-errors";
+
+export { isApproverBlockedFromActing } from "@/lib/approval-errors";
 
 export interface CreateApprovalRequestParams {
   workflowId: number;
@@ -266,7 +269,7 @@ export async function approveStep(
     throw new Error("You are not authorized to approve this step");
   }
 
-  // Update the step and write audit log atomically
+  // Step status, entity updates, and audit logs commit together
   await db.transaction(async (tx) => {
     await tx
       .update(approvalRequestSteps)
@@ -283,10 +286,9 @@ export async function approveStep(
         )
       );
 
-    // Write audit log for this approval step
     await createAuditLog({
       employeeId: approverId,
-      action: `approval_step_approved`,
+      action: "approval_step_approved",
       entityType: request.entityType,
       entityId: request.entityId.toString(),
       changes: {
@@ -297,42 +299,35 @@ export async function approveStep(
       },
       tx,
     });
-  });
 
-  // Fetch all steps to check if all are approved
-  const allSteps = await db
-    .select()
-    .from(approvalRequestSteps)
-    .where(eq(approvalRequestSteps.approvalRequestId, approvalRequestId))
-    .orderBy(approvalRequestSteps.stepOrder);
+    const allSteps = await tx
+      .select()
+      .from(approvalRequestSteps)
+      .where(eq(approvalRequestSteps.approvalRequestId, approvalRequestId))
+      .orderBy(approvalRequestSteps.stepOrder);
 
-  const allApproved = allSteps.every((s) => s.status === "approved");
+    const allApproved = allSteps.every((s) => s.status === "approved");
 
-  if (allApproved) {
-    // All steps approved, mark request as approved
-    const [request] = await db
-      .update(approvalRequests)
-      .set({ status: "approved" })
-      .where(eq(approvalRequests.id, approvalRequestId))
-      .returning();
+    if (allApproved) {
+      const [updatedRequest] = await tx
+        .update(approvalRequests)
+        .set({ status: "approved" })
+        .where(eq(approvalRequests.id, approvalRequestId))
+        .returning();
 
-    // Update entity status
-    if (request.entityType === "time_off_request") {
-      // Fetch request to get days and policy
-      const [timeOffRequest] = await db
-        .select()
-        .from(timeOffRequests)
-        .where(eq(timeOffRequests.id, request.entityId))
-        .limit(1);
+      if (updatedRequest.entityType === "time_off_request") {
+        const [timeOffRequest] = await tx
+          .select()
+          .from(timeOffRequests)
+          .where(eq(timeOffRequests.id, updatedRequest.entityId))
+          .limit(1);
 
-      if (!timeOffRequest) {
-        throw new Error("Time off request not found");
-      }
+        if (!timeOffRequest) {
+          throw new Error("Time off request not found");
+        }
 
-      const daysRequested = parseFloat(timeOffRequest.daysRequested);
+        const daysRequested = parseFloat(timeOffRequest.daysRequested);
 
-      // Atomically update request status AND deduct balance using transaction
-      await db.transaction(async (tx) => {
         await tx
           .update(timeOffRequests)
           .set({
@@ -340,7 +335,7 @@ export async function approveStep(
             reviewedBy: approverId,
             reviewedAt: new Date(),
           })
-          .where(eq(timeOffRequests.id, request.entityId));
+          .where(eq(timeOffRequests.id, updatedRequest.entityId));
 
         await tx
           .update(timeOffBalances)
@@ -354,21 +349,33 @@ export async function approveStep(
               eq(timeOffBalances.policyId, timeOffRequest.policyId)
             )
           );
-      });
-    } else if (request.entityType === "timesheet") {
-      await db
-        .update(timesheets)
-        .set({
-          status: "approved",
-          reviewedBy: approverId,
-          reviewedAt: new Date(),
-        })
-        .where(eq(timesheets.id, request.entityId));
-    } else if (request.entityType === "compensation_change") {
-      // Apply compensation change from metadata (atomic with audit log)
-      const metadata = request.metadata as any;
-      if (metadata) {
-        await db.transaction(async (tx) => {
+
+        await createAuditLog({
+          employeeId: approverId,
+          action: "time_off_approved",
+          entityType: "time_off_request",
+          entityId: updatedRequest.entityId.toString(),
+          changes: {
+            approvalRequestId,
+            stepOrder,
+            daysRequested,
+            policyId: timeOffRequest.policyId,
+            comments,
+          },
+          tx,
+        });
+      } else if (updatedRequest.entityType === "timesheet") {
+        await tx
+          .update(timesheets)
+          .set({
+            status: "approved",
+            reviewedBy: approverId,
+            reviewedAt: new Date(),
+          })
+          .where(eq(timesheets.id, updatedRequest.entityId));
+      } else if (updatedRequest.entityType === "compensation_change") {
+        const metadata = updatedRequest.metadata as any;
+        if (metadata) {
           await tx.insert(compensationHistory).values({
             employeeId: metadata.employeeId,
             effectiveDate: metadata.effectiveDate,
@@ -379,7 +386,6 @@ export async function approveStep(
             changeReason: metadata.changeReason,
           });
 
-          // Audit log with redaction (atomic with compensation insert)
           await createAuditLog({
             employeeId: approverId,
             action: "compensation_updated",
@@ -393,39 +399,32 @@ export async function approveStep(
               currency: metadata.currency,
               effectiveDate: metadata.effectiveDate,
               changeReason: metadata.changeReason,
-              approvalRequestId: request.id,
+              approvalRequestId: updatedRequest.id,
               approvedBy: approverId,
             },
             tx,
           });
-        });
-      }
-    } else if (request.entityType === "job_info_change") {
-      // Apply job info change from metadata (atomic with audit log)
-      const metadata = request.metadata as any;
-      if (metadata) {
-        await db.transaction(async (tx) => {
-          // Build employee updates from metadata
+        }
+      } else if (updatedRequest.entityType === "job_info_change") {
+        const metadata = updatedRequest.metadata as any;
+        if (metadata) {
           const employeeUpdates: any = {
             updatedAt: new Date(),
           };
-          
-          // Map job info fields to employee record
+
           if (metadata.jobTitle !== undefined) employeeUpdates.jobTitle = metadata.jobTitle;
           if (metadata.departmentId !== undefined) employeeUpdates.departmentId = metadata.departmentId;
           if (metadata.divisionId !== undefined) employeeUpdates.divisionId = metadata.divisionId;
           if (metadata.locationId !== undefined) employeeUpdates.locationId = metadata.locationId;
           if (metadata.managerId !== undefined) employeeUpdates.managerId = metadata.managerId;
-          
-          // Update employee record
+
           if (Object.keys(employeeUpdates).length > 1) {
             await tx
               .update(employees)
               .set(employeeUpdates)
               .where(eq(employees.id, metadata.employeeId));
           }
-          
-          // Record in job history (only fields that exist in job_history schema)
+
           await tx.insert(jobHistory).values({
             employeeId: metadata.employeeId,
             effectiveDate: metadata.effectiveDate,
@@ -437,7 +436,6 @@ export async function approveStep(
             comment: metadata.changeReason || null,
           });
 
-          // Audit log (atomic with job info updates)
           await createAuditLog({
             employeeId: approverId,
             action: "job_info_updated",
@@ -452,38 +450,35 @@ export async function approveStep(
               managerId: metadata.managerId,
               effectiveDate: metadata.effectiveDate,
               changeReason: metadata.changeReason,
-              approvalRequestId: request.id,
+              approvalRequestId: updatedRequest.id,
               approvedBy: approverId,
             },
             tx,
           });
-        });
+        }
+      }
+    } else {
+      const currentStepIndex = allSteps.findIndex((s) => s.stepOrder === stepOrder);
+      if (currentStepIndex !== -1 && currentStepIndex + 1 < allSteps.length) {
+        const nextStepObj = allSteps[currentStepIndex + 1];
+
+        await tx
+          .update(approvalRequestSteps)
+          .set({ status: "pending" })
+          .where(
+            and(
+              eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+              eq(approvalRequestSteps.stepOrder, nextStepObj.stepOrder)
+            )
+          );
+
+        await tx
+          .update(approvalRequests)
+          .set({ currentStep: nextStepObj.stepOrder })
+          .where(eq(approvalRequests.id, approvalRequestId));
       }
     }
-  } else {
-    // Move to next step
-    const currentStepIndex = allSteps.findIndex((s) => s.stepOrder === stepOrder);
-    if (currentStepIndex !== -1 && currentStepIndex + 1 < allSteps.length) {
-      const nextStepObj = allSteps[currentStepIndex + 1];
-      
-      // Mark next step as pending
-      await db
-        .update(approvalRequestSteps)
-        .set({ status: "pending" })
-        .where(
-          and(
-            eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
-            eq(approvalRequestSteps.stepOrder, nextStepObj.stepOrder)
-          )
-        );
-
-      // Update request current step
-      await db
-        .update(approvalRequests)
-        .set({ currentStep: nextStepObj.stepOrder })
-        .where(eq(approvalRequests.id, approvalRequestId));
-    }
-  }
+  });
 }
 
 export async function rejectStep(
@@ -568,7 +563,6 @@ export async function rejectStep(
     throw new Error("You are not authorized to reject this step");
   }
 
-  // Update the step and write audit log atomically
   await db.transaction(async (tx) => {
     await tx
       .update(approvalRequestSteps)
@@ -585,10 +579,9 @@ export async function rejectStep(
         )
       );
 
-    // Write audit log for this rejection step
     await createAuditLog({
       employeeId: approverId,
-      action: `approval_step_rejected`,
+      action: "approval_step_rejected",
       entityType: request.entityType,
       entityId: request.entityId.toString(),
       changes: {
@@ -599,36 +592,100 @@ export async function rejectStep(
       },
       tx,
     });
+
+    await tx
+      .update(approvalRequests)
+      .set({ status: "rejected" })
+      .where(eq(approvalRequests.id, approvalRequestId));
+
+    if (request.entityType === "time_off_request") {
+      await tx
+        .update(timeOffRequests)
+        .set({
+          status: "denied",
+          reviewedBy: approverId,
+          reviewedAt: new Date(),
+          reviewNotes: comments,
+        })
+        .where(eq(timeOffRequests.id, request.entityId));
+    } else if (request.entityType === "timesheet") {
+      await tx
+        .update(timesheets)
+        .set({
+          status: "rejected",
+          reviewedBy: approverId,
+          reviewedAt: new Date(),
+          notes: comments,
+        })
+        .where(eq(timesheets.id, request.entityId));
+    }
   });
+}
 
-  // Mark request as rejected
-  await db
-    .update(approvalRequests)
-    .set({ status: "rejected" })
-    .where(eq(approvalRequests.id, approvalRequestId));
+/**
+ * Pending approval steps visible on /approvals for this viewer.
+ * Only the request's current step is returned, and blocked approvers are excluded.
+ */
+export async function getVisiblePendingApprovals(employeeId: number, isAdmin: boolean) {
+  const pendingSteps = await db
+    .select({
+      step: approvalRequestSteps,
+      request: approvalRequests,
+      requester: employees,
+    })
+    .from(approvalRequestSteps)
+    .innerJoin(
+      approvalRequests,
+      eq(approvalRequestSteps.approvalRequestId, approvalRequests.id)
+    )
+    .innerJoin(employees, eq(approvalRequests.requesterId, employees.id))
+    .where(
+      and(
+        eq(approvalRequestSteps.status, "pending"),
+        eq(approvalRequests.status, "pending"),
+        eq(approvalRequestSteps.stepOrder, approvalRequests.currentStep),
+        or(
+          eq(approvalRequestSteps.approverId, employeeId),
+          and(
+            isNull(approvalRequestSteps.approverId),
+            isAdmin ? sql`true` : sql`false`
+          )
+        )
+      )
+    )
+    .orderBy(approvalRequests.createdAt);
 
-  // Update entity status
-  if (request.entityType === "time_off_request") {
-    await db
-      .update(timeOffRequests)
-      .set({
-        status: "denied",
-        reviewedBy: approverId,
-        reviewedAt: new Date(),
-        reviewNotes: comments,
-      })
-      .where(eq(timeOffRequests.id, request.entityId));
-  } else if (request.entityType === "timesheet") {
-    await db
-      .update(timesheets)
-      .set({
-        status: "rejected",
-        reviewedBy: approverId,
-        reviewedAt: new Date(),
-        notes: comments,
-      })
-      .where(eq(timesheets.id, request.entityId));
+  if (pendingSteps.length === 0) {
+    return [];
   }
+
+  const requestIds = pendingSteps.map((item) => item.request.id);
+  const allSteps = await db
+    .select({
+      approvalRequestId: approvalRequestSteps.approvalRequestId,
+      stepOrder: approvalRequestSteps.stepOrder,
+    })
+    .from(approvalRequestSteps)
+    .where(inArray(approvalRequestSteps.approvalRequestId, requestIds));
+
+  const maxStepByRequest = new Map<number, number>();
+  for (const s of allSteps) {
+    const current = maxStepByRequest.get(s.approvalRequestId) ?? 0;
+    if (s.stepOrder > current) {
+      maxStepByRequest.set(s.approvalRequestId, s.stepOrder);
+    }
+  }
+
+  return pendingSteps.filter((item) => {
+    const maxStep = maxStepByRequest.get(item.request.id) ?? item.step.stepOrder;
+    return !isApproverBlockedFromActing({
+      entityType: item.request.entityType,
+      entityId: item.request.entityId,
+      requesterId: item.request.requesterId,
+      viewerId: employeeId,
+      isFinalStep: item.step.stepOrder === maxStep,
+    });
+  });
 }
 
 export async function getApprovalRequestForEntity(

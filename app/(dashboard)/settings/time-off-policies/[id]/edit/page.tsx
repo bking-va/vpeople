@@ -8,7 +8,7 @@ import { TimeOffPolicyForm } from "@/components/time-off-policy-form";
 export default async function EditTimeOffPolicyPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
   const session = await auth();
 
@@ -31,7 +31,8 @@ export default async function EditTimeOffPolicyPage({
     redirect("/settings");
   }
 
-  const policyId = parseInt(params.id);
+  const { id } = await params;
+  const policyId = parseInt(id);
   const [policy] = await db
     .select()
     .from(timeOffPolicies)
