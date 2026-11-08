@@ -47,7 +47,7 @@ export default async function WorkflowsPage() {
           <Card key={workflow.id}>
             <CardHeader>
               <div className="flex items-start justify-between">
-                <div>
+                <div className="flex-1">
                   <CardTitle>{workflow.name}</CardTitle>
                   <CardDescription>{workflow.description}</CardDescription>
                 </div>
@@ -59,6 +59,9 @@ export default async function WorkflowsPage() {
                     workflowId={workflow.id}
                     enabled={workflow.enabled}
                   />
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/settings/workflows/${workflow.id}`}>Edit</Link>
+                  </Button>
                 </div>
               </div>
             </CardHeader>
