@@ -2,10 +2,11 @@
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { timeOffRequests, timeOffBalances, employees } from "@/lib/db/schema";
+import { timeOffRequests, timeOffBalances, employees, approvalRequests } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
+import { approveStep, rejectStep, getApprovalRequestForEntity } from "@/lib/approvals";
 
 export async function approveTimeOffRequest(requestId: number) {
   const session = await auth();
@@ -57,31 +58,103 @@ export async function approveTimeOffRequest(requestId: number) {
     };
   }
 
-  await db
-    .update(timeOffRequests)
-    .set({
-      status: "approved",
-      reviewedBy: currentEmployee.id,
-      reviewedAt: new Date(),
-    })
-    .where(eq(timeOffRequests.id, requestId));
+  // Check if this request has an approval workflow
+  const approvalData = await getApprovalRequestForEntity(
+    "time_off_request",
+    requestId
+  );
 
-  const daysRequested = parseFloat(request.request.daysRequested);
+  if (approvalData) {
+    // Multi-step approval workflow
+    const { request: approvalReq, steps } = approvalData;
 
-  await db
-    .update(timeOffBalances)
-    .set({
-      balance: db.$with(
-        `CAST(CAST(balance AS DECIMAL) - ${daysRequested} AS TEXT)`
-      ) as any,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(timeOffBalances.employeeId, request.request.employeeId),
-        eq(timeOffBalances.policyId, request.request.policyId)
-      )
+    if (approvalReq.status !== "pending") {
+      return {
+        success: false,
+        error: "Request has already been processed",
+      };
+    }
+
+    // Find the current step
+    const currentStep = steps.find((s) => s.step.stepOrder === approvalReq.currentStep);
+
+    if (!currentStep) {
+      return {
+        success: false,
+        error: "Invalid approval step",
+      };
+    }
+
+    // Verify approver can approve this step
+    const canApprove =
+      (currentStep.step.approverId === currentEmployee.id) ||
+      (currentStep.step.approverId === null && isAdmin);
+
+    if (!canApprove) {
+      return {
+        success: false,
+        error: "You are not authorized to approve this step",
+      };
+    }
+
+    // Approve the step
+    await approveStep(
+      approvalReq.id,
+      currentStep.step.stepOrder,
+      currentEmployee.id
     );
+
+    // If final approval, deduct balance
+    const updatedApprovalData = await getApprovalRequestForEntity(
+      "time_off_request",
+      requestId
+    );
+
+    if (updatedApprovalData?.request.status === "approved") {
+      const daysRequested = parseFloat(request.request.daysRequested);
+      await db
+        .update(timeOffBalances)
+        .set({
+          balance: db.$with(
+            `CAST(CAST(balance AS DECIMAL) - ${daysRequested} AS TEXT)`
+          ) as any,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(timeOffBalances.employeeId, request.request.employeeId),
+            eq(timeOffBalances.policyId, request.request.policyId)
+          )
+        );
+    }
+  } else {
+    // Legacy single-step approval
+    await db
+      .update(timeOffRequests)
+      .set({
+        status: "approved",
+        reviewedBy: currentEmployee.id,
+        reviewedAt: new Date(),
+      })
+      .where(eq(timeOffRequests.id, requestId));
+
+    const daysRequested = parseFloat(request.request.daysRequested);
+
+    await db
+      .update(timeOffBalances)
+      .set({
+        balance: db.$with(
+          `CAST(CAST(balance AS DECIMAL) - ${daysRequested} AS TEXT)`
+        ) as any,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(timeOffBalances.employeeId, request.request.employeeId),
+          eq(timeOffBalances.policyId, request.request.policyId)
+        )
+      );
+  }
 
   await createAuditLog({
     userId: session.user.id,
@@ -155,15 +228,64 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
     };
   }
 
-  await db
-    .update(timeOffRequests)
-    .set({
-      status: "denied",
-      reviewedBy: currentEmployee.id,
-      reviewedAt: new Date(),
-      reviewNotes: reason,
-    })
-    .where(eq(timeOffRequests.id, requestId));
+  // Check if this request has an approval workflow
+  const approvalData = await getApprovalRequestForEntity(
+    "time_off_request",
+    requestId
+  );
+
+  if (approvalData) {
+    // Multi-step approval workflow
+    const { request: approvalReq, steps } = approvalData;
+
+    if (approvalReq.status !== "pending") {
+      return {
+        success: false,
+        error: "Request has already been processed",
+      };
+    }
+
+    // Find the current step
+    const currentStep = steps.find((s) => s.step.stepOrder === approvalReq.currentStep);
+
+    if (!currentStep) {
+      return {
+        success: false,
+        error: "Invalid approval step",
+      };
+    }
+
+    // Verify approver can reject this step
+    const canReject =
+      (currentStep.step.approverId === currentEmployee.id) ||
+      (currentStep.step.approverId === null && isAdmin);
+
+    if (!canReject) {
+      return {
+        success: false,
+        error: "You are not authorized to reject this step",
+      };
+    }
+
+    // Reject the step
+    await rejectStep(
+      approvalReq.id,
+      currentStep.step.stepOrder,
+      currentEmployee.id,
+      reason
+    );
+  } else {
+    // Legacy single-step denial
+    await db
+      .update(timeOffRequests)
+      .set({
+        status: "denied",
+        reviewedBy: currentEmployee.id,
+        reviewedAt: new Date(),
+        reviewNotes: reason,
+      })
+      .where(eq(timeOffRequests.id, requestId));
+  }
 
   await createAuditLog({
     userId: session.user.id,

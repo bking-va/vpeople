@@ -412,6 +412,7 @@ export const timeOffRequests = pgTable("time_off_requests", {
   policyId: integer("policy_id")
     .notNull()
     .references(() => timeOffPolicies.id),
+  workflowId: integer("workflow_id").references(() => approvalWorkflows.id),
   startDate: date("start_date").notNull(),
   endDate: date("end_date").notNull(),
   daysRequested: decimal("days_requested", { precision: 10, scale: 2 }).notNull(),
@@ -705,6 +706,42 @@ export const approvalWorkflowSteps = pgTable("approval_workflow_steps", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const approvalRequestStatusEnum = pgEnum("approval_request_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled",
+]);
+
+export const approvalRequests = pgTable("approval_requests", {
+  id: serial("id").primaryKey(),
+  workflowId: integer("workflow_id")
+    .notNull()
+    .references(() => approvalWorkflows.id),
+  entityType: text("entity_type").notNull(), // "time_off_request", "timesheet", etc.
+  entityId: integer("entity_id").notNull(),
+  requesterId: integer("requester_id")
+    .notNull()
+    .references(() => employees.id),
+  status: approvalRequestStatusEnum("status").default("pending").notNull(),
+  currentStep: integer("current_step").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const approvalRequestSteps = pgTable("approval_request_steps", {
+  id: serial("id").primaryKey(),
+  approvalRequestId: integer("approval_request_id")
+    .notNull()
+    .references(() => approvalRequests.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  approverId: integer("approver_id").references(() => employees.id),
+  status: approvalRequestStatusEnum("status").default("pending").notNull(),
+  comments: text("comments"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const peopleViews = pgTable("people_views", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -904,6 +941,7 @@ export const timesheets = pgTable("timesheets", {
   employeeId: integer("employee_id")
     .notNull()
     .references(() => employees.id, { onDelete: "cascade" }),
+  workflowId: integer("workflow_id").references(() => approvalWorkflows.id),
   weekStartDate: date("week_start_date").notNull(),
   weekEndDate: date("week_end_date").notNull(),
   totalHours: decimal("total_hours", { precision: 5, scale: 2 }).notNull(),
