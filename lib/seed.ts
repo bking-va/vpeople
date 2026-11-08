@@ -1466,6 +1466,8 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     { name: "Memorial Day", date: "2027-05-31", country: "US" },
     { name: "Independence Day", date: "2027-07-04", country: "US" },
     { name: "Labor Day", date: "2027-09-06", country: "US" },
+    { name: "Columbus Day", date: "2027-10-11", country: "US" },
+    { name: "Veterans Day", date: "2027-11-11", country: "US" },
     { name: "Thanksgiving", date: "2027-11-25", country: "US" },
     { name: "Christmas Day", date: "2027-12-25", country: "US" },
     

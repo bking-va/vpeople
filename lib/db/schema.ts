@@ -787,6 +787,12 @@ export const trainingCourses = pgTable("training_courses", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const trainingStatusEnum = pgEnum("training_status", [
+  "pending",
+  "completed",
+  "overdue",
+]);
+
 export const trainingCompletions = pgTable("training_completions", {
   id: serial("id").primaryKey(),
   courseId: integer("course_id")
@@ -795,7 +801,10 @@ export const trainingCompletions = pgTable("training_completions", {
   employeeId: integer("employee_id")
     .notNull()
     .references(() => employees.id, { onDelete: "cascade" }),
-  completedAt: timestamp("completed_at").notNull(),
+  status: trainingStatusEnum("status").default("pending").notNull(),
+  dueDate: timestamp("due_date"),
+  completedAt: timestamp("completed_at"),
+  score: integer("score"),
   expiresAt: timestamp("expires_at"),
   certificateUrl: text("certificate_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

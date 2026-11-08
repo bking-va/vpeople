@@ -19,6 +19,7 @@ import {
   employeeTasks,
   employeeTeams,
   teams,
+  documents,
 } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,6 +30,7 @@ import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getUserPermissions } from "@/lib/permissions";
 import Link from "next/link";
+import { ProfileDocuments } from "@/components/profile-documents";
 
 export default async function EmployeeProfilePage({
   params,
@@ -199,6 +201,12 @@ export default async function EmployeeProfilePage({
     .from(employeeTasks)
     .where(eq(employeeTasks.employeeId, employeeId))
     .orderBy(employeeTasks.createdAt);
+
+  const employeeDocs = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.employeeId, employeeId))
+    .orderBy(desc(documents.createdAt));
 
   const employeeTeamsList = await db
     .select({ team: teams })
@@ -622,14 +630,18 @@ export default async function EmployeeProfilePage({
         </TabsContent>
 
         <TabsContent value="documents" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Documents</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">Document management coming soon. Will include offer letters, contracts, performance reviews, and signed documents.</p>
-            </CardContent>
-          </Card>
+          <ProfileDocuments
+            employeeId={employeeId}
+            documents={employeeDocs.map(doc => ({
+              id: doc.id,
+              title: doc.title,
+              category: doc.category,
+              status: doc.status,
+              signedAt: doc.signedAt ? doc.signedAt.toISOString() : null,
+              createdAt: doc.createdAt.toISOString(),
+            }))}
+            canUpload={canViewCompensation}
+          />
         </TabsContent>
 
         <TabsContent value="training" className="space-y-4">

@@ -1,11 +1,13 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { enpsSurveys, enpsResponses } from "@/lib/db/schema";
+import { enpsSurveys, enpsResponses, enpsSurveyParticipants, employees } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { MessageSquare, TrendingUp, Users, Star } from "lucide-react";
+import { MessageSquare, TrendingUp, Users, Star, Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 export default async function ENPSPage() {
   const session = await auth();
@@ -20,37 +22,61 @@ export default async function ENPSPage() {
     .from(enpsSurveys)
     .where(eq(enpsSurveys.isActive, true));
 
+  const totalEmployees = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(employees)
+    .where(eq(employees.employmentStatus, "full_time"))
+    .then((rows) => rows[0]?.count || 0);
+
   let enpsScore = null;
   let responseRate = 0;
   let promoters = 0;
   let detractors = 0;
   let totalResponses = 0;
+  let totalParticipants = 0;
 
   if (surveys.length > 0 && isAdmin) {
     const activeSurvey = surveys[0];
+    
+    const participants = await db
+      .select()
+      .from(enpsSurveyParticipants)
+      .where(eq(enpsSurveyParticipants.surveyId, activeSurvey.id));
+    
+    totalParticipants = participants.length;
+    totalResponses = participants.filter((p) => p.hasResponded).length;
+    
     const responses = await db
       .select()
       .from(enpsResponses)
       .where(eq(enpsResponses.surveyId, activeSurvey.id));
 
-    totalResponses = responses.length;
     promoters = responses.filter((r) => r.score >= 9).length;
     detractors = responses.filter((r) => r.score <= 6).length;
 
     if (totalResponses > 0) {
       enpsScore = Math.round(((promoters - detractors) / totalResponses) * 100);
-      // Assume 85 employees for response rate calculation
-      responseRate = Math.round((totalResponses / 85) * 100);
+      responseRate = Math.round((totalResponses / totalParticipants) * 100);
     }
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Employee Net Promoter Score (eNPS)</h1>
-        <p className="text-muted-foreground">
-          Measure employee satisfaction and engagement
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Employee Net Promoter Score (eNPS)</h1>
+          <p className="text-muted-foreground">
+            Measure employee satisfaction and engagement
+          </p>
+        </div>
+        {isAdmin && (
+          <Link href="/enps/create">
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              New Survey
+            </Button>
+          </Link>
+        )}
       </div>
 
       {isAdmin && (

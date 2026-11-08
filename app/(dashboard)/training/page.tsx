@@ -162,7 +162,9 @@ export default async function TrainingPage() {
                   <div>
                     <div className="font-medium">{item.course?.name}</div>
                     <div className="text-sm text-muted-foreground">
-                      Completed {new Date(item.completion.completedAt).toLocaleDateString()}
+                      {item.completion.completedAt && (
+                        <>Completed {new Date(item.completion.completedAt).toLocaleDateString()}</>
+                      )}
                       {item.completion.expiresAt && (
                         <> • Expires {new Date(item.completion.expiresAt).toLocaleDateString()}</>
                       )}
