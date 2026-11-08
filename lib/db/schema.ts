@@ -13,6 +13,8 @@ import {
   serial,
   index,
   uuid,
+  varchar,
+  time,
 } from "drizzle-orm/pg-core";
 
 export const userRoleEnum = pgEnum("user_role", [
@@ -924,3 +926,43 @@ export const approvalWorkflowStepsRelations = relations(approvalWorkflowSteps, (
     references: [approvalWorkflows.id],
   }),
 }));
+
+export const savedReports = pgTable("saved_reports", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  reportType: varchar("report_type", { length: 50 }).default("custom").notNull(),
+  fields: text("fields").notNull(), // JSON array
+  filters: text("filters"), // JSON object
+  groupBy: varchar("group_by", { length: 100 }),
+  sortBy: varchar("sort_by", { length: 100 }),
+  sortOrder: varchar("sort_order", { length: 10 }).default("asc"),
+  isShared: boolean("is_shared").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const scheduleTypeEnum = pgEnum("schedule_type", ["daily", "weekly", "monthly"]);
+
+export const scheduledReports = pgTable("scheduled_reports", {
+  id: serial("id").primaryKey(),
+  savedReportId: integer("saved_report_id")
+    .notNull()
+    .references(() => savedReports.id, { onDelete: "cascade" }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  scheduleType: varchar("schedule_type", { length: 20 }).default("weekly").notNull(),
+  scheduleDay: integer("schedule_day"), // 0-6 for weekly, 1-31 for monthly
+  scheduleTime: time("schedule_time").default("09:00:00"),
+  recipientEmails: text("recipient_emails").notNull(), // JSON array
+  format: varchar("format", { length: 10 }).default("csv").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

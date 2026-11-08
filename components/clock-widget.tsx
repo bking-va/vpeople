@@ -3,13 +3,15 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Clock, LogIn, LogOut } from "lucide-react";
+import { Clock, LogIn, LogOut, Coffee } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export function ClockWidget() {
   const [currentClock, setCurrentClock] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [onBreak, setOnBreak] = useState(false);
+  const [breakStart, setBreakStart] = useState<Date | null>(null);
 
   useEffect(() => {
     fetchClockStatus();
@@ -40,6 +42,8 @@ export function ClockWidget() {
 
       if (response.ok) {
         await fetchClockStatus();
+        setOnBreak(false);
+        setBreakStart(null);
       } else {
         alert("Clock action failed");
       }
@@ -51,10 +55,56 @@ export function ClockWidget() {
     }
   };
 
+  const handleBreak = async (breakAction: "start" | "end") => {
+    if (breakAction === "start") {
+      setOnBreak(true);
+      setBreakStart(new Date());
+    } else {
+      if (!breakStart || !currentClock) return;
+      
+      setIsLoading(true);
+      try {
+        const breakMinutes = Math.floor((new Date().getTime() - breakStart.getTime()) / 60000);
+        const response = await fetch("/api/time-tracking/clock", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clockId: currentClock.id,
+            breakMinutes: (currentClock.breakMinutes || 0) + breakMinutes,
+          }),
+        });
+
+        if (response.ok) {
+          await fetchClockStatus();
+          setOnBreak(false);
+          setBreakStart(null);
+        } else {
+          alert("Break update failed");
+        }
+      } catch (error) {
+        console.error("Break update failed:", error);
+        alert("Break update failed");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const formatElapsedTime = () => {
     if (!currentClock?.clockIn) return "00:00:00";
     const start = new Date(currentClock.clockIn);
-    const diff = currentTime.getTime() - start.getTime();
+    let diff = currentTime.getTime() - start.getTime();
+    
+    // Subtract recorded break time
+    const breakMs = (currentClock.breakMinutes || 0) * 60000;
+    diff -= breakMs;
+    
+    // Subtract current ongoing break
+    if (onBreak && breakStart) {
+      const currentBreakMs = currentTime.getTime() - breakStart.getTime();
+      diff -= currentBreakMs;
+    }
+    
     const hours = Math.floor(diff / 3600000);
     const minutes = Math.floor((diff % 3600000) / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);
@@ -73,23 +123,51 @@ export function ClockWidget() {
         {currentClock ? (
           <>
             <div className="flex items-center justify-between">
-              <Badge variant="default">Clocked In</Badge>
+              <Badge variant={onBreak ? "secondary" : "default"}>
+                {onBreak ? "On Break" : "Clocked In"}
+              </Badge>
               <span className="text-2xl font-mono font-bold">
                 {formatElapsedTime()}
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
               Since {new Date(currentClock.clockIn).toLocaleTimeString()}
+              {currentClock.breakMinutes > 0 && (
+                <> • {currentClock.breakMinutes}m break</>
+              )}
             </p>
-            <Button
-              onClick={() => handleClock("out")}
-              disabled={isLoading}
-              className="w-full"
-              variant="outline"
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              Clock Out
-            </Button>
+            <div className="flex gap-2">
+              {onBreak ? (
+                <Button
+                  onClick={() => handleBreak("end")}
+                  disabled={isLoading}
+                  className="flex-1"
+                  variant="outline"
+                >
+                  <Coffee className="mr-2 h-4 w-4" />
+                  End Break
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => handleBreak("start")}
+                  disabled={isLoading}
+                  className="flex-1"
+                  variant="outline"
+                >
+                  <Coffee className="mr-2 h-4 w-4" />
+                  Start Break
+                </Button>
+              )}
+              <Button
+                onClick={() => handleClock("out")}
+                disabled={isLoading || onBreak}
+                className="flex-1"
+                variant="outline"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Clock Out
+              </Button>
+            </div>
           </>
         ) : (
           <>

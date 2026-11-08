@@ -105,6 +105,68 @@ export async function POST(request: NextRequest) {
   }
 }
 
+export async function PUT(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const [employee] = await db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(eq(employees.email, session.user.email))
+      .limit(1);
+
+    if (!employee) {
+      return NextResponse.json(
+        { error: "Employee record not found" },
+        { status: 404 }
+      );
+    }
+
+    const data = await request.json();
+    const { clockId, breakMinutes } = data;
+
+    if (!clockId || breakMinutes === undefined) {
+      return NextResponse.json(
+        { error: "Clock ID and break minutes required" },
+        { status: 400 }
+      );
+    }
+
+    // Update break minutes on the clock entry
+    const [updated] = await db
+      .update(timeClocks)
+      .set({
+        breakMinutes,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(timeClocks.id, clockId),
+          eq(timeClocks.employeeId, employee.id)
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      return NextResponse.json(
+        { error: "Clock entry not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ clockEntry: updated });
+  } catch (error: any) {
+    console.error("Failed to update break time:", error);
+    return NextResponse.json(
+      { error: "Update failed", message: error.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.email) {

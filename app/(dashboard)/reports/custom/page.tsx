@@ -6,7 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, Play } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Download, Play, Save, Clock } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 const availableFields = [
   { id: "employeeNumber", label: "Employee Number", category: "Basic" },
@@ -32,6 +43,7 @@ const groupByOptions = [
 ];
 
 export default function CustomReportPage() {
+  const router = useRouter();
   const [selectedFields, setSelectedFields] = useState<string[]>([
     "employeeNumber",
     "firstName",
@@ -43,6 +55,10 @@ export default function CustomReportPage() {
   const [groupBy, setGroupBy] = useState("none");
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [reportName, setReportName] = useState("");
+  const [reportDescription, setReportDescription] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const toggleField = (fieldId: string) => {
     setSelectedFields((prev) =>
@@ -76,6 +92,39 @@ export default function CustomReportPage() {
       groupBy,
     });
     window.location.href = `/api/reports/export?${params}`;
+  };
+
+  const handleSaveReport = async () => {
+    if (!reportName.trim()) return;
+
+    setIsSaving(true);
+    try {
+      const response = await fetch("/api/reports/saved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: reportName,
+          description: reportDescription,
+          fields: selectedFields,
+          groupBy: groupBy !== "none" ? groupBy : null,
+          isShared: false,
+        }),
+      });
+
+      if (response.ok) {
+        setShowSaveDialog(false);
+        setReportName("");
+        setReportDescription("");
+        alert("Report saved successfully!");
+      } else {
+        alert("Failed to save report");
+      }
+    } catch (error) {
+      console.error("Save failed:", error);
+      alert("Failed to save report");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const fieldsByCategory = availableFields.reduce((acc, field) => {
@@ -166,6 +215,14 @@ export default function CustomReportPage() {
                 <Download className="mr-2 h-4 w-4" />
                 Export CSV
               </Button>
+              <Button
+                onClick={() => setShowSaveDialog(true)}
+                variant="outline"
+                disabled={selectedFields.length === 0}
+              >
+                <Save className="mr-2 h-4 w-4" />
+                Save Report
+              </Button>
             </div>
 
             {previewData && (
@@ -215,6 +272,46 @@ export default function CustomReportPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Report</DialogTitle>
+            <DialogDescription>
+              Save this report configuration for quick access later
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="reportName">Report Name</Label>
+              <Input
+                id="reportName"
+                value={reportName}
+                onChange={(e) => setReportName(e.target.value)}
+                placeholder="e.g., Sales Team Contact List"
+              />
+            </div>
+            <div>
+              <Label htmlFor="reportDescription">Description (optional)</Label>
+              <Textarea
+                id="reportDescription"
+                value={reportDescription}
+                onChange={(e) => setReportDescription(e.target.value)}
+                placeholder="Describe what this report is for..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveReport} disabled={isSaving || !reportName.trim()}>
+              {isSaving ? "Saving..." : "Save Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
