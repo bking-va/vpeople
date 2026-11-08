@@ -46,6 +46,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Failed to reject request:", error);
+    
+    // Return 403 for authorization errors
+    if (
+      error.message?.includes("not authorized") ||
+      error.message?.includes("cannot approve") ||
+      error.message?.includes("earlier steps are still pending") ||
+      error.message?.includes("your own")
+    ) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      );
+    }
+    
     return NextResponse.json(
       { error: "Failed to reject request", message: error.message },
       { status: 500 }

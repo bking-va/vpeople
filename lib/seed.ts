@@ -869,9 +869,23 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   if (!shouldSkipEmployees) {
     // Create 78 employees (1 CEO + 6 execs + 78 = 85 total)
     // Distribution: Tech=33, Services=15, Sales=10, Marketing=8, Product=6, PeopleOps=6
+    
+    // Track used names to ensure uniqueness
+    const usedNames = new Set<string>();
+    
     for (let i = 0; i < 78; i++) {
-      let firstName = firstNames[i % firstNames.length];
-      let lastName = lastNames[Math.floor(i / 2) % lastNames.length];
+      // Generate unique first/last name combinations
+      let firstName: string;
+      let lastName: string;
+      let fullName: string;
+      
+      do {
+        firstName = firstNames[(i + Math.floor(i / firstNames.length) * 7) % firstNames.length];
+        lastName = lastNames[(i + Math.floor(i / lastNames.length) * 11) % lastNames.length];
+        fullName = `${firstName} ${lastName}`;
+      } while (usedNames.has(fullName));
+      
+      usedNames.add(fullName);
       let email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${VENDASTA_DOMAIN}`;
 
       let suffix = 1;
@@ -1076,6 +1090,50 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       .set({ calendarToken: token })
       .where(eq(schema.employees.id, emp.id));
   }
+
+  console.log("Creating starting compensation for all employees...");
+
+  // Create starting compensation for all employees
+  const compensationData = allEmployees.map((emp) => {
+    // Determine pay rate based on role and level
+    let payRate: string;
+    const jobTitle = emp.jobTitle?.toLowerCase() || "";
+    
+    // Executive compensation
+    if (emp.id === ceo.id) {
+      payRate = "300000";
+    } else if (executives.some(e => e?.id === emp.id)) {
+      payRate = jobTitle.includes("vp") || jobTitle.includes("vice") ? "200000" : "180000";
+    } 
+    // Manager compensation
+    else if (emp.accessLevel === "full_admin") {
+      payRate = "160000";
+    } else if (emp.accessLevel === "manager") {
+      payRate = "120000";
+    }
+    // IC compensation by seniority
+    else if (jobTitle.includes("principal") || jobTitle.includes("staff")) {
+      payRate = "140000";
+    } else if (jobTitle.includes("senior") || jobTitle.includes("iii")) {
+      payRate = "110000";
+    } else if (jobTitle.includes("ii")) {
+      payRate = "85000";
+    } else {
+      payRate = "70000"; // Entry level
+    }
+
+    return {
+      employeeId: emp.id,
+      effectiveDate: emp.hireDate || "2020-01-15",
+      payRate,
+      payType: "salary",
+      paySchedule: "annual",
+      currency: "CAD",
+      changeReason: "New hire",
+    };
+  });
+
+  await db.insert(schema.compensationHistory).values(compensationData);
 
   console.log("Creating seats...");
 

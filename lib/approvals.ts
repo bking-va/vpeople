@@ -194,10 +194,27 @@ export async function approveStep(
     throw new Error("Approval step not found");
   }
 
-  const { step, workflowStep } = stepData;
+  const { step, request, workflowStep } = stepData;
 
   if (step.status !== "pending") {
     throw new Error("Step has already been processed");
+  }
+
+  // Verify this is the current step (no earlier pending steps)
+  const earlierPendingSteps = await db
+    .select()
+    .from(approvalRequestSteps)
+    .where(
+      and(
+        eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+        eq(approvalRequestSteps.status, "pending"),
+        sql`${approvalRequestSteps.stepOrder} < ${stepOrder}`
+      )
+    )
+    .limit(1);
+
+  if (earlierPendingSteps.length > 0) {
+    throw new Error("Cannot approve this step: earlier steps are still pending");
   }
 
   // Verify approver is authorized for this step
@@ -209,6 +226,22 @@ export async function approveStep(
 
   if (!approver) {
     throw new Error("Approver not found");
+  }
+
+  // Check for self-approval: approver cannot approve their own request
+  // For compensation_change and job_info_change, the affected employee is in entityId
+  if (
+    request.entityType === "compensation_change" ||
+    request.entityType === "job_info_change"
+  ) {
+    if (request.entityId === approverId) {
+      throw new Error("You cannot approve your own compensation or job information changes");
+    }
+  } else {
+    // For other types (time_off), check requesterId
+    if (request.requesterId === approverId) {
+      throw new Error("You cannot approve your own requests");
+    }
   }
 
   // Check authorization: approver must be the assigned approver OR a full_admin for admin steps
@@ -302,92 +335,98 @@ export async function approveStep(
         })
         .where(eq(timesheets.id, request.entityId));
     } else if (request.entityType === "compensation_change") {
-      // Apply compensation change from metadata
+      // Apply compensation change from metadata (atomic with audit log)
       const metadata = request.metadata as any;
       if (metadata) {
-        await db.insert(compensationHistory).values({
-          employeeId: metadata.employeeId,
-          effectiveDate: metadata.effectiveDate,
-          payRate: metadata.payRate || "0",
-          payType: metadata.payType,
-          paySchedule: metadata.paySchedule,
-          currency: metadata.currency || "CAD",
-          changeReason: metadata.changeReason,
-        });
-
-        // Audit log with redaction
-        await createAuditLog({
-          employeeId: approverId,
-          action: "compensation_updated",
-          entityType: "employee",
-          entityId: metadata.employeeId.toString(),
-          changes: {
+        await db.transaction(async (tx) => {
+          await tx.insert(compensationHistory).values({
             employeeId: metadata.employeeId,
-            payRate: metadata.payRate,
+            effectiveDate: metadata.effectiveDate,
+            payRate: metadata.payRate || "0",
             payType: metadata.payType,
             paySchedule: metadata.paySchedule,
-            currency: metadata.currency,
-            effectiveDate: metadata.effectiveDate,
+            currency: metadata.currency || "CAD",
             changeReason: metadata.changeReason,
-            approvalRequestId: request.id,
-            approvedBy: approverId,
-          },
+          });
+
+          // Audit log with redaction (atomic with compensation insert)
+          await createAuditLog({
+            employeeId: approverId,
+            action: "compensation_updated",
+            entityType: "employee",
+            entityId: metadata.employeeId.toString(),
+            changes: {
+              employeeId: metadata.employeeId,
+              payRate: metadata.payRate,
+              payType: metadata.payType,
+              paySchedule: metadata.paySchedule,
+              currency: metadata.currency,
+              effectiveDate: metadata.effectiveDate,
+              changeReason: metadata.changeReason,
+              approvalRequestId: request.id,
+              approvedBy: approverId,
+            },
+            tx,
+          });
         });
       }
     } else if (request.entityType === "job_info_change") {
-      // Apply job info change from metadata
+      // Apply job info change from metadata (atomic with audit log)
       const metadata = request.metadata as any;
       if (metadata) {
-        // Build employee updates from metadata
-        const employeeUpdates: any = {
-          updatedAt: new Date(),
-        };
-        
-        // Map job info fields to employee record
-        if (metadata.jobTitle !== undefined) employeeUpdates.jobTitle = metadata.jobTitle;
-        if (metadata.departmentId !== undefined) employeeUpdates.departmentId = metadata.departmentId;
-        if (metadata.divisionId !== undefined) employeeUpdates.divisionId = metadata.divisionId;
-        if (metadata.locationId !== undefined) employeeUpdates.locationId = metadata.locationId;
-        if (metadata.managerId !== undefined) employeeUpdates.managerId = metadata.managerId;
-        
-        // Update employee record
-        if (Object.keys(employeeUpdates).length > 1) {
-          await db
-            .update(employees)
-            .set(employeeUpdates)
-            .where(eq(employees.id, metadata.employeeId));
-        }
-        
-        // Record in job history (only fields that exist in job_history schema)
-        await db.insert(jobHistory).values({
-          employeeId: metadata.employeeId,
-          effectiveDate: metadata.effectiveDate,
-          jobTitle: metadata.jobTitle || null,
-          departmentId: metadata.departmentId || null,
-          divisionId: metadata.divisionId || null,
-          locationId: metadata.locationId || null,
-          managerId: metadata.managerId || null,
-          comment: metadata.changeReason || null,
-        });
-
-        // Audit log
-        await createAuditLog({
-          employeeId: approverId,
-          action: "job_info_updated",
-          entityType: "employee",
-          entityId: metadata.employeeId.toString(),
-          changes: {
+        await db.transaction(async (tx) => {
+          // Build employee updates from metadata
+          const employeeUpdates: any = {
+            updatedAt: new Date(),
+          };
+          
+          // Map job info fields to employee record
+          if (metadata.jobTitle !== undefined) employeeUpdates.jobTitle = metadata.jobTitle;
+          if (metadata.departmentId !== undefined) employeeUpdates.departmentId = metadata.departmentId;
+          if (metadata.divisionId !== undefined) employeeUpdates.divisionId = metadata.divisionId;
+          if (metadata.locationId !== undefined) employeeUpdates.locationId = metadata.locationId;
+          if (metadata.managerId !== undefined) employeeUpdates.managerId = metadata.managerId;
+          
+          // Update employee record
+          if (Object.keys(employeeUpdates).length > 1) {
+            await tx
+              .update(employees)
+              .set(employeeUpdates)
+              .where(eq(employees.id, metadata.employeeId));
+          }
+          
+          // Record in job history (only fields that exist in job_history schema)
+          await tx.insert(jobHistory).values({
             employeeId: metadata.employeeId,
-            jobTitle: metadata.jobTitle,
-            departmentId: metadata.departmentId,
-            divisionId: metadata.divisionId,
-            locationId: metadata.locationId,
-            managerId: metadata.managerId,
             effectiveDate: metadata.effectiveDate,
-            changeReason: metadata.changeReason,
-            approvalRequestId: request.id,
-            approvedBy: approverId,
-          },
+            jobTitle: metadata.jobTitle || null,
+            departmentId: metadata.departmentId || null,
+            divisionId: metadata.divisionId || null,
+            locationId: metadata.locationId || null,
+            managerId: metadata.managerId || null,
+            comment: metadata.changeReason || null,
+          });
+
+          // Audit log (atomic with job info updates)
+          await createAuditLog({
+            employeeId: approverId,
+            action: "job_info_updated",
+            entityType: "employee",
+            entityId: metadata.employeeId.toString(),
+            changes: {
+              employeeId: metadata.employeeId,
+              jobTitle: metadata.jobTitle,
+              departmentId: metadata.departmentId,
+              divisionId: metadata.divisionId,
+              locationId: metadata.locationId,
+              managerId: metadata.managerId,
+              effectiveDate: metadata.effectiveDate,
+              changeReason: metadata.changeReason,
+              approvalRequestId: request.id,
+              approvedBy: approverId,
+            },
+            tx,
+          });
         });
       }
     }
@@ -423,6 +462,77 @@ export async function rejectStep(
   approverId: number,
   comments?: string
 ) {
+  // Fetch the step and request to verify authorization
+  const [stepData] = await db
+    .select({
+      step: approvalRequestSteps,
+      request: approvalRequests,
+      workflowStep: approvalWorkflowSteps,
+    })
+    .from(approvalRequestSteps)
+    .innerJoin(approvalRequests, eq(approvalRequestSteps.approvalRequestId, approvalRequests.id))
+    .innerJoin(
+      approvalWorkflowSteps,
+      and(
+        eq(approvalWorkflowSteps.workflowId, approvalRequests.workflowId),
+        eq(approvalWorkflowSteps.stepOrder, approvalRequestSteps.stepOrder)
+      )
+    )
+    .where(
+      and(
+        eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+        eq(approvalRequestSteps.stepOrder, stepOrder)
+      )
+    )
+    .limit(1);
+
+  if (!stepData) {
+    throw new Error("Approval step not found");
+  }
+
+  const { step, request, workflowStep } = stepData;
+
+  if (step.status !== "pending") {
+    throw new Error("Step has already been processed");
+  }
+
+  // Verify this is the current step (no earlier pending steps)
+  const earlierPendingSteps = await db
+    .select()
+    .from(approvalRequestSteps)
+    .where(
+      and(
+        eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+        eq(approvalRequestSteps.status, "pending"),
+        sql`${approvalRequestSteps.stepOrder} < ${stepOrder}`
+      )
+    )
+    .limit(1);
+
+  if (earlierPendingSteps.length > 0) {
+    throw new Error("Cannot reject this step: earlier steps are still pending");
+  }
+
+  // Verify approver is authorized
+  const [approver] = await db
+    .select()
+    .from(employees)
+    .where(eq(employees.id, approverId))
+    .limit(1);
+
+  if (!approver) {
+    throw new Error("Approver not found");
+  }
+
+  // Check authorization
+  const isAssignedApprover = step.approverId === approverId;
+  const isFullAdmin = approver.accessLevel === "full_admin";
+  const isAdminStepWithFullAdmin = workflowStep.approverRole === "full_admin" && isFullAdmin;
+
+  if (!isAssignedApprover && !isAdminStepWithFullAdmin) {
+    throw new Error("You are not authorized to reject this step");
+  }
+
   // Update the step
   await db
     .update(approvalRequestSteps)
@@ -440,11 +550,10 @@ export async function rejectStep(
     );
 
   // Mark request as rejected
-  const [request] = await db
+  await db
     .update(approvalRequests)
     .set({ status: "rejected" })
-    .where(eq(approvalRequests.id, approvalRequestId))
-    .returning();
+    .where(eq(approvalRequests.id, approvalRequestId));
 
   // Update entity status
   if (request.entityType === "time_off_request") {

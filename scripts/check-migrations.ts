@@ -39,6 +39,37 @@ function checkAllMigrationsInJournal() {
   console.log(`✅ All ${sqlFiles.length} migration files are in journal`);
 }
 
+function checkMonotonicTimestamps() {
+  console.log("\nChecking migration timestamps are monotonic...");
+
+  const journal = JSON.parse(fs.readFileSync(JOURNAL_PATH, "utf-8"));
+  const entries = journal.entries;
+
+  let prevWhen = 0;
+  const errors: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.when <= prevWhen) {
+      errors.push(
+        `Migration ${entry.tag} has timestamp ${entry.when} which is not greater than previous ${prevWhen}`
+      );
+    }
+    prevWhen = entry.when;
+  }
+
+  if (errors.length > 0) {
+    console.error("❌ ERROR: Non-monotonic migration timestamps detected:");
+    errors.forEach((e) => console.error(`  - ${e}`));
+    console.error(
+      "\nThis will cause drizzle to skip migrations! Each migration's 'when' must be > all previous."
+    );
+    console.error("Regenerate the problematic migration with drizzle-kit.");
+    process.exit(1);
+  }
+
+  console.log("✅ All migration timestamps are monotonic");
+}
+
 function checkNoPendingMigrations() {
   console.log("\nChecking for pending schema changes...");
 
@@ -89,6 +120,7 @@ function checkNoPendingMigrations() {
 
 // Run checks
 checkAllMigrationsInJournal();
+checkMonotonicTimestamps();
 checkNoPendingMigrations();
 
 console.log("\n✅ All migration checks passed!");

@@ -81,6 +81,7 @@ export async function createAuditLog({
   changes,
   ipAddress,
   userAgent,
+  tx,
 }: {
   employeeId: number;
   action: string;
@@ -89,11 +90,13 @@ export async function createAuditLog({
   changes?: any;
   ipAddress?: string;
   userAgent?: string;
+  tx?: any; // Transaction object from db.transaction()
 }) {
   // Redact sensitive fields before storing
   const redactedChanges = changes ? redactSensitiveFields(changes) : null;
 
-  await db.insert(auditLogs).values({
+  const dbOrTx = tx || db;
+  await dbOrTx.insert(auditLogs).values({
     employeeId,
     action,
     entityType,
