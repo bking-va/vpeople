@@ -1,18 +1,40 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { employees, departments, locations } from "@/lib/db/schema";
+import { employees, departments, locations, peopleViews } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Mail, Phone, MapPin, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Mail, Phone, MapPin, Users, Table2, Download } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { PeopleViewSelector } from "@/components/people-view-selector";
 
-export default async function PeoplePage() {
+export default async function PeoplePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
     redirect("/auth/signin");
   }
+
+  const { view: selectedViewId } = await searchParams;
+
+  const [employee] = await db.query.employees.findMany({
+    where: (employees, { eq }) => eq(employees.email, session.user.email),
+    limit: 1,
+  });
+
+  if (!employee) {
+    redirect("/auth/signin");
+  }
+
+  const views = await db
+    .select()
+    .from(peopleViews)
+    .where(eq(peopleViews.userId, employee.id));
 
   const allEmployees = await db
     .select({
@@ -59,6 +81,21 @@ export default async function PeoplePage() {
           <p className="text-muted-foreground">
             {allEmployees.length} active employees
           </p>
+        </div>
+        <div className="flex gap-2">
+          <PeopleViewSelector views={views} />
+          <Link href="/people/directory">
+            <Button variant="outline">
+              <Table2 className="mr-2 h-4 w-4" />
+              Table View
+            </Button>
+          </Link>
+          <Link href="/api/reports/export?type=employees">
+            <Button variant="outline">
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
+          </Link>
         </div>
       </div>
 

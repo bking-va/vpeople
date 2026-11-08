@@ -1,133 +1,278 @@
-import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
+"use client";
+
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clock, Calendar, CheckCircle, PlayCircle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { ClockWidget } from "@/components/clock-widget";
+import { Clock, Calendar, CheckCircle, XCircle } from "lucide-react";
 
-export default async function TimeTrackingPage() {
-  const session = await auth();
-  if (!session?.user) {
-    redirect("/auth/signin");
-  }
+export default function TimeTrackingPage() {
+  const [timesheets, setTimesheets] = useState<any[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
+  const [showSubmitForm, setShowSubmitForm] = useState(false);
+  const [weekStart, setWeekStart] = useState("");
+  const [weekEnd, setWeekEnd] = useState("");
+  const [totalHours, setTotalHours] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isAdmin = session.user.role === "admin" || session.user.role === "full_admin";
+  useEffect(() => {
+    fetchTimesheets();
+    fetchPendingApprovals();
+  }, []);
+
+  const fetchTimesheets = async () => {
+    try {
+      const response = await fetch("/api/time-tracking/timesheets");
+      if (response.ok) {
+        const data = await response.json();
+        setTimesheets(data.timesheets || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch timesheets:", error);
+    }
+  };
+
+  const fetchPendingApprovals = async () => {
+    try {
+      const response = await fetch("/api/time-tracking/timesheets?status=submitted");
+      if (response.ok) {
+        const data = await response.json();
+        setPendingApprovals(data.timesheets || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch approvals:", error);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/time-tracking/timesheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weekStartDate: weekStart,
+          weekEndDate: weekEnd,
+          totalHours: parseFloat(totalHours),
+        }),
+      });
+
+      if (response.ok) {
+        setShowSubmitForm(false);
+        setWeekStart("");
+        setWeekEnd("");
+        setTotalHours("");
+        await fetchTimesheets();
+        alert("Timesheet submitted successfully!");
+      } else {
+        alert("Failed to submit timesheet");
+      }
+    } catch (error) {
+      console.error("Submission failed:", error);
+      alert("Submission failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleApproval = async (timesheetId: number, action: "approve" | "reject") => {
+    try {
+      const response = await fetch(`/api/time-tracking/timesheets/${timesheetId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+
+      if (response.ok) {
+        await fetchPendingApprovals();
+        alert(`Timesheet ${action}d successfully`);
+      } else {
+        alert(`Failed to ${action} timesheet`);
+      }
+    } catch (error) {
+      console.error("Approval failed:", error);
+      alert("Approval failed");
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "approved":
+        return <Badge variant="default">Approved</Badge>;
+      case "submitted":
+        return <Badge variant="outline">Pending</Badge>;
+      case "rejected":
+        return <Badge variant="destructive">Rejected</Badge>;
+      default:
+        return <Badge variant="secondary">Draft</Badge>;
+    }
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Time & Attendance</h1>
-          <p className="text-muted-foreground">
-            Track time, manage timesheets, and approve hours
-          </p>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold">Time & Attendance</h1>
+        <p className="text-muted-foreground">
+          Track your hours and manage timesheets
+        </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Hours This Week</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0.0</div>
-            <p className="text-xs text-muted-foreground">Out of 40.0 hours</p>
-          </CardContent>
-        </Card>
+      <div className="grid gap-6 md:grid-cols-2">
+        <ClockWidget />
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Today</CardTitle>
-            <PlayCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0.0</div>
-            <p className="text-xs text-muted-foreground">Hours today</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Status</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <Badge variant="outline">Clocked Out</Badge>
-            <p className="text-xs text-muted-foreground mt-1">Not tracking</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Overtime</CardTitle>
+            <CardTitle className="text-sm font-medium">Quick Stats</CardTitle>
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0.0</div>
-            <p className="text-xs text-muted-foreground">This period</p>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">This Week</span>
+                <span className="text-sm font-bold">40.0 hours</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-muted-foreground">This Month</span>
+                <span className="text-sm font-bold">160.0 hours</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Time Clock</CardTitle>
-          <CardDescription>Clock in and out for your shift</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="text-4xl font-bold mb-6">
-              {new Date().toLocaleTimeString("en-US", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </div>
-            <div className="flex gap-3">
-              <Button size="lg" className="w-32">
-                <PlayCircle className="h-5 w-5 mr-2" />
-                Clock In
-              </Button>
-              <Button size="lg" variant="outline" className="w-32" disabled>
-                <Clock className="h-5 w-5 mr-2" />
-                Clock Out
-              </Button>
-            </div>
-            <p className="text-sm text-muted-foreground mt-4">
-              Currently clocked out
-            </p>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>My Timesheets</CardTitle>
+            <CardDescription>Submit and track your timesheets</CardDescription>
           </div>
+          <Button onClick={() => setShowSubmitForm(!showSubmitForm)}>
+            Submit Timesheet
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {showSubmitForm && (
+            <form onSubmit={handleSubmit} className="space-y-4 p-4 border rounded-lg">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="weekStart">Week Start</Label>
+                  <Input
+                    id="weekStart"
+                    type="date"
+                    value={weekStart}
+                    onChange={(e) => setWeekStart(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="weekEnd">Week End</Label>
+                  <Input
+                    id="weekEnd"
+                    type="date"
+                    value={weekEnd}
+                    onChange={(e) => setWeekEnd(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="totalHours">Total Hours</Label>
+                <Input
+                  id="totalHours"
+                  type="number"
+                  step="0.5"
+                  value={totalHours}
+                  onChange={(e) => setTotalHours(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? "Submitting..." : "Submit"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowSubmitForm(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {timesheets.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">
+              No timesheets yet
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {timesheets.map((sheet) => (
+                <div
+                  key={sheet.id}
+                  className="flex items-center justify-between p-3 border rounded-lg"
+                >
+                  <div>
+                    <p className="font-medium">
+                      Week of {new Date(sheet.weekStartDate).toLocaleDateString()}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {sheet.totalHours} hours
+                    </p>
+                  </div>
+                  {getStatusBadge(sheet.status)}
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Weekly Timesheet</CardTitle>
-          <CardDescription>Your time entries for this week</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-12">
-            <Calendar className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Time Entries</h3>
-            <p className="text-muted-foreground">
-              Clock in to start tracking your time
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {isAdmin && (
+      {pendingApprovals.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Pending Approvals</CardTitle>
-            <CardDescription>Timesheets awaiting manager approval</CardDescription>
+            <CardDescription>Review and approve team timesheets</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-8">
-              <CheckCircle className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">
-                No timesheets pending approval
-              </p>
+            <div className="space-y-3">
+              {pendingApprovals.map((sheet) => (
+                <div
+                  key={sheet.id}
+                  className="flex items-center justify-between p-3 border rounded-lg"
+                >
+                  <div>
+                    <p className="font-medium">
+                      Week of {new Date(sheet.weekStartDate).toLocaleDateString()}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {sheet.totalHours} hours • Submitted {new Date(sheet.submittedAt || sheet.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleApproval(sheet.id, "approve")}
+                    >
+                      <CheckCircle className="mr-1 h-4 w-4" />
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleApproval(sheet.id, "reject")}
+                    >
+                      <XCircle className="mr-1 h-4 w-4" />
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>

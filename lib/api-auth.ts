@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { employees } from "@/lib/db/schema";
+import { employees, accessLevels } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 
@@ -10,8 +10,14 @@ export interface ApiKeyAuth {
   permissions: {
     canViewCompensation: boolean;
     canEditCompensation: boolean;
+    canViewSensitivePersonalInfo: boolean;
+    canEditSensitivePersonalInfo: boolean;
+    canViewBankInfo: boolean;
+    canEditBankInfo: boolean;
+    canManageUsers: boolean;
     canManageSettings: boolean;
     canApproveTimeOff: boolean;
+    canApproveCompensationChanges: boolean;
   };
 }
 
@@ -40,15 +46,17 @@ export async function authenticateApiKey(
     // Hash the provided API key
     const hashedKey = crypto.createHash("sha256").update(apiKey).digest("hex");
 
-    // Look up employee by hashed API key
+    // Look up employee by hashed API key and join with access levels
     const [employee] = await db
       .select({
         id: employees.id,
         email: employees.email,
         apiKeyHash: employees.apiKeyHash,
         accessLevel: employees.accessLevel,
+        permissions: accessLevels,
       })
       .from(employees)
+      .leftJoin(accessLevels, eq(employees.accessLevel, accessLevels.code))
       .where(eq(employees.apiKeyHash, hashedKey))
       .limit(1);
 
@@ -56,22 +64,75 @@ export async function authenticateApiKey(
       return null;
     }
 
-    // Get permissions from access level
-    // For now, simplified - in production, join with access_levels table
-    const isAdmin = employee.accessLevel === "full_admin";
+    // Return full permissions from access level
+    const perms = employee.permissions || {
+      canViewCompensation: false,
+      canEditCompensation: false,
+      canViewSensitivePersonalInfo: false,
+      canEditSensitivePersonalInfo: false,
+      canViewBankInfo: false,
+      canEditBankInfo: false,
+      canManageUsers: false,
+      canManageSettings: false,
+      canApproveTimeOff: false,
+      canApproveCompensationChanges: false,
+    };
 
     return {
       employeeId: employee.id,
       email: employee.email,
       permissions: {
-        canViewCompensation: isAdmin,
-        canEditCompensation: isAdmin,
-        canManageSettings: isAdmin,
-        canApproveTimeOff: isAdmin,
+        canViewCompensation: perms.canViewCompensation,
+        canEditCompensation: perms.canEditCompensation,
+        canViewSensitivePersonalInfo: perms.canViewSensitivePersonalInfo,
+        canEditSensitivePersonalInfo: perms.canEditSensitivePersonalInfo,
+        canViewBankInfo: perms.canViewBankInfo,
+        canEditBankInfo: perms.canEditBankInfo,
+        canManageUsers: perms.canManageUsers,
+        canManageSettings: perms.canManageSettings,
+        canApproveTimeOff: perms.canApproveTimeOff,
+        canApproveCompensationChanges: perms.canApproveCompensationChanges,
       },
     };
   } catch (error) {
     console.error("API key authentication error:", error);
     return null;
   }
+}
+
+/**
+ * Filter employee object to remove fields the API key owner cannot view
+ */
+export function filterEmployeeFields(employee: any, permissions: ApiKeyAuth["permissions"]) {
+  const filtered: any = { ...employee };
+
+  // Remove compensation if not permitted
+  if (!permissions.canViewCompensation) {
+    delete filtered.salary;
+    delete filtered.hourlyRate;
+    delete filtered.payRate;
+    delete filtered.currency;
+    delete filtered.bonusAmount;
+    delete filtered.bonusDate;
+    delete filtered.equityShares;
+    delete filtered.equityValue;
+  }
+
+  // Remove SIN/SSN if not permitted
+  if (!permissions.canViewSensitivePersonalInfo) {
+    delete filtered.sin;
+    delete filtered.ssn;
+    delete filtered.passportNumber;
+    delete filtered.nationalId;
+  }
+
+  // Remove bank info if not permitted
+  if (!permissions.canViewBankInfo) {
+    delete filtered.bankName;
+    delete filtered.bankAccountNumber;
+    delete filtered.bankRoutingNumber;
+    delete filtered.bankSwiftCode;
+  }
+
+  return filtered;
 }

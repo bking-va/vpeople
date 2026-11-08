@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, departments } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { authenticateApiKey } from "@/lib/api-auth";
+import { eq, or, inArray } from "drizzle-orm";
+import { authenticateApiKey, filterEmployeeFields } from "@/lib/api-auth";
 
 export async function GET(request: NextRequest) {
   // BambooHR-compatible employee directory API
@@ -17,36 +17,66 @@ export async function GET(request: NextRequest) {
   }
   
   try {
-    const allEmployees = await db
-      .select({
-        id: employees.id,
-        employeeNumber: employees.employeeNumber,
-        firstName: employees.firstName,
-        lastName: employees.lastName,
-        email: employees.email,
-        jobTitle: employees.jobTitle,
-        department: departments.name,
-        location: employees.locationId,
-        workPhone: employees.workPhone,
-        hireDate: employees.hireDate,
-      })
-      .from(employees)
-      .leftJoin(departments, eq(employees.departmentId, departments.id));
+    // Determine scope: admins see all, managers see their reports, employees see only themselves
+    let scopedEmployees: any[];
+    
+    if (auth.permissions.canManageUsers) {
+      // Full access - can see all employees
+      scopedEmployees = await db
+        .select()
+        .from(employees)
+        .leftJoin(departments, eq(employees.departmentId, departments.id));
+    } else {
+      // Get direct reports if manager
+      const directReports = await db
+        .select({ id: employees.id })
+        .from(employees)
+        .where(eq(employees.managerId, auth.employeeId));
+      
+      const reportIds = directReports.map(r => r.id);
+      
+      if (reportIds.length > 0) {
+        // Manager: self + direct reports
+        scopedEmployees = await db
+          .select()
+          .from(employees)
+          .leftJoin(departments, eq(employees.departmentId, departments.id))
+          .where(or(
+            eq(employees.id, auth.employeeId),
+            inArray(employees.id, reportIds)
+          ));
+      } else {
+        // Regular employee: only self
+        scopedEmployees = await db
+          .select()
+          .from(employees)
+          .leftJoin(departments, eq(employees.departmentId, departments.id))
+          .where(eq(employees.id, auth.employeeId));
+      }
+    }
 
     const bambooFormat = {
-      employees: allEmployees.map((emp) => ({
-        id: emp.id.toString(),
-        employeeNumber: emp.employeeNumber,
-        firstName: emp.firstName,
-        lastName: emp.lastName,
-        displayName: `${emp.firstName} ${emp.lastName}`,
-        jobTitle: emp.jobTitle,
-        department: emp.department,
-        location: emp.location?.toString(),
-        workEmail: emp.email,
-        workPhone: emp.workPhone,
-        hireDate: emp.hireDate,
-      })),
+      employees: scopedEmployees.map((row) => {
+        const emp = row.employees || row;
+        const dept = row.departments;
+        
+        // Filter sensitive fields based on permissions
+        const filtered = filterEmployeeFields(emp, auth.permissions);
+        
+        return {
+          id: filtered.id.toString(),
+          employeeNumber: filtered.employeeNumber,
+          firstName: filtered.firstName,
+          lastName: filtered.lastName,
+          displayName: `${filtered.firstName} ${filtered.lastName}`,
+          jobTitle: filtered.jobTitle,
+          department: dept?.name,
+          location: filtered.locationId?.toString(),
+          workEmail: filtered.email,
+          workPhone: filtered.workPhone,
+          hireDate: filtered.hireDate,
+        };
+      }),
     };
 
     return NextResponse.json(bambooFormat);
