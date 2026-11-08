@@ -1020,6 +1020,126 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.insert(schema.employeeTeams).values(teamData);
   }
 
+  console.log("Creating job openings...");
+
+  const existingJobOpenings = await db
+    .select()
+    .from(schema.jobOpenings);
+
+  let jobOpeningsCreated = 0;
+  if (existingJobOpenings.length === 0) {
+    const openingsData = [
+      {
+        title: "Senior Software Engineer",
+        departmentId: tech.id,
+        locationId: saskatoon.id,
+        hiringLeadId: executives[1]?.id || ceo.id,
+        status: "open" as const,
+        employmentType: "full_time",
+        description: "We are looking for an experienced software engineer to join our growing team. You will work on building scalable web applications using modern technologies.",
+        requirements: "• 5+ years of software development experience\n• Strong knowledge of React, TypeScript, and Node.js\n• Experience with PostgreSQL and cloud platforms\n• Excellent communication skills",
+        openDate: "2026-11-01",
+      },
+      {
+        title: "Product Designer",
+        departmentId: product.id,
+        locationId: remote.id,
+        hiringLeadId: ceo.id,
+        status: "open" as const,
+        employmentType: "full_time",
+        description: "Join our product team to create beautiful, intuitive user experiences. You'll work closely with engineers and product managers to bring ideas to life.",
+        requirements: "• 3+ years of product design experience\n• Proficiency in Figma and design systems\n• Strong portfolio demonstrating UX/UI work\n• Understanding of front-end technologies",
+        openDate: "2026-10-15",
+      },
+      {
+        title: "Customer Success Manager",
+        departmentId: services.id,
+        locationId: bocaRaton.id,
+        hiringLeadId: executives[3]?.id || ceo.id,
+        status: "open" as const,
+        employmentType: "full_time",
+        description: "Help our customers achieve their goals by providing exceptional support and guidance. Build strong relationships and drive product adoption.",
+        requirements: "• 2+ years in customer success or account management\n• Excellent communication and problem-solving skills\n• Experience with B2B SaaS products\n• Ability to manage multiple accounts",
+        openDate: "2026-11-05",
+      },
+      {
+        title: "Data Analyst",
+        departmentId: tech.id,
+        locationId: chennai.id,
+        hiringLeadId: executives[1]?.id || ceo.id,
+        status: "draft" as const,
+        employmentType: "full_time",
+        description: "Analyze data to drive business insights and inform product decisions. Work with large datasets and build dashboards.",
+        requirements: "• 2+ years of data analysis experience\n• SQL expertise required\n• Experience with BI tools (Tableau, Looker, etc.)\n• Python or R knowledge is a plus",
+      },
+    ];
+
+    const insertedOpenings = await db
+      .insert(schema.jobOpenings)
+      .values(openingsData)
+      .returning();
+    jobOpeningsCreated = insertedOpenings.length;
+
+    console.log("Creating candidates...");
+
+    const candidatesData = [
+      {
+        jobOpeningId: insertedOpenings[0].id,
+        firstName: "Sarah",
+        lastName: "Johnson",
+        email: "sarah.johnson@example.com",
+        phone: "+1-416-555-0123",
+        source: "linkedin" as const,
+        stage: "interview" as const,
+        rating: 4,
+        appliedAt: new Date("2026-11-02"),
+      },
+      {
+        jobOpeningId: insertedOpenings[0].id,
+        firstName: "Michael",
+        lastName: "Chen",
+        email: "michael.chen@example.com",
+        phone: "+1-647-555-0456",
+        source: "referral" as const,
+        stage: "offer" as const,
+        rating: 5,
+        appliedAt: new Date("2026-11-01"),
+      },
+      {
+        jobOpeningId: insertedOpenings[0].id,
+        firstName: "Emily",
+        lastName: "Rodriguez",
+        email: "emily.rodriguez@example.com",
+        source: "indeed" as const,
+        stage: "new" as const,
+        appliedAt: new Date("2026-11-06"),
+      },
+      {
+        jobOpeningId: insertedOpenings[1].id,
+        firstName: "Alex",
+        lastName: "Kim",
+        email: "alex.kim@example.com",
+        source: "linkedin" as const,
+        stage: "phone_screen" as const,
+        rating: 3,
+        appliedAt: new Date("2026-10-20"),
+      },
+      {
+        jobOpeningId: insertedOpenings[2].id,
+        firstName: "Jessica",
+        lastName: "Taylor",
+        email: "jessica.taylor@example.com",
+        phone: "+1-561-555-0789",
+        source: "direct" as const,
+        stage: "interview" as const,
+        rating: 4,
+        appliedAt: new Date("2026-11-07"),
+      },
+    ];
+
+    await db.insert(schema.candidates).values(candidatesData);
+  }
+
   console.log("✅ Seeding completed!");
   console.log(
     `Created ${allEmployees.length + executives.length + 1} employees`
@@ -1028,6 +1148,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   console.log(`Created ${balances.length} time off balances`);
   console.log(`Created ${requests.length} time off requests`);
   console.log(`Created ${taskData.length} onboarding tasks`);
+  console.log(`Created ${jobOpeningsCreated} job openings`);
 
   return {
     success: true,
@@ -1037,6 +1158,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       balances: balances.length,
       requests: requests.length,
       tasks: taskData.length,
+      jobOpenings: jobOpeningsCreated,
     },
   };
 }

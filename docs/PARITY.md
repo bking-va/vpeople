@@ -102,7 +102,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Export to CSV
 - [x] Org chart (basic)
 - [ ] Org chart export
-- [ ] Saved views
+- [ ] Saved views (UI only, not stored)
+- [ ] Column chooser
 - [ ] New Employee wizard
 - [ ] Terminate employee flow
   - [ ] Termination reasons
@@ -130,12 +131,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Custom lists
 
 ### Access Levels
-- [x] Basic RBAC (employee, manager, admin, full_admin)
-- [x] Settings page UI showing access levels
+- [x] Basic RBAC (employee, manager, admin, full_admin) - hardcoded in session
+- [ ] Settings page UI (read-only shell, not editable)
+- [ ] Access levels stored in DB and editable
 - [ ] No Access level
 - [ ] Post-Employment level
 - [ ] Custom levels (scoped by region/department)
-- [x] Per-field-group permissions (basic)
+- [x] Per-field-group permissions (basic) - hardcoded checks, not configurable
   - [x] Compensation restrictions
   - [x] SIN/SSN restrictions
   - [x] Bank data restrictions
@@ -143,12 +145,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Access history log
 
 ### Approval Workflows
-- [x] Settings page UI showing workflow config
+- [ ] Settings page UI (read-only shell, not editable)
+- [ ] Workflows stored in DB and editable
 - [ ] Information Updates (by location)
-- [x] Time Off (reports-to) - basic
-- [ ] Compensation changes
-- [ ] Employment Status changes
-- [ ] Job Info changes
+- [x] Time Off (reports-to) - hardcoded to manager, not configurable
+- [ ] Compensation changes with approval
+- [ ] Employment Status changes with approval
+- [ ] Job Info changes with approval
 - [ ] Promotion workflow
 - [ ] Enable/disable per workflow
 - [ ] Configurable requester and approver paths
@@ -179,11 +182,12 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## 5. Time Off
 
-- [x] Basic policies (partial)
+- [x] Basic policies (seeded, not editable)
+- [ ] Policy management UI (create, edit policies)
 - [ ] Categories
-- [ ] Accrual rules
+- [ ] Accrual rules that run on schedule
 - [ ] Carryover rules
-- [ ] Manual policies
+- [ ] Manual balance adjustments with history
 - [ ] Multi-country policies
   - [ ] Canada
   - [ ] US
@@ -193,10 +197,10 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [ ] Armenia
 - [ ] Holiday calendars per country
 - [ ] Year views
-- [x] Request time off (basic)
-- [x] Approve/deny (basic)
-- [ ] Balance history
-- [ ] Time-off calendar view
+- [ ] Employee request submission with balance check
+- [x] Manager approve/deny actions (basic)
+- [ ] Balance history and audit trail
+- [ ] Who's-out calendar view
 
 ---
 
@@ -219,12 +223,20 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## 7. Hiring (ATS)
 
-- [x] Basic hiring dashboard with metrics
-- [x] Job openings UI (empty state)
-- [x] Application pipeline UI (empty state)
-- [x] Candidate sources UI (empty state)
+- [ ] Dashboard UI (shell only, no real data)
+- [ ] Job openings (not implemented)
+  - [ ] Create, edit, close openings
+  - [ ] Statuses: Draft, Open, On Hold, Filled, Canceled
+  - [ ] Hiring lead assignment
+- [ ] Candidates (not implemented)
+  - [ ] Application form
+  - [ ] Pipeline stage moves
+  - [ ] Notes and ratings
+  - [ ] Offer letters
+- [ ] Seed demo data
 
-### Job Openings
+### Job Openings (TO DO)
+- [ ] Job opening CRUD
 - [ ] Job opening statuses
   - [ ] Draft
   - [ ] Open
@@ -236,7 +248,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Embed code for careers page
 - [ ] Application form
 
-### Candidates
+### Candidates (TO DO)
 - [ ] Candidate management
 - [ ] Filter by status
 - [ ] Filter by rating

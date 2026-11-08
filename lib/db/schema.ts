@@ -515,3 +515,136 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// Hiring / ATS Tables
+
+export const jobOpeningStatusEnum = pgEnum("job_opening_status", [
+  "draft",
+  "open",
+  "on_hold",
+  "filled",
+  "canceled",
+]);
+
+export const candidateStageEnum = pgEnum("candidate_stage", [
+  "new",
+  "phone_screen",
+  "interview",
+  "offer",
+  "hired",
+  "rejected",
+]);
+
+export const candidateSourceEnum = pgEnum("candidate_source", [
+  "linkedin",
+  "indeed",
+  "glassdoor",
+  "referral",
+  "direct",
+  "other",
+]);
+
+export const jobOpenings = pgTable("job_openings", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  departmentId: integer("department_id").references(() => departments.id),
+  locationId: integer("location_id").references(() => locations.id),
+  hiringLeadId: integer("hiring_lead_id").references(() => employees.id),
+  status: jobOpeningStatusEnum("status").default("draft").notNull(),
+  employmentType: text("employment_type").notNull(), // full_time, part_time, contractor
+  description: text("description"),
+  requirements: text("requirements"),
+  openDate: date("open_date"),
+  closeDate: date("close_date"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const candidates = pgTable("candidates", {
+  id: serial("id").primaryKey(),
+  jobOpeningId: integer("job_opening_id")
+    .notNull()
+    .references(() => jobOpenings.id, { onDelete: "cascade" }),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  resumeUrl: text("resume_url"),
+  linkedinUrl: text("linkedin_url"),
+  source: candidateSourceEnum("source").default("other").notNull(),
+  stage: candidateStageEnum("stage").default("new").notNull(),
+  rating: integer("rating"), // 1-5 stars
+  appliedAt: timestamp("applied_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const candidateNotes = pgTable("candidate_notes", {
+  id: serial("id").primaryKey(),
+  candidateId: integer("candidate_id")
+    .notNull()
+    .references(() => candidates.id, { onDelete: "cascade" }),
+  authorId: integer("author_id")
+    .notNull()
+    .references(() => employees.id),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const offerLetters = pgTable("offer_letters", {
+  id: serial("id").primaryKey(),
+  candidateId: integer("candidate_id")
+    .notNull()
+    .references(() => candidates.id, { onDelete: "cascade" }),
+  jobTitle: text("job_title").notNull(),
+  salary: decimal("salary", { precision: 12, scale: 2 }),
+  startDate: date("start_date"),
+  signedAt: timestamp("signed_at"),
+  documentUrl: text("document_url"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const jobOpeningsRelations = relations(jobOpenings, ({ one, many }) => ({
+  department: one(departments, {
+    fields: [jobOpenings.departmentId],
+    references: [departments.id],
+  }),
+  location: one(locations, {
+    fields: [jobOpenings.locationId],
+    references: [locations.id],
+  }),
+  hiringLead: one(employees, {
+    fields: [jobOpenings.hiringLeadId],
+    references: [employees.id],
+  }),
+  candidates: many(candidates),
+}));
+
+export const candidatesRelations = relations(candidates, ({ one, many }) => ({
+  jobOpening: one(jobOpenings, {
+    fields: [candidates.jobOpeningId],
+    references: [jobOpenings.id],
+  }),
+  notes: many(candidateNotes),
+  offerLetter: one(offerLetters),
+}));
+
+export const candidateNotesRelations = relations(candidateNotes, ({ one }) => ({
+  candidate: one(candidates, {
+    fields: [candidateNotes.candidateId],
+    references: [candidates.id],
+  }),
+  author: one(employees, {
+    fields: [candidateNotes.authorId],
+    references: [employees.id],
+  }),
+}));
+
+export const offerLettersRelations = relations(offerLetters, ({ one }) => ({
+  candidate: one(candidates, {
+    fields: [offerLetters.candidateId],
+    references: [candidates.id],
+  }),
+}));

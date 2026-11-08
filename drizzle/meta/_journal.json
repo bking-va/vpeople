@@ -8,6 +8,13 @@
       "when": 1794078881559,
       "tag": "0000_dry_next_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794145362493,
+      "tag": "0001_black_shocker",
+      "breakpoints": true
     }
   ]
 }
