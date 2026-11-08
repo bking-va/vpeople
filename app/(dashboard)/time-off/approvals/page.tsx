@@ -8,6 +8,8 @@ import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TimeOffActions } from "@/components/time-off-actions";
+import { ApprovalStatus } from "@/components/approval-status";
+import { getApprovalRequestForEntity } from "@/lib/approvals";
 
 export default async function TimeOffApprovalsPage() {
   const session = await auth();
@@ -72,6 +74,20 @@ export default async function TimeOffApprovalsPage() {
 
   const pendingRequests = await pendingRequestsQuery;
 
+  // Fetch approval request data for each pending request
+  const requestsWithApprovals = await Promise.all(
+    pendingRequests.map(async (item) => {
+      const approvalData = await getApprovalRequestForEntity(
+        "time_off_request",
+        item.request.id
+      );
+      return {
+        ...item,
+        approvalData,
+      };
+    })
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -85,15 +101,16 @@ export default async function TimeOffApprovalsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Pending Approvals ({pendingRequests.length})</CardTitle>
+          <CardTitle>Pending Approvals ({requestsWithApprovals.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          {pendingRequests.length > 0 ? (
-            <div className="space-y-4">
-              {pendingRequests.map((item) => {
+          {requestsWithApprovals.length > 0 ? (
+            <div className="space-y-6">
+              {requestsWithApprovals.map((item) => {
                 const emp = item.employee;
                 const req = item.request;
                 const policy = item.policy;
+                const approvalData = item.approvalData;
 
                 const empName = emp
                   ? emp.preferredName
@@ -104,32 +121,44 @@ export default async function TimeOffApprovalsPage() {
                 return (
                   <div
                     key={req.id}
-                    className="flex items-center justify-between border-b pb-4 last:border-b-0"
+                    className="border rounded-lg p-4 space-y-3"
                   >
-                    <div className="space-y-1 flex-1">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/people/${emp?.id}`}
-                          className="font-medium text-primary hover:underline"
-                        >
-                          {empName}
-                        </Link>
-                        <Badge variant="secondary">{policy?.name}</Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {formatDate(req.startDate)} - {formatDate(req.endDate)} (
-                        {req.daysRequested} days)
-                      </p>
-                      {req.notes && (
-                        <p className="text-sm text-muted-foreground italic">
-                          Note: {req.notes}
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/people/${emp?.id}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            {empName}
+                          </Link>
+                          <Badge variant="secondary">{policy?.name}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {formatDate(req.startDate)} - {formatDate(req.endDate)} (
+                          {req.daysRequested} days)
                         </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Requested {formatDate(req.createdAt)}
-                      </p>
+                        {req.notes && (
+                          <p className="text-sm text-muted-foreground italic">
+                            Note: {req.notes}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          Requested {formatDate(req.createdAt)}
+                        </p>
+                      </div>
+                      <TimeOffActions requestId={req.id} />
                     </div>
-                    <TimeOffActions requestId={req.id} />
+                    
+                    {approvalData && (
+                      <div className="border-t pt-3">
+                        <ApprovalStatus
+                          steps={approvalData.steps}
+                          currentStep={approvalData.request.currentStep}
+                          overallStatus={approvalData.request.status}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
