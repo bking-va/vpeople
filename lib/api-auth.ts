@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { employees, accessLevels } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import crypto from "crypto";
 
 export interface ApiKeyAuth {
@@ -56,7 +56,7 @@ export async function authenticateApiKey(
         permissions: accessLevels,
       })
       .from(employees)
-      .leftJoin(accessLevels, eq(employees.accessLevel, accessLevels.code))
+      .leftJoin(accessLevels, sql`${employees.accessLevel}::text = ${accessLevels.code}`)
       .where(eq(employees.apiKeyHash, hashedKey))
       .limit(1);
 

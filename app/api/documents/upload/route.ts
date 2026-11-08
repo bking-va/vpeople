@@ -4,6 +4,7 @@ import { put } from "@vercel/blob";
 import { db } from "@/lib/db";
 import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getUserPermissions } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
   }
 
   const [employee] = await db
-    .select({ id: employees.id })
+    .select({ id: employees.id, managerId: employees.managerId })
     .from(employees)
     .where(eq(employees.email, session.user.email))
     .limit(1);
@@ -38,6 +39,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const targetEmployeeId = parseInt(employeeId);
+
+    // Permission check: Can only attach to self, direct reports, or if admin/HR
+    const permissions = await getUserPermissions(session.user.email);
+    const isSelf = targetEmployeeId === employee.id;
+
+    // Check if target employee reports to uploader
+    let isDirectReport = false;
+    if (!isSelf && !permissions.canManageUsers) {
+      const [targetEmployee] = await db
+        .select({ managerId: employees.managerId })
+        .from(employees)
+        .where(eq(employees.id, targetEmployeeId))
+        .limit(1);
+      
+      isDirectReport = targetEmployee?.managerId === employee.id;
+    }
+
+    if (!isSelf && !isDirectReport && !permissions.canManageUsers) {
+      return NextResponse.json(
+        { error: "Forbidden: You can only upload documents for yourself, your direct reports, or you must be an admin" },
+        { status: 403 }
+      );
+    }
+
     // Validate file size (10MB max)
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
@@ -48,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     // Upload to Vercel Blob with private access
     const blob = await put(file.name, file, {
-      access: "public", // We'll use signed URLs for access control
+      access: "private", // Private store requires signed URLs for access
       addRandomSuffix: true,
     });
 

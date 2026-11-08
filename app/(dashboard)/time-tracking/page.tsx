@@ -12,6 +12,8 @@ import { Clock, Calendar, CheckCircle, XCircle } from "lucide-react";
 export default function TimeTrackingPage() {
   const [timesheets, setTimesheets] = useState<any[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
+  const [weekHours, setWeekHours] = useState(0);
+  const [monthHours, setMonthHours] = useState(0);
   const [showSubmitForm, setShowSubmitForm] = useState(false);
   const [weekStart, setWeekStart] = useState("");
   const [weekEnd, setWeekEnd] = useState("");
@@ -21,6 +23,7 @@ export default function TimeTrackingPage() {
   useEffect(() => {
     fetchTimesheets();
     fetchPendingApprovals();
+    fetchHoursSummary();
   }, []);
 
   const fetchTimesheets = async () => {
@@ -44,6 +47,19 @@ export default function TimeTrackingPage() {
       }
     } catch (error) {
       console.error("Failed to fetch approvals:", error);
+    }
+  };
+
+  const fetchHoursSummary = async () => {
+    try {
+      const response = await fetch("/api/time-tracking/summary");
+      if (response.ok) {
+        const data = await response.json();
+        setWeekHours(data.weekHours || 0);
+        setMonthHours(data.monthHours || 0);
+      }
+    } catch (error) {
+      console.error("Failed to fetch hours summary:", error);
     }
   };
 
@@ -134,11 +150,11 @@ export default function TimeTrackingPage() {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">This Week</span>
-                <span className="text-sm font-bold">40.0 hours</span>
+                <span className="text-sm font-bold">{weekHours.toFixed(1)} hours</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-muted-foreground">This Month</span>
-                <span className="text-sm font-bold">160.0 hours</span>
+                <span className="text-sm font-bold">{monthHours.toFixed(1)} hours</span>
               </div>
             </div>
           </CardContent>

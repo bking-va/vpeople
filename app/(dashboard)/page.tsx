@@ -26,6 +26,7 @@ import {
   Clock,
   AlertCircle,
 } from "lucide-react";
+import { ClockWidget } from "@/components/clock-widget";
 
 export default async function HomePage() {
   const session = await auth();
@@ -223,6 +224,9 @@ export default async function HomePage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {/* Clock In/Out Widget */}
+        <ClockWidget />
+
         {/* Time Off Balances */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">

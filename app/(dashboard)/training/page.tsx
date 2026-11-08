@@ -35,7 +35,7 @@ export default async function TrainingPage() {
     .where(eq(trainingCompletions.employeeId, employee.id));
 
   const completedCourseIds = new Set(myCompletions.map((c) => c.completion.courseId));
-  const assignedCourses = allCourses.filter((c) => !completedCourseIds.has(c.id));
+  const incompleteCourses = allCourses.filter((c) => !completedCourseIds.has(c.id));
 
   const totalHours = myCompletions.reduce((sum, c) => {
     return sum + parseFloat(c.course?.durationHours || "0");
@@ -57,8 +57,8 @@ export default async function TrainingPage() {
             <BookOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{assignedCourses.length}</div>
-            <p className="text-xs text-muted-foreground">To complete</p>
+            <div className="text-2xl font-bold">{allCourses.length}</div>
+            <p className="text-xs text-muted-foreground">{incompleteCourses.length} incomplete</p>
           </CardContent>
         </Card>
 
@@ -87,13 +87,13 @@ export default async function TrainingPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Available Courses</CardTitle>
+          <CardTitle>All Courses</CardTitle>
           <CardDescription>
-            Training courses available to you
+            Training courses catalog
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {assignedCourses.length === 0 ? (
+          {allCourses.length === 0 ? (
             <div className="text-center py-8">
               <BookOpen className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
               <p className="text-muted-foreground">
@@ -102,36 +102,45 @@ export default async function TrainingPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {assignedCourses.map((course) => (
-                <div
-                  key={course.id}
-                  className="p-4 border rounded-lg hover:bg-accent"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="font-medium">{course.name}</div>
-                      {course.description && (
-                        <div className="text-sm text-muted-foreground mt-1">
-                          {course.description}
+              {allCourses.map((course) => {
+                const isCompleted = completedCourseIds.has(course.id);
+                return (
+                  <div
+                    key={course.id}
+                    className="p-4 border rounded-lg hover:bg-accent"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium">{course.name}</div>
+                        {course.description && (
+                          <div className="text-sm text-muted-foreground mt-1">
+                            {course.description}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          {course.category && (
+                            <Badge variant="outline">{course.category}</Badge>
+                          )}
+                          {course.durationHours && (
+                            <span className="text-sm text-muted-foreground">
+                              {course.durationHours} hours
+                            </span>
+                          )}
+                          {isCompleted && (
+                            <Badge variant="secondary">
+                              <Award className="h-3 w-3 mr-1" />
+                              Completed
+                            </Badge>
+                          )}
                         </div>
-                      )}
-                      <div className="flex items-center gap-2 mt-2">
-                        {course.category && (
-                          <Badge variant="outline">{course.category}</Badge>
-                        )}
-                        {course.durationHours && (
-                          <span className="text-sm text-muted-foreground">
-                            {course.durationHours} hours
-                          </span>
-                        )}
                       </div>
+                      {course.isRequired && !isCompleted && (
+                        <Badge variant="default">Required</Badge>
+                      )}
                     </div>
-                    {course.isRequired && (
-                      <Badge variant="default">Required</Badge>
-                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { head } from "@vercel/blob";
 
 export async function GET(
   request: NextRequest,
@@ -54,12 +55,28 @@ export async function GET(
       );
     }
 
-    // For now, return the direct URL (in production with private blobs, generate signed URL)
-    // With Vercel Blob private access, you'd use: await head(document.fileUrl).then(blob => blob.downloadUrl)
-    return NextResponse.json({
-      url: document.fileUrl,
-      expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour
-    });
+    // Generate signed download URL for private blob
+    if (!document.fileUrl) {
+      return NextResponse.json({
+        url: null,
+        expiresAt: null,
+      });
+    }
+
+    try {
+      const blobInfo = await head(document.fileUrl);
+      return NextResponse.json({
+        url: blobInfo.downloadUrl,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour
+      });
+    } catch (blobError) {
+      console.error("Failed to generate signed URL:", blobError);
+      // Return null if blob doesn't exist yet (e.g., seeded placeholder)
+      return NextResponse.json({
+        url: null,
+        expiresAt: null,
+      });
+    }
   } catch (error: any) {
     console.error("Document download failed:", error);
     return NextResponse.json(

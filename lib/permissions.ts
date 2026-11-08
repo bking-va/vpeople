@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { employees, accessLevels } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export async function getUserPermissions(email: string) {
   const [employee] = await db
@@ -12,7 +12,7 @@ export async function getUserPermissions(email: string) {
     .from(employees)
     .leftJoin(
       accessLevels,
-      eq(employees.accessLevel, accessLevels.code)
+      sql`${employees.accessLevel}::text = ${accessLevels.code}`
     )
     .where(eq(employees.email, email))
     .limit(1);

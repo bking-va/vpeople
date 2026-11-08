@@ -4,14 +4,61 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FileText, FileCheck, Upload, FolderOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { db } from "@/lib/db";
+import { documents, employees } from "@/lib/db/schema";
+import { eq, count, desc, sql } from "drizzle-orm";
+import { formatDate } from "@/lib/utils";
+import Link from "next/link";
 
 export default async function FilesPage() {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
+    redirect("/auth/signin");
+  }
+
+  const [employee] = await db
+    .select({ id: employees.id })
+    .from(employees)
+    .where(eq(employees.email, session.user.email))
+    .limit(1);
+
+  if (!employee) {
     redirect("/auth/signin");
   }
 
   const isAdmin = session.user.role === "admin" || session.user.role === "full_admin";
+
+  // Get document counts
+  const [totalDocsResult] = await db
+    .select({ count: count() })
+    .from(documents);
+
+  const [pendingSignaturesResult] = await db
+    .select({ count: count() })
+    .from(documents)
+    .where(eq(documents.status, "pending_signature"));
+
+  const [myDocsResult] = await db
+    .select({ count: count() })
+    .from(documents)
+    .where(eq(documents.employeeId, employee.id));
+
+  const recentDocs = await db
+    .select({
+      id: documents.id,
+      title: documents.title,
+      category: documents.category,
+      status: documents.status,
+      createdAt: documents.createdAt,
+      employeeId: documents.employeeId,
+    })
+    .from(documents)
+    .orderBy(desc(documents.createdAt))
+    .limit(10);
+
+  const totalDocs = totalDocsResult.count;
+  const pendingSignatures = pendingSignaturesResult.count;
+  const myDocs = myDocsResult.count;
 
   return (
     <div className="space-y-6">
@@ -37,7 +84,7 @@ export default async function FilesPage() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
+            <div className="text-2xl font-bold">{totalDocs}</div>
             <p className="text-xs text-muted-foreground">Across all employees</p>
           </CardContent>
         </Card>
@@ -48,7 +95,7 @@ export default async function FilesPage() {
             <FileCheck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
+            <div className="text-2xl font-bold">{pendingSignatures}</div>
             <p className="text-xs text-muted-foreground">Awaiting signature</p>
           </CardContent>
         </Card>
@@ -59,7 +106,7 @@ export default async function FilesPage() {
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">5</div>
+            <div className="text-2xl font-bold">6</div>
             <p className="text-xs text-muted-foreground">Document types</p>
           </CardContent>
         </Card>
@@ -70,7 +117,7 @@ export default async function FilesPage() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
+            <div className="text-2xl font-bold">{myDocs}</div>
             <p className="text-xs text-muted-foreground">Personal files</p>
           </CardContent>
         </Card>
@@ -129,13 +176,40 @@ export default async function FilesPage() {
           <CardDescription>Latest uploaded files</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12">
-            <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Documents</h3>
-            <p className="text-muted-foreground">
-              Uploaded documents will appear here
-            </p>
-          </div>
+          {recentDocs.length === 0 ? (
+            <div className="text-center py-12">
+              <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Documents</h3>
+              <p className="text-muted-foreground">
+                Uploaded documents will appear here
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {recentDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent"
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <Link
+                        href={`/people/${doc.employeeId}#documents`}
+                        className="font-medium hover:underline"
+                      >
+                        {doc.title}
+                      </Link>
+                      <p className="text-sm text-muted-foreground">
+                        {doc.category} • {formatDate(doc.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="secondary">{doc.status}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -17,10 +17,15 @@ export default async function ENPSPage() {
 
   const isAdmin = session.user.role === "admin" || session.user.role === "full_admin";
 
-  const surveys = await db
+  const activeSurveys = await db
     .select()
     .from(enpsSurveys)
     .where(eq(enpsSurveys.isActive, true));
+
+  const allSurveys = await db
+    .select()
+    .from(enpsSurveys)
+    .orderBy(sql`${enpsSurveys.createdAt} DESC`);
 
   const totalEmployees = await db
     .select({ count: sql<number>`count(*)` })
@@ -35,8 +40,8 @@ export default async function ENPSPage() {
   let totalResponses = 0;
   let totalParticipants = 0;
 
-  if (surveys.length > 0 && isAdmin) {
-    const activeSurvey = surveys[0];
+  if (activeSurveys.length > 0 && isAdmin) {
+    const activeSurvey = activeSurveys[0];
     
     const participants = await db
       .select()
@@ -139,20 +144,41 @@ export default async function ENPSPage() {
               <CardDescription>Past eNPS surveys and results</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-12">
-                <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No Surveys Sent</h3>
-                <p className="text-muted-foreground mb-4">
-                  Start measuring employee satisfaction with eNPS surveys
-                </p>
-                <div className="p-4 border rounded-lg bg-muted max-w-md mx-auto">
-                  <h4 className="font-medium mb-2">About eNPS</h4>
-                  <p className="text-sm text-muted-foreground">
-                    eNPS measures employee loyalty with one simple question:
-                    &quot;How likely are you to recommend this company as a place to work?&quot;
+              {allSurveys.length === 0 ? (
+                <div className="text-center py-12">
+                  <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No Surveys Sent</h3>
+                  <p className="text-muted-foreground mb-4">
+                    Start measuring employee satisfaction with eNPS surveys
                   </p>
+                  <div className="p-4 border rounded-lg bg-muted max-w-md mx-auto">
+                    <h4 className="font-medium mb-2">About eNPS</h4>
+                    <p className="text-sm text-muted-foreground">
+                      eNPS measures employee loyalty with one simple question:
+                      &quot;How likely are you to recommend this company as a place to work?&quot;
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-3">
+                  {allSurveys.map((survey) => (
+                    <div
+                      key={survey.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div>
+                        <p className="font-medium">{survey.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Created {new Date(survey.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Badge variant={survey.isActive ? "default" : "secondary"}>
+                        {survey.isActive ? "Active" : "Closed"}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </>
