@@ -149,19 +149,23 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ### Approval Workflows
 - [x] Settings page UI - inspection view with enable/disable toggle
 - [x] Workflows stored in DB
-- [x] Workflows editable via UI forms ✅ NEW
+- [x] Workflows editable via UI forms ✅ Done
   - [x] Edit name, description
   - [x] Edit approval requirements (manager/admin)
   - [x] Edit auto-approve days
-- [ ] Multi-step approval chains with custom approvers
-- [ ] Information Updates (by location)
-- [x] Time Off (reports-to) - hardcoded to manager, not configurable
-- [ ] Compensation changes with approval
-- [ ] Employment Status changes with approval
-- [ ] Job Info changes with approval
-- [ ] Promotion workflow
-- [ ] Enable/disable per workflow
-- [ ] Configurable requester and approver paths
+- [x] Multi-step approval chains with custom approvers ✅ Done
+  - [x] approval_requests and approval_request_steps tables
+  - [x] Time off requests with multi-step approvals (via lib/approvals.ts)
+  - [x] Timesheet approvals with multi-step support (schema ready)
+  - [x] Legacy single-step fallback when no workflow attached
+- [ ] Information Updates (by location) - Missing
+- [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled)
+- [ ] Compensation changes with approval - Missing
+- [ ] Employment Status changes with approval - Missing
+- [ ] Job Info changes with approval - Missing
+- [ ] Promotion workflow - Missing
+- [x] Enable/disable per workflow ✅ Done
+- [ ] Configurable requester and approver paths - Partial (approver role-based)
 
 ### Email Alerts
 - [ ] Birthday alerts
@@ -458,4 +462,4 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ---
 
 **Last Updated:** 2026-11-08  
-**Current Phase:** Security hardening, Time Tracking UI, saved views integration
+**Current Phase:** Multi-step approvals, vacation balance fixes, document deletion
