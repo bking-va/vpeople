@@ -56,8 +56,43 @@ export async function Nav() {
               <Briefcase className="h-4 w-4" />
               Hiring
             </Link>
+            <Link
+              href="/time-tracking"
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+            >
+              <Clock className="h-4 w-4" />
+              Time Tracking
+            </Link>
+            <Link
+              href="/files"
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+            >
+              <FileText className="h-4 w-4" />
+              Files
+            </Link>
+            <Link
+              href="/training"
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+            >
+              <BookOpen className="h-4 w-4" />
+              Training
+            </Link>
             {(session?.user?.role === "admin" || session?.user?.role === "full_admin") && (
               <>
+                <Link
+                  href="/reports"
+                  className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  Reports
+                </Link>
+                <Link
+                  href="/enps"
+                  className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  eNPS
+                </Link>
                 <Link
                   href="/settings"
                   className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"

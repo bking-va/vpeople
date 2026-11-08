@@ -132,12 +132,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ### Access Levels
 - [x] Basic RBAC (employee, manager, admin, full_admin) - hardcoded in session
-- [ ] Settings page UI (read-only shell, not editable)
-- [ ] Access levels stored in DB and editable
+- [x] Settings page UI - inspection view
+- [x] Access levels stored in DB
+- [ ] Access levels editable via UI forms
 - [ ] No Access level
 - [ ] Post-Employment level
 - [ ] Custom levels (scoped by region/department)
-- [x] Per-field-group permissions (basic) - hardcoded checks, not configurable
+- [x] Per-field-group permissions stored in DB
   - [x] Compensation restrictions
   - [x] SIN/SSN restrictions
   - [x] Bank data restrictions
@@ -145,8 +146,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Access history log
 
 ### Approval Workflows
-- [ ] Settings page UI (read-only shell, not editable)
-- [ ] Workflows stored in DB and editable
+- [x] Settings page UI - inspection view with enable/disable toggle
+- [x] Workflows stored in DB
+- [ ] Workflows editable via UI forms (edit names, steps, approvers)
 - [ ] Information Updates (by location)
 - [x] Time Off (reports-to) - hardcoded to manager, not configurable
 - [ ] Compensation changes with approval
@@ -223,37 +225,39 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## 7. Hiring (ATS)
 
-- [ ] Dashboard UI (shell only, no real data)
-- [ ] Job openings (not implemented)
-  - [ ] Create, edit, close openings
-  - [ ] Statuses: Draft, Open, On Hold, Filled, Canceled
-  - [ ] Hiring lead assignment
-- [ ] Candidates (not implemented)
-  - [ ] Application form
-  - [ ] Pipeline stage moves
-  - [ ] Notes and ratings
-  - [ ] Offer letters
-- [ ] Seed demo data
+- [x] Dashboard UI with real data
+- [x] Job openings
+  - [x] Create, edit, close openings
+  - [x] Statuses: Draft, Open, On Hold, Filled, Canceled
+  - [x] Hiring lead assignment
+- [x] Candidates
+  - [ ] Public application form
+  - [x] Pipeline stage moves (dropdown on candidate detail)
+  - [x] Notes with author attribution
+  - [x] 5-star ratings
+  - [x] Offer letters (create, edit)
+- [x] Seed demo data (4 openings, 5 candidates)
 
-### Job Openings (TO DO)
-- [ ] Job opening CRUD
-- [ ] Job opening statuses
-  - [ ] Draft
-  - [ ] Open
-  - [ ] On Hold
-  - [ ] Filled
-  - [ ] Canceled
-- [ ] Hiring lead assignment
+### Job Openings
+- [x] Job opening CRUD
+- [x] Job opening statuses
+  - [x] Draft
+  - [x] Open
+  - [x] On Hold
+  - [x] Filled
+  - [x] Canceled
+- [x] Hiring lead assignment
 - [ ] Public careers page
 - [ ] Embed code for careers page
-- [ ] Application form
+- [ ] Public application form
 
-### Candidates (TO DO)
-- [ ] Candidate management
-- [ ] Filter by status
-- [ ] Filter by rating
-- [ ] Filter by source
-- [ ] Filter by location
+### Candidates
+- [x] Candidate management with detail pages
+- [x] Filter by opening
+- [x] Stage moves
+- [x] Ratings (1-5 stars)
+- [x] Notes
+- [x] Offer letters
 - [ ] Filter by hiring lead
 - [ ] Customizable pipeline statuses
 - [ ] Disqualify reasons
