@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { employees, departments, locations } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { employees, departments, locations, compensationHistory } from "@/lib/db/schema";
+import { eq, desc } from "drizzle-orm";
 import { authenticateApiKey, filterEmployeeFields } from "@/lib/api-auth";
 
 export async function GET(
@@ -38,6 +38,14 @@ export async function GET(
     const dept = employee.departments;
     const loc = employee.locations;
 
+    // Fetch latest compensation record
+    const [latestComp] = await db
+      .select()
+      .from(compensationHistory)
+      .where(eq(compensationHistory.employeeId, emp.id))
+      .orderBy(desc(compensationHistory.effectiveDate))
+      .limit(1);
+
     // Check access scope: can only view self, direct reports, or all if admin
     const canAccess = 
       auth.permissions.canManageUsers || // Admin can see all
@@ -51,45 +59,29 @@ export async function GET(
       );
     }
 
-    // Filter sensitive fields based on permissions
-    const filtered = filterEmployeeFields(emp, auth.permissions);
-
+    // Build base response
     const bambooFormat: any = {
-      id: filtered.id.toString(),
-      employeeNumber: filtered.employeeNumber,
-      firstName: filtered.firstName,
-      lastName: filtered.lastName,
-      displayName: `${filtered.firstName} ${filtered.lastName}`,
-      jobTitle: filtered.jobTitle,
+      id: emp.id.toString(),
+      employeeNumber: emp.employeeNumber,
+      firstName: emp.firstName,
+      lastName: emp.lastName,
+      displayName: `${emp.firstName} ${emp.lastName}`,
+      jobTitle: emp.jobTitle,
       department: dept?.name,
       location: loc?.name,
-      workEmail: filtered.email,
-      workPhone: filtered.workPhone,
-      hireDate: filtered.hireDate,
-      status: filtered.employmentStatus,
+      workEmail: emp.email,
+      workPhone: emp.workPhone,
+      hireDate: emp.hireDate,
+      status: emp.employmentStatus,
     };
 
-    // Include compensation fields if permitted
-    if (filtered.payRate !== undefined) bambooFormat.payRate = filtered.payRate;
-    if (filtered.salary !== undefined) bambooFormat.salary = filtered.salary;
-    if (filtered.hourlyRate !== undefined) bambooFormat.hourlyRate = filtered.hourlyRate;
-    if (filtered.currency !== undefined) bambooFormat.currency = filtered.currency;
-    if (filtered.bonusAmount !== undefined) bambooFormat.bonusAmount = filtered.bonusAmount;
-    if (filtered.bonusDate !== undefined) bambooFormat.bonusDate = filtered.bonusDate;
-    if (filtered.equityShares !== undefined) bambooFormat.equityShares = filtered.equityShares;
-    if (filtered.equityValue !== undefined) bambooFormat.equityValue = filtered.equityValue;
-
-    // Include sensitive personal info if permitted
-    if (filtered.sin !== undefined) bambooFormat.sin = filtered.sin;
-    if (filtered.ssn !== undefined) bambooFormat.ssn = filtered.ssn;
-    if (filtered.passportNumber !== undefined) bambooFormat.passportNumber = filtered.passportNumber;
-    if (filtered.nationalId !== undefined) bambooFormat.nationalId = filtered.nationalId;
-
-    // Include bank info if permitted
-    if (filtered.bankName !== undefined) bambooFormat.bankName = filtered.bankName;
-    if (filtered.bankAccountNumber !== undefined) bambooFormat.bankAccountNumber = filtered.bankAccountNumber;
-    if (filtered.bankRoutingNumber !== undefined) bambooFormat.bankRoutingNumber = filtered.bankRoutingNumber;
-    if (filtered.bankSwiftCode !== undefined) bambooFormat.bankSwiftCode = filtered.bankSwiftCode;
+    // Include compensation fields if permitted and present
+    if (auth.permissions.canViewCompensation && latestComp) {
+      if (latestComp.payRate) bambooFormat.payRate = latestComp.payRate;
+      if (latestComp.payType) bambooFormat.payType = latestComp.payType;
+      if (latestComp.paySchedule) bambooFormat.paySchedule = latestComp.paySchedule;
+      if (latestComp.currency) bambooFormat.currency = latestComp.currency;
+    }
 
     return NextResponse.json(bambooFormat);
   } catch (error: any) {

@@ -11,6 +11,7 @@ import {
   jobHistory,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { createAuditLog } from "@/lib/audit";
 
 export interface CreateApprovalRequestParams {
   workflowId: number;
@@ -229,6 +230,25 @@ export async function approveStep(
           currency: metadata.currency || "CAD",
           changeReason: metadata.changeReason,
         });
+
+        // Audit log with redaction
+        await createAuditLog({
+          userId: approverId.toString(),
+          action: "compensation_updated",
+          entityType: "employee",
+          entityId: metadata.employeeId.toString(),
+          changes: {
+            employeeId: metadata.employeeId,
+            payRate: metadata.payRate,
+            payType: metadata.payType,
+            paySchedule: metadata.paySchedule,
+            currency: metadata.currency,
+            effectiveDate: metadata.effectiveDate,
+            changeReason: metadata.changeReason,
+            approvalRequestId: request.id,
+            approvedBy: approverId,
+          },
+        });
       }
     } else if (request.entityType === "job_info_change") {
       // Apply job info change from metadata
@@ -255,6 +275,26 @@ export async function approveStep(
           locationId: metadata.locationId,
           managerId: metadata.managerId,
           comment: metadata.changeReason,
+        });
+
+        // Audit log
+        await createAuditLog({
+          userId: approverId.toString(),
+          action: "job_info_updated",
+          entityType: "employee",
+          entityId: metadata.employeeId.toString(),
+          changes: {
+            employeeId: metadata.employeeId,
+            jobTitle: metadata.jobTitle,
+            departmentId: metadata.departmentId,
+            divisionId: metadata.divisionId,
+            locationId: metadata.locationId,
+            managerId: metadata.managerId,
+            effectiveDate: metadata.effectiveDate,
+            changeReason: metadata.changeReason,
+            approvalRequestId: request.id,
+            approvedBy: approverId,
+          },
         });
       }
     }

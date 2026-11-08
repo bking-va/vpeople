@@ -133,7 +133,7 @@ export async function approveTimeOffRequest(requestId: number) {
       await db
         .update(timeOffBalances)
         .set({
-          balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
+          balance: sql`${timeOffBalances.balance} - ${daysRequested}::numeric`,
           updatedAt: new Date(),
         })
         .where(
@@ -167,7 +167,7 @@ export async function approveTimeOffRequest(requestId: number) {
     await db
       .update(timeOffBalances)
       .set({
-        balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
+        balance: sql`${timeOffBalances.balance} - ${daysRequested}::numeric`,
         updatedAt: new Date(),
       })
       .where(

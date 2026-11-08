@@ -45,6 +45,13 @@ export function CompensationEditForm({ employeeId, canEdit }: CompensationEditFo
       const result = await updateEmployeeCompensation(employeeId, formData);
 
       if (result.success) {
+        if (result.requiresApproval) {
+          alert(
+            `Compensation change submitted for approval. Request ID: ${result.approvalRequestId}\n\nThe change will be applied after all approvals are complete.`
+          );
+        } else {
+          alert("Compensation updated successfully!");
+        }
         router.refresh();
         // Reset form
         setFormData({
