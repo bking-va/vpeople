@@ -102,8 +102,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Export to CSV
 - [x] Org chart (basic)
 - [ ] Org chart export
-- [ ] Saved views (UI only, not stored)
-- [ ] Column chooser
+- [x] Saved views schema (people_views table) ✅ NEW
+- [ ] Saved views UI (create, edit, delete, apply)
+- [ ] Column chooser UI
 - [ ] New Employee wizard
 - [ ] Terminate employee flow
   - [ ] Termination reasons
@@ -134,7 +135,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Basic RBAC (employee, manager, admin, full_admin) - hardcoded in session
 - [x] Settings page UI - inspection view
 - [x] Access levels stored in DB
-- [ ] Access levels editable via UI forms
+- [x] Access levels editable via UI forms ✅ NEW
 - [ ] No Access level
 - [ ] Post-Employment level
 - [ ] Custom levels (scoped by region/department)
@@ -148,7 +149,11 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ### Approval Workflows
 - [x] Settings page UI - inspection view with enable/disable toggle
 - [x] Workflows stored in DB
-- [ ] Workflows editable via UI forms (edit names, steps, approvers)
+- [x] Workflows editable via UI forms ✅ NEW
+  - [x] Edit name, description
+  - [x] Edit approval requirements (manager/admin)
+  - [x] Edit auto-approve days
+- [ ] Multi-step approval chains with custom approvers
 - [ ] Information Updates (by location)
 - [x] Time Off (reports-to) - hardcoded to manager, not configurable
 - [ ] Compensation changes with approval
