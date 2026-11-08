@@ -70,7 +70,7 @@ export async function DELETE(
       action: "delete",
       entityType: "document",
       entityId: String(documentId),
-      userId: session.user.id,
+      employeeId: session.user.employeeId,
       changes: {
         title: document.title,
         category: document.category,

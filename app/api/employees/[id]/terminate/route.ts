@@ -103,7 +103,7 @@ export async function POST(
 
     // Audit log
     await db.insert(auditLogs).values({
-      userId: session.user.id,
+      employeeId: session.user.employeeId,
       action: "employee_terminated",
       entityType: "employee",
       entityId: String(targetEmployeeId),

@@ -67,7 +67,7 @@ export async function POST(
 
     // Audit log
     await db.insert(auditLogs).values({
-      userId: employee.userId || session.user.id,
+      employeeId: employee.id,
       action: "document_signed",
       entityType: "document",
       entityId: id.toString(),

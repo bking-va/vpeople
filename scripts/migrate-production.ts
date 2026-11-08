@@ -1,6 +1,6 @@
-import { drizzle } from "drizzle-orm/neon-http";
-import { migrate } from "drizzle-orm/neon-http/migrator";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { migrate } from "drizzle-orm/neon-serverless/migrator";
+import { Pool } from "@neondatabase/serverless";
 import * as fs from "fs";
 
 async function runMigrations() {
@@ -11,12 +11,13 @@ async function runMigrations() {
   }
 
   console.log("Connecting to production database...");
-  const sql = neon(DATABASE_URL);
-  const db = drizzle(sql);
+  const pool = new Pool({ connectionString: DATABASE_URL });
+  const db = drizzle(pool);
 
   console.log("Running migrations...");
   await migrate(db, { migrationsFolder: "./drizzle" });
 
+  await pool.end();
   console.log("✅ Migrations completed successfully");
   process.exit(0);
 }

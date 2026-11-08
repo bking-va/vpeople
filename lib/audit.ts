@@ -74,7 +74,7 @@ function redactSensitiveFields(changes: any): any {
 }
 
 export async function createAuditLog({
-  userId,
+  employeeId,
   action,
   entityType,
   entityId,
@@ -82,7 +82,7 @@ export async function createAuditLog({
   ipAddress,
   userAgent,
 }: {
-  userId: string;
+  employeeId: number;
   action: string;
   entityType: string;
   entityId: string;
@@ -94,7 +94,7 @@ export async function createAuditLog({
   const redactedChanges = changes ? redactSensitiveFields(changes) : null;
 
   await db.insert(auditLogs).values({
-    userId,
+    employeeId,
     action,
     entityType,
     entityId,

@@ -104,7 +104,7 @@ export async function approveTimeOffRequest(requestId: number) {
 
     // Create audit log for this step approval
     await createAuditLog({
-      userId: session.user.id,
+      employeeId: currentEmployee.id,
       action: "time_off_approved",
       entityType: "time_off_request",
       entityId: requestId.toString(),
@@ -158,7 +158,7 @@ export async function approveTimeOffRequest(requestId: number) {
 
     // Legacy single-step audit log
     await createAuditLog({
-      userId: session.user.id,
+      employeeId: currentEmployee.id,
       action: "time_off_approved",
       entityType: "time_off_request",
       entityId: requestId.toString(),
@@ -277,7 +277,7 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
 
     // Create audit log for this step rejection
     await createAuditLog({
-      userId: session.user.id,
+      employeeId: currentEmployee.id,
       action: "time_off_denied",
       entityType: "time_off_request",
       entityId: requestId.toString(),
@@ -313,7 +313,7 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
 
     // Legacy single-step audit log
     await createAuditLog({
-      userId: session.user.id,
+      employeeId: currentEmployee.id,
       action: "time_off_denied",
       entityType: "time_off_request",
       entityId: requestId.toString(),

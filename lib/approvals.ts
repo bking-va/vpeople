@@ -166,6 +166,60 @@ export async function approveStep(
   approverId: number,
   comments?: string
 ) {
+  // Fetch the step and its workflow definition to verify authorization
+  const [stepData] = await db
+    .select({
+      step: approvalRequestSteps,
+      request: approvalRequests,
+      workflowStep: approvalWorkflowSteps,
+    })
+    .from(approvalRequestSteps)
+    .innerJoin(approvalRequests, eq(approvalRequestSteps.approvalRequestId, approvalRequests.id))
+    .innerJoin(
+      approvalWorkflowSteps,
+      and(
+        eq(approvalWorkflowSteps.workflowId, approvalRequests.workflowId),
+        eq(approvalWorkflowSteps.stepOrder, approvalRequestSteps.stepOrder)
+      )
+    )
+    .where(
+      and(
+        eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+        eq(approvalRequestSteps.stepOrder, stepOrder)
+      )
+    )
+    .limit(1);
+
+  if (!stepData) {
+    throw new Error("Approval step not found");
+  }
+
+  const { step, workflowStep } = stepData;
+
+  if (step.status !== "pending") {
+    throw new Error("Step has already been processed");
+  }
+
+  // Verify approver is authorized for this step
+  const [approver] = await db
+    .select()
+    .from(employees)
+    .where(eq(employees.id, approverId))
+    .limit(1);
+
+  if (!approver) {
+    throw new Error("Approver not found");
+  }
+
+  // Check authorization: approver must be the assigned approver OR a full_admin for admin steps
+  const isAssignedApprover = step.approverId === approverId;
+  const isFullAdmin = approver.accessLevel === "full_admin";
+  const isAdminStepWithFullAdmin = workflowStep.approverRole === "full_admin" && isFullAdmin;
+
+  if (!isAssignedApprover && !isAdminStepWithFullAdmin) {
+    throw new Error("You are not authorized to approve this step");
+  }
+
   // Update the step
   await db
     .update(approvalRequestSteps)
@@ -263,7 +317,7 @@ export async function approveStep(
 
         // Audit log with redaction
         await createAuditLog({
-          userId: approverId.toString(),
+          employeeId: approverId,
           action: "compensation_updated",
           entityType: "employee",
           entityId: metadata.employeeId.toString(),
@@ -309,7 +363,7 @@ export async function approveStep(
 
         // Audit log
         await createAuditLog({
-          userId: approverId.toString(),
+          employeeId: approverId,
           action: "job_info_updated",
           entityType: "employee",
           entityId: metadata.employeeId.toString(),

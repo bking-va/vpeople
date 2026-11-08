@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { auditLogs, employees, users } from "@/lib/db/schema";
+import { auditLogs, employees } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,13 +34,14 @@ export default async function AuditLogPage() {
   const logs = await db
     .select({
       log: auditLogs,
-      user: {
-        name: users.name,
-        email: users.email,
+      employee: {
+        firstName: employees.firstName,
+        lastName: employees.lastName,
+        email: employees.email,
       },
     })
     .from(auditLogs)
-    .leftJoin(users, eq(auditLogs.userId, users.id))
+    .leftJoin(employees, eq(auditLogs.employeeId, employees.id))
     .orderBy(desc(auditLogs.createdAt))
     .limit(100);
 
@@ -72,7 +73,7 @@ export default async function AuditLogPage() {
             <div className="space-y-3">
               {logs.map((item) => {
                 const log = item.log;
-                const user = item.user;
+                const employee = item.employee;
 
                 return (
                   <div
@@ -85,7 +86,7 @@ export default async function AuditLogPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
                         <span className="font-medium">
-                          {user?.name || user?.email || "System"}
+                          {employee ? `${employee.firstName} ${employee.lastName}` : "System"}
                         </span>
                         <span className="text-muted-foreground">
                           {log.action.replace("_", " ")} {log.entityType}

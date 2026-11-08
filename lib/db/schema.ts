@@ -506,7 +506,7 @@ export const employeeTasks = pgTable("employee_tasks", {
 
 export const auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
-  userId: text("user_id").references(() => users.id),
+  employeeId: integer("employee_id").references(() => employees.id),
   action: text("action").notNull(),
   entityType: text("entity_type").notNull(),
   entityId: text("entity_id").notNull(),
@@ -517,9 +517,9 @@ export const auditLogs = pgTable("audit_logs", {
 });
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
-  user: one(users, {
-    fields: [auditLogs.userId],
-    references: [users.id],
+  employee: one(employees, {
+    fields: [auditLogs.employeeId],
+    references: [employees.id],
   }),
 }));
 

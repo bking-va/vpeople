@@ -63,7 +63,7 @@ export async function updateEmployeeProfile(
     .where(eq(employees.id, employeeId));
 
   await createAuditLog({
-    userId: session.user.id,
+    employeeId: session.user.employeeId,
     action: "employee_updated",
     entityType: "employee",
     entityId: employeeId.toString(),
@@ -177,7 +177,7 @@ export async function updateEmployeeJobInfo(
       }
 
       await createAuditLog({
-        userId: session.user.id,
+        employeeId: session.user.employeeId,
         action: "job_info_change_requested",
         entityType: "employee",
         entityId: employeeId.toString(),
@@ -223,7 +223,7 @@ export async function updateEmployeeJobInfo(
   }
 
   await createAuditLog({
-    userId: session.user.id,
+    employeeId: session.user.employeeId,
     action: "job_info_updated",
     entityType: "employee",
     entityId: employeeId.toString(),
@@ -319,7 +319,7 @@ export async function updateEmployeeCompensation(
     }
 
     await createAuditLog({
-      userId: session.user.id,
+      employeeId: session.user.employeeId,
       action: "compensation_change_requested",
       entityType: "employee",
       entityId: employeeId.toString(),
@@ -357,7 +357,7 @@ export async function updateEmployeeCompensation(
   });
 
   await createAuditLog({
-    userId: session.user.id,
+    employeeId: session.user.employeeId,
     action: "compensation_updated",
     entityType: "employee",
     entityId: employeeId.toString(),
