@@ -14,8 +14,11 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check for session cookie (NextAuth uses __Secure-next-auth.session-token in production or next-auth.session-token in dev)
+  // Check for session cookie (Auth.js v5 uses __Secure-authjs.session-token in production or authjs.session-token in dev)
+  // Also check legacy NextAuth v4 cookie names for backwards compatibility
   const sessionCookie =
+    req.cookies.get("__Secure-authjs.session-token") ||
+    req.cookies.get("authjs.session-token") ||
     req.cookies.get("__Secure-next-auth.session-token") ||
     req.cookies.get("next-auth.session-token");
 
