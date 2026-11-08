@@ -103,7 +103,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] List view (basic) ✅ Done
 - [x] Directory with filters (department, location, search) ✅ Done (table view at /people/directory)
 - [x] Export to CSV ✅ Done
-- [x] Org chart (basic) ✅ Done
+- [x] Org chart (basic) ✅ Done (redirect from /people/org-chart to /org-chart)
 - [x] Org chart export ✅ Done (GET /api/org-chart/export generates CSV with full reporting structure)
 - [x] Saved views schema (people_views table) ✅ Done
 - [x] Saved views UI (create, edit, delete, apply) ✅ Complete (PeopleViewSelector wired into /people and /people/directory)
@@ -168,20 +168,23 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Edit name, description
   - [x] Edit approval requirements (manager/admin)
   - [x] Edit auto-approve days
-- [x] Multi-step approval chains infrastructure ✅ Complete (dbed588)
+- [x] Multi-step approval chains infrastructure ✅ Complete
   - [x] approval_requests and approval_request_steps tables
   - [x] Time off requests with multi-step approvals (via lib/approvals.ts)
+  - [x] Atomic approval + balance deduction using db.batch ✅ Done (b33c7ec)
   - [x] Timesheet approvals with multi-step support (schema ready)
   - [x] Legacy single-step fallback when no workflow attached
   - [x] Approval progress UI with step tracking and status icons
   - [x] ApprovalStatus component showing current step and approver
-  - [x] Workflow step builder UI ✅ Done (dbed588 - WorkflowSteps component)
-  - [x] Seeded workflow steps ✅ Done (dbed588 - 2-step time off workflow)
+  - [x] Workflow step builder UI ✅ Done
+  - [x] Seeded workflow steps ✅ Done (time_off, compensation_change, job_info_change)
+  - [x] Unified approvals dashboard (/approvals) ✅ Done (b33c7ec)
+  - [x] Approval/rejection actions for all workflow types ✅ Done (b33c7ec)
 - [ ] Information Updates (by location) - Missing
-- [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled)
-- [x] Compensation changes with approval ✅ Done (a50adbb - routes through workflow when enabled, applies on final approval)
+- [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled, balance deducted atomically)
+- [x] Compensation changes with approval ✅ Done (routes through workflow, commits to compensationHistory on final approval)
 - [ ] Employment Status changes with approval - Missing
-- [x] Job Info changes with approval ✅ Done (a50adbb - routes through workflow when enabled for significant changes)
+- [x] Job Info changes with approval ✅ Done (routes through workflow, updates employee record and jobHistory on final approval)
 - [ ] Promotion workflow - Missing
 - [x] Enable/disable per workflow ✅ Done
 - [ ] Configurable requester and approver paths - Partial (approver role-based)
@@ -436,7 +439,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Basic Bamboo-compatible shim ✅ Done
 - [x] Extended Bamboo API endpoints ⚠️ Partial
   - [x] `/api/bamboo/v1/employees/directory` ✅ Done (with permission enforcement)
-  - [x] `/api/bamboo/v1/employees/{id}` ✅ Done (with permission enforcement and scope checks)
+  - [x] `/api/bamboo/v1/employees/{id}` ✅ Done (with permission enforcement, returns compensation fields when canViewCompensation=true)
   - [x] `/api/gateway/v1/[company]/employees/directory` ✅ Done
   - [x] `/api/gateway/v1/[company]/employees/{id}` ✅ Done
   - [x] `/api/gateway/v1/[company]/reports/custom` ✅ Done
@@ -456,7 +459,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] API key management ✅ Done
   - [x] Per-integration keys ✅ Done (generate/revoke UI at /settings/api-keys)
   - [x] Scope configuration ✅ Done (inherits from user access level)
-  - [x] Last-used timestamps ✅ Done (apiKeyLastUsedAt updated on each successful auth)
+  - [x] Last-used timestamps ✅ Done (displayed on /settings/api-keys, updated on each successful auth)
+  - [x] Status display (active/revoked) ✅ Done (b33c7ec)
+  - [x] Creation date display ✅ Done (b33c7ec)
   - [x] Permission enforcement ✅ Done (field-level filtering for compensation/SIN/bank)
   - [x] Security tests ✅ Done (bamboo-security.test.ts verifies auth + scope)
 - [ ] Support for 31 Bamboo integrations - Missing
@@ -485,7 +490,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## Testing and Quality
 
-- [x] Comprehensive test coverage ⚠️ Partial (security tests for API permissions + webhook delivery tests)
+- [x] Comprehensive test coverage ⚠️ Partial
+  - [x] Security tests for API permissions + webhook delivery tests
+  - [x] Integration tests against real Postgres ✅ Done
+    - [x] Time-off approval balance deduction (single and 2-step)
+    - [x] Compensation change workflow routing
+    - [x] Job info change workflow routing
+    - [x] Bamboo API permission enforcement
 - [ ] E2E tests for critical flows - Missing
 - [ ] Performance testing - Missing
 - [x] Security audit ⚠️ Partial (API key auth + field-level permissions + scope enforcement verified)
@@ -505,4 +516,11 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ---
 
 **Last Updated:** 2026-11-08  
-**Current Phase:** Critical bug fixes complete (user resolution, break minutes, days calculation). Remaining: workflow step builder UI, custom fields CRUD, iCal token generation
+**Current Phase:** 
+- ✅ Multi-step approvals complete (time-off, comp changes, job info changes)
+- ✅ Atomic balance deduction using db.batch
+- ✅ Unified /approvals dashboard
+- ✅ Integration tests against real Postgres
+- ✅ Seed org structure: CEO with exactly 6 direct reports, no manager >10 reports, 85 total employees
+- ✅ Bamboo API compensation fields returned when canViewCompensation=true
+- ✅ API keys UI shows status, created date, and last-used timestamps

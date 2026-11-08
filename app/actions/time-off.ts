@@ -120,17 +120,29 @@ export async function approveTimeOffRequest(requestId: number) {
       },
     });
 
-    // If final approval, deduct balance
-    const updatedApprovalData = await getApprovalRequestForEntity(
-      "time_off_request",
-      requestId
-    );
+    // Balance deduction is now handled atomically in lib/approvals.ts
 
-    if (updatedApprovalData?.request.status === "approved") {
-      const daysRequested = parseFloat(request.request.daysRequested);
-      
-      // Deduct balance (atomic operation)
-      await db
+    revalidatePath("/time-off");
+    revalidatePath("/time-off/approvals");
+    revalidatePath(`/people/${request.request.employeeId}`);
+
+    return { success: true };
+  } else {
+    // Legacy single-step approval
+    const daysRequested = parseFloat(request.request.daysRequested);
+
+    // Atomically update status AND deduct balance using transaction
+    await db.transaction(async (tx) => {
+      await tx
+        .update(timeOffRequests)
+        .set({
+          status: "approved",
+          reviewedBy: currentEmployee.id,
+          reviewedAt: new Date(),
+        })
+        .where(eq(timeOffRequests.id, requestId));
+
+      await tx
         .update(timeOffBalances)
         .set({
           balance: sql`${timeOffBalances.balance} - ${daysRequested}::numeric`,
@@ -142,40 +154,7 @@ export async function approveTimeOffRequest(requestId: number) {
             eq(timeOffBalances.policyId, request.request.policyId)
           )
         );
-    }
-
-    revalidatePath("/time-off");
-    revalidatePath("/time-off/approvals");
-    revalidatePath(`/people/${request.request.employeeId}`);
-
-    return { success: true };
-  } else {
-    // Legacy single-step approval
-    const daysRequested = parseFloat(request.request.daysRequested);
-
-    // Update status
-    await db
-      .update(timeOffRequests)
-      .set({
-        status: "approved",
-        reviewedBy: currentEmployee.id,
-        reviewedAt: new Date(),
-      })
-      .where(eq(timeOffRequests.id, requestId));
-
-    // Deduct balance
-    await db
-      .update(timeOffBalances)
-      .set({
-        balance: sql`${timeOffBalances.balance} - ${daysRequested}::numeric`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(timeOffBalances.employeeId, request.request.employeeId),
-          eq(timeOffBalances.policyId, request.request.policyId)
-        )
-      );
+    });
 
     // Legacy single-step audit log
     await createAuditLog({

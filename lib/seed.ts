@@ -584,7 +584,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     .where(eq(schema.employees.email, `brendan.king@${VENDASTA_DOMAIN}`))
     .limit(1);
 
-  console.log("Creating C-suite and VPs...");
+  console.log("Creating C-suite and department heads (6 direct reports to CEO)...");
 
   const executiveValues = [
     {
@@ -642,21 +642,55 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     },
     {
       employeeNumber: "E005",
-      firstName: "Raj",
-      lastName: "Patel",
-      email: `raj.patel@${VENDASTA_DOMAIN}`,
-      jobTitle: "Director of Engineering - India",
-      departmentId: tech.id,
-      divisionId: rdDiv.id,
-      locationId: chennai.id,
+      firstName: "Michael",
+      lastName: "O'Brien",
+      email: `michael.obrien@${VENDASTA_DOMAIN}`,
+      jobTitle: "VP of Customer Success",
+      departmentId: services.id,
+      divisionId: supportDiv.id,
+      locationId: toronto.id,
       managerId: ceo.id,
-      hireDate: "2016-11-05",
+      hireDate: "2014-08-15",
       employmentStatus: "full_time" as const,
       jobFamilyId: managerFamily.id,
-      jobLevelId: levels.find((l) => l.code === "M3")!.id,
+      jobLevelId: levels.find((l) => l.code === "M4")!.id,
       accessLevel: "regional_view" as const,
-      workPhone: "+91-44-555-0100",
-      extension: "201",
+      workPhone: "+1-416-555-0100",
+      extension: "105",
+    },
+    {
+      employeeNumber: "E006",
+      firstName: "Emily",
+      lastName: "Thompson",
+      email: `emily.thompson@${VENDASTA_DOMAIN}`,
+      jobTitle: "VP of Marketing",
+      departmentId: marketing.id,
+      locationId: saskatoon.id,
+      managerId: ceo.id,
+      hireDate: "2017-03-10",
+      employmentStatus: "full_time" as const,
+      jobFamilyId: managerFamily.id,
+      jobLevelId: levels.find((l) => l.code === "M4")!.id,
+      accessLevel: "regional_view" as const,
+      workPhone: "+1-306-955-5515",
+      extension: "106",
+    },
+    {
+      employeeNumber: "E007",
+      firstName: "Alex",
+      lastName: "Kim",
+      email: `alex.kim@${VENDASTA_DOMAIN}`,
+      jobTitle: "VP of Product",
+      departmentId: product.id,
+      locationId: saskatoon.id,
+      managerId: ceo.id,
+      hireDate: "2016-05-22",
+      employmentStatus: "full_time" as const,
+      jobFamilyId: managerFamily.id,
+      jobLevelId: levels.find((l) => l.code === "M4")!.id,
+      accessLevel: "regional_view" as const,
+      workPhone: "+1-306-955-5516",
+      extension: "107",
     },
   ];
 
@@ -682,7 +716,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
 
   console.log("Creating managers and employees...");
   const employeesData = [];
-  let empNumber = 6;
+  let empNumber = 8; // Start at E008 after 6 execs
   const departmentDirectors: Record<number, number | null> = {}; // Track first employee per dept
   const departmentTeamLeads: Record<number, number[]> = {}; // Track team leads per dept
 
@@ -833,7 +867,9 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   const usedEmails = new Set<string>();
 
   if (!shouldSkipEmployees) {
-    for (let i = 0; i < 80; i++) {
+    // Create 78 employees (1 CEO + 6 execs + 78 = 85 total)
+    // Distribution: Tech=33, Services=15, Sales=10, Marketing=8, Product=6, PeopleOps=6
+    for (let i = 0; i < 78; i++) {
       let firstName = firstNames[i % firstNames.length];
       let lastName = lastNames[Math.floor(i / 2) % lastNames.length];
       let email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}@${VENDASTA_DOMAIN}`;
@@ -845,15 +881,15 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       }
       usedEmails.add(email);
       const dept =
-        i < 35
+        i < 33
           ? tech
-          : i < 50
+          : i < 48
             ? services
-            : i < 60
+            : i < 58
               ? sales
-              : i < 68
+              : i < 66
                 ? marketing
-                : i < 74
+                : i < 72
                   ? product
                   : peopleOps;
       const location =
@@ -870,19 +906,19 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       const isManager = i % 15 === 0; // Fewer managers = larger teams
       const isFirstInDept = !departmentDirectors[dept.id];
       
-      // Department heads (executives)
+      // Department heads (executives) - CEO has exactly 6 direct reports
       const deptHead =
         dept.id === tech.id
-          ? executives[1]?.id // CTO
+          ? executives[1]?.id // CTO - David Chen
           : dept.id === services.id
-            ? executives[3]?.id // Use 4th exec as Services head
+            ? executives[3]?.id // VP Customer Success - Michael O'Brien
             : dept.id === sales.id
-              ? executives[2]?.id // VP of Sales
+              ? executives[2]?.id // VP of Sales - Sarah Martinez
               : dept.id === marketing.id
-                ? ceo.id // Marketing reports to CEO
+                ? executives[4]?.id // VP of Marketing - Emily Thompson
                 : dept.id === product.id
-                  ? ceo.id // Product reports to CEO for now
-                  : executives[0]?.id; // CPO for people ops
+                  ? executives[5]?.id // VP of Product - Alex Kim
+                  : executives[0]?.id; // CPO - Jean Parchewsky for people ops
       
       // Temporary manager assignment (will be fixed by post-processing)
       const managerId = isFirstInDept ? deptHead : deptHead;
@@ -961,7 +997,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       .values(employeesData)
       .onConflictDoNothing();
     
-    console.log("Fixing reporting structure - creating team lead hierarchy...");
+    console.log("Fixing reporting structure - ensuring max 10 reports per manager...");
     // Get all non-executive employees by department
     for (const dept of [tech, services, sales, marketing, product, peopleOps]) {
       const deptEmployees = await db
@@ -970,32 +1006,51 @@ export async function runSeed(options: { reset?: boolean } = {}) {
         .where(
           and(
             eq(schema.employees.departmentId, dept.id),
-            sql`${schema.employees.id} NOT IN (${ceo.id}, ${executives[0]?.id || 0}, ${executives[1]?.id || 0}, ${executives[2]?.id || 0}, ${executives[3]?.id || 0})`
+            sql`${schema.employees.id} NOT IN (${ceo.id}, ${executives[0]?.id || 0}, ${executives[1]?.id || 0}, ${executives[2]?.id || 0}, ${executives[3]?.id || 0}, ${executives[4]?.id || 0}, ${executives[5]?.id || 0})`
           )
         )
         .orderBy(schema.employees.id);
       
-      if (deptEmployees.length > 1) {
-        const directorId = deptEmployees[0].id;
-        const remaining = deptEmployees.slice(1);
+      if (deptEmployees.length === 0) continue;
+      
+      // Get department head
+      const deptHeadId =
+        dept.id === tech.id
+          ? executives[1]?.id
+          : dept.id === services.id
+            ? executives[3]?.id
+            : dept.id === sales.id
+              ? executives[2]?.id
+              : dept.id === marketing.id
+                ? executives[4]?.id
+                : dept.id === product.id
+                  ? executives[5]?.id
+                  : executives[0]?.id;
+      
+      if (!deptHeadId) continue;
+      
+      // If department has <=10 employees, all report to dept head
+      if (deptEmployees.length <= 10) {
+        await db
+          .update(schema.employees)
+          .set({ managerId: deptHeadId })
+          .where(inArray(schema.employees.id, deptEmployees.map(e => e.id)));
+      } else {
+        // Create team leads: 1 lead per 8-9 employees (keeping under 10)
+        const numLeads = Math.ceil(deptEmployees.length / 9);
+        const teamLeads = deptEmployees.slice(0, numLeads);
+        const teamMembers = deptEmployees.slice(numLeads);
         
-        // Create team leads: ~1 lead per 6-8 employees
-        const numLeads = Math.max(1, Math.min(4, Math.floor(remaining.length / 7)));
-        const teamLeads = remaining.slice(0, numLeads);
-        const teamMembers = remaining.slice(numLeads);
+        // Team leads report to dept head
+        await db
+          .update(schema.employees)
+          .set({ managerId: deptHeadId })
+          .where(inArray(schema.employees.id, teamLeads.map(e => e.id)));
         
-        // Team leads report to director
-        if (teamLeads.length > 0) {
-          await db
-            .update(schema.employees)
-            .set({ managerId: directorId })
-            .where(inArray(schema.employees.id, teamLeads.map(e => e.id)));
-        }
-        
-        // Team members report to leads in round-robin
+        // Team members report to leads in round-robin (max 9 per lead)
         for (let i = 0; i < teamMembers.length; i++) {
           const leadIdx = i % teamLeads.length;
-          const leadId = teamLeads[leadIdx]?.id || directorId;
+          const leadId = teamLeads[leadIdx].id;
           await db
             .update(schema.employees)
             .set({ managerId: leadId })

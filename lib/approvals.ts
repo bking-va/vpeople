@@ -9,8 +9,9 @@ import {
   timesheets,
   compensationHistory,
   jobHistory,
+  timeOffBalances,
 } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { createAuditLog } from "@/lib/audit";
 
 export interface CreateApprovalRequestParams {
@@ -200,14 +201,43 @@ export async function approveStep(
 
     // Update entity status
     if (request.entityType === "time_off_request") {
-      await db
-        .update(timeOffRequests)
-        .set({
-          status: "approved",
-          reviewedBy: approverId,
-          reviewedAt: new Date(),
-        })
-        .where(eq(timeOffRequests.id, request.entityId));
+      // Fetch request to get days and policy
+      const [timeOffRequest] = await db
+        .select()
+        .from(timeOffRequests)
+        .where(eq(timeOffRequests.id, request.entityId))
+        .limit(1);
+
+      if (!timeOffRequest) {
+        throw new Error("Time off request not found");
+      }
+
+      const daysRequested = parseFloat(timeOffRequest.daysRequested);
+
+      // Atomically update request status AND deduct balance using transaction
+      await db.transaction(async (tx) => {
+        await tx
+          .update(timeOffRequests)
+          .set({
+            status: "approved",
+            reviewedBy: approverId,
+            reviewedAt: new Date(),
+          })
+          .where(eq(timeOffRequests.id, request.entityId));
+
+        await tx
+          .update(timeOffBalances)
+          .set({
+            balance: sql`${timeOffBalances.balance} - ${daysRequested}::numeric`,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(timeOffBalances.employeeId, timeOffRequest.employeeId),
+              eq(timeOffBalances.policyId, timeOffRequest.policyId)
+            )
+          );
+      });
     } else if (request.entityType === "timesheet") {
       await db
         .update(timesheets)

@@ -1,7 +1,7 @@
-import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
+import { drizzle as drizzleNeonServerless } from "drizzle-orm/neon-serverless";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import { neon } from "@neondatabase/serverless";
-import { Pool } from "pg";
+import { Pool as NeonPool } from "@neondatabase/serverless";
+import { Pool as PgPool } from "pg";
 import * as schema from "./schema";
 
 if (!process.env.DATABASE_URL) {
@@ -10,6 +10,7 @@ if (!process.env.DATABASE_URL) {
 
 const isNeonUrl = process.env.DATABASE_URL.includes("neon.tech");
 
+// Use neon-serverless Pool for Neon (supports transactions), pg Pool for local/other
 export const db = isNeonUrl
-  ? drizzleNeon(neon(process.env.DATABASE_URL), { schema })
-  : drizzlePg(new Pool({ connectionString: process.env.DATABASE_URL }), { schema });
+  ? drizzleNeonServerless(new NeonPool({ connectionString: process.env.DATABASE_URL }), { schema })
+  : drizzlePg(new PgPool({ connectionString: process.env.DATABASE_URL }), { schema });
