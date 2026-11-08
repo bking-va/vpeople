@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "2mb",
     },
   },
+  outputFileTracingIncludes: {
+    '/api/admin/seed': ['./drizzle/**/*'],
+  },
 };
 
 export default nextConfig;

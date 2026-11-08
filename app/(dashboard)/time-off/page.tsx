@@ -81,12 +81,18 @@ export default async function TimeOffPage() {
           <p className="text-muted-foreground">Manage time off requests and balances</p>
         </div>
         <div className="flex gap-2">
+          <Button asChild>
+            <Link href="/time-off/request">Request Time Off</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/time-off/calendar">Who&apos;s Out</Link>
+          </Button>
           {(isManager || isAdmin) && (
             <Button asChild variant="outline">
               <Link href="/time-off/approvals">View All Approvals</Link>
             </Button>
           )}
-          <Button asChild>
+          <Button asChild variant="outline">
             <Link href={`/people/${employeeId}#time-off`}>View My Balances</Link>
           </Button>
         </div>
