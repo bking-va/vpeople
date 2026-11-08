@@ -21,10 +21,10 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Time-off approvals ✅ Done
   - [x] Timesheet approvals ✅ Done (widget on dashboard shows pending timesheets)
   - [x] Onboarding tasks ✅ Done
-  - [ ] Documents to sign - Missing (no widget)
+  - [x] Documents to sign ✅ Done (dashboard to-do lists pending_signature docs; links to profile Documents tab)
 - [x] Direct reports widget ✅ Done
 - [x] Headcount chart ✅ Done
-- [ ] Turnover chart - Missing
+- [x] Turnover chart ✅ Done (12-month hires/terms sparkline on dashboard + /reports/turnover)
 - [x] Location charts ✅ Done
 - [x] Celebrations (birthdays and anniversaries) ✅ Done
 - [x] Who's Out calendar ✅ Done (dashboard widget of who's out today + /time-off/calendar month view)
@@ -56,8 +56,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Address fields ✅ Done (street, city, province, postal, country on personal tab)
 - [x] Contact information ✅ Done (work/mobile/home phone, personal email)
 - [x] Social links ✅ Done (LinkedIn, Twitter, GitHub)
-- [ ] Visa table
-- [ ] Education table
+- [x] Visa table ✅ Done (employee_visas + Personal tab; seed sample; no CRUD UI)
+- [x] Education table ✅ Done (employee_education + Personal tab; seed sample; no CRUD UI)
 
 ### Job Tab
 - [x] Hire Date
@@ -227,7 +227,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Basic policies (seeded, not editable)
 - [x] Policy management UI (create, edit policies) ✅ Done (4f22048 - Settings page + CRUD API + integration tests)
 - [ ] Categories
-- [ ] Accrual rules that run on schedule
+- [x] Accrual rules that run on schedule ✅ Done (daily Vercel cron `/api/cron/accrue-time-off`; unique `(balanceId, periodKey)` so monthly/annual/biweekly apply once per period; skips terminated; caps at maxBalance)
 - [ ] Carryover rules
 - [ ] Manual balance adjustments with history
 - [ ] Multi-country policies
@@ -241,7 +241,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Year views
 - [x] Employee request submission with balance check ✅ Done (POST /api/time-off/requests rejects insufficient balance)
 - [x] Manager approve/deny actions (basic)
-- [ ] Balance history and audit trail
+- [x] Balance history and audit trail ⚠️ Partial (accrual writes `time_off_balance_adjustments` with `accrual:<periodKey>`; no employee-facing history UI)
 - [x] Who's-out calendar view ✅ Done (/time-off/calendar + dashboard widget)
 
 ---
@@ -337,7 +337,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [ ] Commission letter - Template missing
   - [ ] Termination letter - Template missing
   - [ ] India-specific letters - Template missing
-- [x] Pending Signatures view ⚠️ Partial (ProfileDocuments component filters by status)
+- [x] Pending Signatures view ✅ Done (ProfileDocuments + home to-do widget for pending_signature)
 - [x] Signed documents archive ✅ Done (ProfileDocuments component shows signed docs)
 - [x] Vercel Blob storage integration ⚠️ Partial (upload/download routes exist; Blob token not provisioned)
 
@@ -381,8 +381,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ### Standard Reports
 - [x] Headcount report ✅ Done (/reports/headcount + CSV export by department/location/status)
-- [ ] Turnover report
-- [ ] Additions/Terminations report
+- [x] Turnover report ✅ Done (/reports/turnover + dashboard chart + CSV `type=turnover`)
+- [x] Additions/Terminations report ✅ Done (/reports/standard?type=additions)
 - [ ] Pay by Title
 - [ ] Pay by Department
 - [ ] Pay by Location
@@ -396,19 +396,19 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Change History
 - [ ] Missing Data report
 - [ ] Point-in-Time report
-- [ ] Age profile
-- [ ] Gender profile
-- [ ] Birthdays report
-- [ ] Employment Status History
-- [ ] Job History
-- [ ] Years of Service
+- [x] Age profile ✅ Done (/reports/standard?type=age-gender)
+- [x] Gender profile ✅ Done (/reports/standard?type=age-gender)
+- [x] Birthdays report ✅ Done (/reports/standard?type=birthdays)
+- [x] Employment Status History ⚠️ Partial (current status + hire/termination dates, not a full effective-dated status table)
+- [x] Job History ✅ Done (/reports/standard?type=job-history)
+- [x] Years of Service ✅ Done (/reports/standard?type=years-of-service)
 - [ ] Candidate Sources
 - [ ] Candidate Funnel
-- [ ] Last Pay Change
+- [x] Last Pay Change ✅ Done (/reports/standard?type=last-pay-change; requires canViewCompensation)
 - [ ] Salary History
-- [ ] Time Off Balances
+- [x] Time Off Balances ✅ Done (/reports/standard?type=time-off-balances)
 - [ ] Time Off Schedule
-- [ ] Time Off Used
+- [x] Time Off Used ✅ Done (/reports/standard?type=time-off-used)
 - [ ] Timesheet Hours
 - [ ] Project Hours
 - [ ] eNPS scores

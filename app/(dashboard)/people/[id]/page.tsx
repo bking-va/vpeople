@@ -20,6 +20,8 @@ import {
   employeeTeams,
   teams,
   documents,
+  employeeEducation,
+  employeeVisas,
 } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -37,8 +39,10 @@ import { JobInfoEditForm } from "@/components/job-info-edit-form";
 
 export default async function EmployeeProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) {
@@ -46,6 +50,7 @@ export default async function EmployeeProfilePage({
   }
 
   const { id } = await params;
+  const { tab } = await searchParams;
   const employeeId = parseInt(id);
 
   if (isNaN(employeeId)) {
@@ -213,6 +218,18 @@ export default async function EmployeeProfilePage({
     .where(eq(documents.employeeId, employeeId))
     .orderBy(desc(documents.createdAt));
 
+  const educationRows = await db
+    .select()
+    .from(employeeEducation)
+    .where(eq(employeeEducation.employeeId, employeeId))
+    .orderBy(desc(employeeEducation.endDate));
+
+  const visaRows = await db
+    .select()
+    .from(employeeVisas)
+    .where(eq(employeeVisas.employeeId, employeeId))
+    .orderBy(desc(employeeVisas.expiryDate));
+
   const employeeTeamsList = await db
     .select({ team: teams })
     .from(employeeTeams)
@@ -286,7 +303,7 @@ export default async function EmployeeProfilePage({
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="personal" className="w-full">
+      <Tabs defaultValue={tab || "personal"} className="w-full">
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="personal">Personal</TabsTrigger>
           <TabsTrigger value="job">Job</TabsTrigger>
@@ -349,6 +366,51 @@ export default async function EmployeeProfilePage({
               <InfoField label="LinkedIn" value={employee.linkedInUrl} />
               <InfoField label="Twitter" value={employee.twitterUrl} />
               <InfoField label="GitHub" value={employee.githubUrl} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Education</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {educationRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No education records</p>
+              ) : (
+                educationRows.map((row) => (
+                  <div key={row.id} className="border rounded-lg p-3 text-sm space-y-1">
+                    <p className="font-medium">{row.institution}</p>
+                    <p className="text-muted-foreground">
+                      {[row.degree, row.fieldOfStudy].filter(Boolean).join(" · ") || "—"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {row.startDate || "—"} – {row.endDate || "present"}
+                    </p>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Visa / Work Authorization</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {visaRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No visa records</p>
+              ) : (
+                visaRows.map((row) => (
+                  <div key={row.id} className="border rounded-lg p-3 text-sm grid md:grid-cols-2 gap-2">
+                    <InfoField label="Type" value={row.visaType} />
+                    <InfoField label="Country" value={row.country} />
+                    <InfoField label="Document #" value={row.documentNumber} />
+                    <InfoField label="Status" value={row.status} />
+                    <InfoField label="Issued" value={formatDate(row.issuedDate)} />
+                    <InfoField label="Expires" value={formatDate(row.expiryDate)} />
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
 

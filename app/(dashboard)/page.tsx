@@ -10,6 +10,7 @@ import {
   departments,
   employeeTasks,
   timesheets,
+  documents,
 } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +31,7 @@ import {
 import { ClockWidget } from "@/components/clock-widget";
 import { getWhosOut } from "@/lib/whos-out";
 import { isOutOnDate } from "@/lib/date-overlap";
+import { getTurnoverReport } from "@/lib/reports/turnover";
 
 export default async function HomePage() {
   const session = await auth();
@@ -206,6 +208,22 @@ export default async function HomePage() {
     )
     .limit(5);
 
+  const pendingSignatureDocs = await db
+    .select({
+      id: documents.id,
+      title: documents.title,
+    })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.employeeId, employeeId),
+        eq(documents.status, "pending_signature")
+      )
+    )
+    .limit(5);
+
+  const turnover = isAdmin ? await getTurnoverReport() : null;
+
   // Fetch headcount by department
   const headcountByDept = await db
     .select({
@@ -360,8 +378,24 @@ export default async function HomePage() {
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {myTasks.length > 0 || pendingApprovals.length > 0 || pendingTimesheetApprovals.length > 0 ? (
+            {myTasks.length > 0 || pendingApprovals.length > 0 || pendingTimesheetApprovals.length > 0 || pendingSignatureDocs.length > 0 ? (
               <div className="space-y-2">
+                {pendingSignatureDocs.length > 0 && (
+                  <div>
+                    <Link
+                      href={`/people/${employeeId}?tab=documents`}
+                      className="text-sm text-primary hover:underline flex items-center gap-1"
+                    >
+                      <Clock className="h-3 w-3" />
+                      {pendingSignatureDocs.length} document{pendingSignatureDocs.length !== 1 ? "s" : ""} to sign
+                    </Link>
+                    {pendingSignatureDocs.slice(0, 2).map((doc) => (
+                      <p key={doc.id} className="text-xs text-muted-foreground pl-4">
+                        {doc.title}
+                      </p>
+                    ))}
+                  </div>
+                )}
                 {pendingApprovals.length > 0 && (
                   <div>
                     <Link
@@ -418,6 +452,38 @@ export default async function HomePage() {
                   <Link href="/org-chart">View Org Chart</Link>
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {turnover && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Turnover (12 mo)</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{turnover.turnoverRate}%</div>
+              <p className="text-xs text-muted-foreground">
+                {turnover.terminations} terms · {turnover.hires} hires
+              </p>
+              <div className="mt-3 flex items-end gap-1 h-16">
+                {turnover.byMonth.map((row) => {
+                  const max = Math.max(1, ...turnover.byMonth.map((m) => m.hires + m.terms));
+                  const height = ((row.hires + row.terms) / max) * 100;
+                  return (
+                    <div
+                      key={row.month}
+                      className="flex-1 bg-primary/70 rounded-sm"
+                      style={{ height: `${Math.max(height, 4)}%` }}
+                      title={`${row.month}: ${row.hires} hired, ${row.terms} left`}
+                    />
+                  );
+                })}
+              </div>
+              <Button asChild size="sm" variant="outline" className="w-full mt-3">
+                <Link href="/reports/turnover">View report</Link>
+              </Button>
             </CardContent>
           </Card>
         )}

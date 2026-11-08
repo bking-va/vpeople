@@ -72,6 +72,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE timesheets CASCADE`);
     
     // Time off (depends on employees & policies)
+    await db.execute(sql`TRUNCATE TABLE time_off_accrual_runs CASCADE`);
     await db.execute(sql`TRUNCATE TABLE time_off_balance_adjustments CASCADE`);
     await db.execute(sql`TRUNCATE TABLE time_off_requests CASCADE`);
     await db.execute(sql`TRUNCATE TABLE time_off_balances CASCADE`);
@@ -86,6 +87,8 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE enps_survey_participants CASCADE`);
     await db.execute(sql`TRUNCATE TABLE enps_surveys CASCADE`);
     await db.execute(sql`TRUNCATE TABLE documents CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employee_education CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employee_visas CASCADE`);
     await db.execute(sql`TRUNCATE TABLE employee_notes CASCADE`);
     await db.execute(sql`TRUNCATE TABLE emergency_contacts CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_history CASCADE`);
@@ -127,7 +130,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE rate_limits CASCADE`);
     await db.execute(sql`TRUNCATE TABLE webhooks CASCADE`);
 
-    console.log("✅ Database reset complete (52 tables truncated)");
+    console.log("✅ Database reset complete (55 tables truncated)");
   }
 
   console.log("Creating locations...");
@@ -1810,6 +1813,40 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   ]);
 
   await db.insert(schema.documents).values(documentsData);
+
+  const existingEducation = await db.$count(schema.employeeEducation);
+  if (existingEducation === 0) {
+    console.log("Creating education and visa records...");
+    await db.insert(schema.employeeEducation).values([
+      {
+        employeeId: ceo.id,
+        institution: "University of Saskatchewan",
+        degree: "Bachelor of Commerce",
+        fieldOfStudy: "Accounting",
+        startDate: "1994-09-01",
+        endDate: "1998-05-15",
+      },
+      {
+        employeeId: allEmployees[5]?.id || ceo.id,
+        institution: "University of Waterloo",
+        degree: "Bachelor of Computer Science",
+        fieldOfStudy: "Software Engineering",
+        startDate: "2012-09-01",
+        endDate: "2016-04-30",
+      },
+    ]);
+    await db.insert(schema.employeeVisas).values([
+      {
+        employeeId: allEmployees[10]?.id || ceo.id,
+        visaType: "TN",
+        country: "US",
+        documentNumber: "TN-2026-4411",
+        issuedDate: "2026-01-15",
+        expiryDate: "2029-01-14",
+        status: "active",
+      },
+    ]);
+  }
 
   console.log("Creating custom fields...");
 

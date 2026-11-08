@@ -1,10 +1,9 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { employees, timeOffRequests, departments, divisions } from "@/lib/db/schema";
-import { eq, sql, and, gte } from "drizzle-orm";
+import { employees, timeOffRequests, departments } from "@/lib/db/schema";
+import { eq, sql, gte } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Users, Calendar, TrendingUp } from "lucide-react";
 import Link from "next/link";
@@ -93,7 +92,7 @@ export default async function ReportsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">5</div>
+            <div className="text-2xl font-bold">12</div>
             <p className="text-xs text-muted-foreground">Standard reports</p>
           </CardContent>
         </Card>
@@ -145,22 +144,46 @@ export default async function ReportsPage() {
                 <div className="font-medium">Headcount Report</div>
                 <div className="text-sm text-muted-foreground">Active employees by department, location, and status</div>
               </Link>
-              <div className="p-3 border rounded-lg hover:bg-accent cursor-pointer">
-                <div className="font-medium">New Hires Report</div>
-                <div className="text-sm text-muted-foreground">Recent hires by period</div>
-              </div>
-              <div className="p-3 border rounded-lg hover:bg-accent cursor-pointer">
-                <div className="font-medium">Time Off Report</div>
-                <div className="text-sm text-muted-foreground">Time off requests and balances</div>
-              </div>
-              <div className="p-3 border rounded-lg hover:bg-accent cursor-pointer">
+              <Link href="/reports/turnover" className="block p-3 border rounded-lg hover:bg-accent">
                 <div className="font-medium">Turnover Report</div>
-                <div className="text-sm text-muted-foreground">Terminations and turnover rate</div>
-              </div>
-              <div className="p-3 border rounded-lg hover:bg-accent cursor-pointer">
-                <div className="font-medium">Compensation Report</div>
-                <div className="text-sm text-muted-foreground">Salary ranges by department</div>
-              </div>
+                <div className="text-sm text-muted-foreground">Terminations and turnover rate (12 months)</div>
+              </Link>
+              <Link href="/reports/standard?type=additions" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Additions / Terminations</div>
+                <div className="text-sm text-muted-foreground">New hires and terminations this year</div>
+              </Link>
+              <Link href="/reports/standard?type=years-of-service" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Years of Service</div>
+                <div className="text-sm text-muted-foreground">Tenure for active employees</div>
+              </Link>
+              <Link href="/reports/standard?type=time-off-balances" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Time Off Balances</div>
+                <div className="text-sm text-muted-foreground">Current balances by employee and policy</div>
+              </Link>
+              <Link href="/reports/standard?type=time-off-used" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Time Off Used</div>
+                <div className="text-sm text-muted-foreground">Approved time off this year</div>
+              </Link>
+              <Link href="/reports/standard?type=last-pay-change" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Last Pay Change</div>
+                <div className="text-sm text-muted-foreground">Most recent compensation change per employee</div>
+              </Link>
+              <Link href="/reports/standard?type=birthdays" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Birthdays</div>
+                <div className="text-sm text-muted-foreground">Birth dates for active employees</div>
+              </Link>
+              <Link href="/reports/standard?type=age-gender" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Age / Gender Profile</div>
+                <div className="text-sm text-muted-foreground">Headcount by age band and gender</div>
+              </Link>
+              <Link href="/reports/standard?type=job-history" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Job History</div>
+                <div className="text-sm text-muted-foreground">Effective-dated job changes</div>
+              </Link>
+              <Link href="/reports/standard?type=employment-status" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Employment Status History</div>
+                <div className="text-sm text-muted-foreground">Current status, hire, and termination dates</div>
+              </Link>
             </div>
           </CardContent>
         </Card>
@@ -190,12 +213,29 @@ export default async function ReportsPage() {
               <div className="p-4 border rounded-lg hover:bg-accent">
                 <div className="flex items-center justify-between">
                   <div>
+                    <div className="font-medium">Turnover Export</div>
+                    <div className="text-sm text-muted-foreground">
+                      12-month hires, terminations, and turnover rate
+                    </div>
+                  </div>
+                  <Button asChild variant="outline" size="sm">
+                    <a href="/api/reports/export?type=turnover" download>
+                      Export CSV
+                    </a>
+                  </Button>
+                </div>
+              </div>
+              <div className="p-4 border rounded-lg hover:bg-accent">
+                <div className="flex items-center justify-between">
+                  <div>
                     <div className="font-medium">Custom Report Builder</div>
                     <div className="text-sm text-muted-foreground">
                       Select fields and filters to create custom reports
                     </div>
                   </div>
-                  <Badge variant="secondary">Coming Soon</Badge>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/reports/custom">Open</Link>
+                  </Button>
                 </div>
               </div>
             </div>

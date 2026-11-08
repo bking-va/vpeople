@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { employees, departments, locations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getHeadcountReport, headcountToCsv } from "@/lib/reports/headcount";
+import { getTurnoverReport } from "@/lib/reports/turnover";
+import { turnoverToCsv } from "@/lib/reports/turnover-format";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -56,6 +58,9 @@ export async function GET(request: NextRequest) {
     } else if (reportType === "headcount") {
       const report = await getHeadcountReport();
       csvData = headcountToCsv(report);
+    } else if (reportType === "turnover") {
+      const report = await getTurnoverReport();
+      csvData = turnoverToCsv(report);
     }
 
     return new NextResponse(csvData, {

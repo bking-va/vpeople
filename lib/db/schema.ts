@@ -12,6 +12,7 @@ import {
   pgEnum,
   serial,
   index,
+  uniqueIndex,
   uuid,
   varchar,
   time,
@@ -832,6 +833,55 @@ export const timeOffBalanceAdjustments = pgTable("time_off_balance_adjustments",
     .notNull()
     .references(() => employees.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const timeOffAccrualRuns = pgTable(
+  "time_off_accrual_runs",
+  {
+    id: serial("id").primaryKey(),
+    balanceId: integer("balance_id")
+      .notNull()
+      .references(() => timeOffBalances.id, { onDelete: "cascade" }),
+    periodKey: text("period_key").notNull(),
+    amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueBalancePeriod: uniqueIndex("time_off_accrual_runs_balance_period").on(
+      table.balanceId,
+      table.periodKey
+    ),
+  })
+);
+
+export const employeeEducation = pgTable("employee_education", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  institution: text("institution").notNull(),
+  degree: text("degree"),
+  fieldOfStudy: text("field_of_study"),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const employeeVisas = pgTable("employee_visas", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  visaType: text("visa_type").notNull(),
+  country: text("country").notNull(),
+  documentNumber: text("document_number"),
+  issuedDate: date("issued_date"),
+  expiryDate: date("expiry_date"),
+  status: text("status").default("active").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const documentCategoryEnum = pgEnum("document_category", [
