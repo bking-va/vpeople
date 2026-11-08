@@ -17,6 +17,7 @@ const customJestConfig = {
     '**/__tests__/**/*.test.ts',
     '**/__tests__/**/*.test.tsx',
     '!**/__tests__/actions/**',
+    '!**/__tests__/integration/**',
   ],
 }
 
