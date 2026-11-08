@@ -742,6 +742,39 @@ export const approvalRequestSteps = pgTable("approval_request_steps", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const customFieldTypeEnum = pgEnum("custom_field_type", [
+  "text",
+  "number",
+  "date",
+  "select",
+  "textarea",
+  "checkbox",
+]);
+
+export const customFields = pgTable("custom_fields", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  fieldType: customFieldTypeEnum("field_type").notNull(),
+  entityType: text("entity_type").notNull(), // "employee", "job", "compensation", etc.
+  section: text("section"), // which tab/section to display in
+  options: text("options"), // JSON array for select type
+  isRequired: boolean("is_required").default(false).notNull(),
+  orderIndex: integer("order_index").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const customFieldValues = pgTable("custom_field_values", {
+  id: serial("id").primaryKey(),
+  customFieldId: integer("custom_field_id")
+    .notNull()
+    .references(() => customFields.id, { onDelete: "cascade" }),
+  entityId: integer("entity_id").notNull(), // ID of the employee, job, etc.
+  value: text("value"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const peopleViews = pgTable("people_views", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
