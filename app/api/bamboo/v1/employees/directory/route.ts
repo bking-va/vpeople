@@ -2,10 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, departments } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { authenticateApiKey } from "@/lib/api-auth";
 
 export async function GET(request: NextRequest) {
   // BambooHR-compatible employee directory API
   // Format matches BambooHR v1 API response structure
+  
+  const auth = await authenticateApiKey(request);
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Unauthorized", message: "Valid API key required" },
+      { status: 401 }
+    );
+  }
   
   try {
     const allEmployees = await db

@@ -3,6 +3,24 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { jobOpenings } from "@/lib/db/schema";
 
+export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const openings = await db.select().from(jobOpenings);
+    return NextResponse.json(openings);
+  } catch (error: any) {
+    console.error("Failed to fetch job openings:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch job openings", message: error.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user || (session.user.role !== "admin" && session.user.role !== "full_admin")) {

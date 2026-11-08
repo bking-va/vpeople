@@ -4,6 +4,38 @@ import { db } from "@/lib/db";
 import { jobOpenings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { id: idStr } = await params;
+    const id = parseInt(idStr);
+
+    const [opening] = await db
+      .select()
+      .from(jobOpenings)
+      .where(eq(jobOpenings.id, id));
+
+    if (!opening) {
+      return NextResponse.json({ error: "Job opening not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(opening);
+  } catch (error: any) {
+    console.error("Failed to fetch job opening:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch job opening", message: error.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

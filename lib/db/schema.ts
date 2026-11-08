@@ -230,6 +230,7 @@ export const employees = pgTable("employees", {
   jobFamilyId: integer("job_family_id").references(() => jobFamilies.id),
   jobLevelId: integer("job_level_id").references(() => jobLevels.id),
   accessLevel: accessLevelEnum("access_level").default("employee").notNull(),
+  apiKeyHash: text("api_key_hash").unique(),
   photoUrl: text("photo_url"),
   dietaryRestrictions: text("dietary_restrictions"),
   tshirtSize: text("tshirt_size"),
@@ -816,7 +817,6 @@ export const enpsResponses = pgTable("enps_responses", {
     .references(() => enpsSurveys.id, { onDelete: "cascade" }),
   score: integer("score").notNull(), // 0-10
   comment: text("comment"),
-  responseHash: text("response_hash").notNull().unique(), // Anonymous tracking
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -830,6 +830,43 @@ export const webhooks = pgTable("webhooks", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export const rateLimits = pgTable("rate_limits", {
+  id: serial("id").primaryKey(),
+  identifier: text("identifier").notNull(), // IP address or user ID
+  endpoint: text("endpoint").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  windowStart: timestamp("window_start").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  identifierEndpointIdx: index("rate_limits_identifier_endpoint_idx").on(
+    table.identifier,
+    table.endpoint
+  ),
+}));
+
+export const enpsSurveyParticipants = pgTable(
+  "enps_survey_participants",
+  {
+    id: serial("id").primaryKey(),
+    surveyId: integer("survey_id")
+      .notNull()
+      .references(() => enpsSurveys.id, { onDelete: "cascade" }),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    hasResponded: boolean("has_responded").default(false).notNull(),
+    respondedAt: timestamp("responded_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    surveyEmployeeIdx: index("enps_survey_participants_survey_employee_idx").on(
+      table.surveyId,
+      table.employeeId
+    ),
+  })
+);
 
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),

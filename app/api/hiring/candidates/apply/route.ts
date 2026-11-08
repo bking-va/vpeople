@@ -1,27 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { candidates } from "@/lib/db/schema";
-
-// Simple in-memory rate limiter (for production, use Redis or Vercel KV)
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const limit = rateLimitMap.get(ip);
-
-  if (!limit || now > limit.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + 60000 }); // 1 minute window
-    return true;
-  }
-
-  if (limit.count >= 3) {
-    // Max 3 submissions per minute
-    return false;
-  }
-
-  limit.count++;
-  return true;
-}
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   // Public endpoint - strict security controls
@@ -29,10 +9,16 @@ export async function POST(request: NextRequest) {
   try {
     // Rate limiting by IP
     const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
-    if (!checkRateLimit(ip)) {
+    
+    const rateLimit = await checkRateLimit(ip, "/api/hiring/candidates/apply", {
+      maxAttempts: 3,
+      windowMs: 60000, // 1 minute
+    });
+    
+    if (!rateLimit.success) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Please try again later." },
-        { status: 429 }
+        { status: 429, headers: { "X-RateLimit-Reset": rateLimit.reset.toISOString() } }
       );
     }
 

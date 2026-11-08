@@ -2,17 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, departments, divisions, locations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { validateApiKey, formatBambooEmployee } from "@/lib/bamboo-api";
+import { authenticateApiKey } from "@/lib/api-auth";
+import { formatBambooEmployee } from "@/lib/bamboo-api";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ company: string }> }
 ) {
   await params;
-  const apiKey = request.headers.get("authorization")?.replace("Bearer ", "");
-
-  if (!validateApiKey(apiKey)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  
+  const auth = await authenticateApiKey(request);
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Unauthorized", message: "Valid API key required" },
+      { status: 401 }
+    );
   }
 
   const searchParams = request.nextUrl.searchParams;

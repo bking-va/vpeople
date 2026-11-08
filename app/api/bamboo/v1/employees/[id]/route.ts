@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, departments, locations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { authenticateApiKey } from "@/lib/api-auth";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   // BambooHR-compatible single employee endpoint
+  
+  const auth = await authenticateApiKey(request);
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Unauthorized", message: "Valid API key required" },
+      { status: 401 }
+    );
+  }
   
   try {
     const { id } = await params;

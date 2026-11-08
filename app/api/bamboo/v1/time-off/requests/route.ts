@@ -2,9 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { timeOffRequests, employees, timeOffPolicies } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { authenticateApiKey } from "@/lib/api-auth";
 
 export async function GET(request: NextRequest) {
   // BambooHR-compatible time-off requests endpoint
+  
+  const auth = await authenticateApiKey(request);
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Unauthorized", message: "Valid API key required" },
+      { status: 401 }
+    );
+  }
   
   try {
     const { searchParams } = new URL(request.url);
