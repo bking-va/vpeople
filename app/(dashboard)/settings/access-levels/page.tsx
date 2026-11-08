@@ -48,11 +48,16 @@ export default async function AccessLevelsPage() {
           <Card key={level.id}>
             <CardHeader>
               <div className="flex items-start justify-between">
-                <div>
+                <div className="flex-1">
                   <CardTitle>{level.name}</CardTitle>
                   <CardDescription>{level.description}</CardDescription>
                 </div>
-                <Badge variant="outline">{level.code}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{level.code}</Badge>
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href={`/settings/access-levels/${level.code}`}>Edit</Link>
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
