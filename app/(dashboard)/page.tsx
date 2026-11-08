@@ -9,6 +9,7 @@ import {
   locations,
   departments,
   employeeTasks,
+  timesheets,
 } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -153,6 +154,41 @@ export default async function HomePage() {
         : Promise.resolve([]);
 
     pendingApprovals = await approvalsQuery;
+  }
+
+  // Fetch pending timesheet approvals for managers
+  let pendingTimesheetApprovals: any[] = [];
+  if (isManager || isAdmin) {
+    const reportIds = directReports.map((r) => r.id);
+    
+    const timesheetApprovalsQuery = isAdmin
+      ? db
+          .select({
+            timesheet: timesheets,
+            employee: employees,
+          })
+          .from(timesheets)
+          .leftJoin(employees, eq(timesheets.employeeId, employees.id))
+          .where(eq(timesheets.status, "submitted"))
+          .limit(5)
+      : reportIds.length > 0
+        ? db
+            .select({
+              timesheet: timesheets,
+              employee: employees,
+            })
+            .from(timesheets)
+            .leftJoin(employees, eq(timesheets.employeeId, employees.id))
+            .where(
+              and(
+                eq(timesheets.status, "submitted"),
+                inArray(timesheets.employeeId, reportIds)
+              )
+            )
+            .limit(5)
+        : Promise.resolve([]);
+
+    pendingTimesheetApprovals = await timesheetApprovalsQuery;
   }
 
   // Fetch my pending tasks
@@ -312,7 +348,7 @@ export default async function HomePage() {
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {myTasks.length > 0 || pendingApprovals.length > 0 ? (
+            {myTasks.length > 0 || pendingApprovals.length > 0 || pendingTimesheetApprovals.length > 0 ? (
               <div className="space-y-2">
                 {pendingApprovals.length > 0 && (
                   <div>
@@ -322,6 +358,17 @@ export default async function HomePage() {
                     >
                       <Clock className="h-3 w-3" />
                       {pendingApprovals.length} time-off approval{pendingApprovals.length !== 1 ? "s" : ""}
+                    </Link>
+                  </div>
+                )}
+                {pendingTimesheetApprovals.length > 0 && (
+                  <div>
+                    <Link
+                      href="/time-tracking"
+                      className="text-sm text-primary hover:underline flex items-center gap-1"
+                    >
+                      <Clock className="h-3 w-3" />
+                      {pendingTimesheetApprovals.length} timesheet approval{pendingTimesheetApprovals.length !== 1 ? "s" : ""}
                     </Link>
                   </div>
                 )}

@@ -19,7 +19,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] My time-off balances with Request button ✅ Done
 - [x] To-do feed ✅ Done
   - [x] Time-off approvals ✅ Done
-  - [ ] Timesheet approvals - Missing (route exists but no widget)
+  - [x] Timesheet approvals ✅ Done (widget on dashboard shows pending timesheets)
   - [x] Onboarding tasks ✅ Done
   - [ ] Documents to sign - Missing (no widget)
 - [x] Direct reports widget ✅ Done
