@@ -7,18 +7,21 @@ import {
   employees,
   timeOffRequests,
   timesheets,
+  compensationHistory,
+  jobHistory,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 
 export interface CreateApprovalRequestParams {
   workflowId: number;
-  entityType: "time_off_request" | "timesheet";
+  entityType: "time_off_request" | "timesheet" | "compensation_change" | "job_info_change";
   entityId: number;
   requesterId: number;
+  metadata?: any;
 }
 
 export async function createApprovalRequest(params: CreateApprovalRequestParams) {
-  const { workflowId, entityType, entityId, requesterId } = params;
+  const { workflowId, entityType, entityId, requesterId, metadata } = params;
 
   // Fetch workflow and steps
   const workflow = await db
@@ -39,7 +42,7 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
 
   if (steps.length === 0) {
     // No steps defined, auto-approve
-    return null;
+    return { success: false, error: "No workflow steps defined" };
   }
 
   // Fetch requester to determine manager
@@ -59,6 +62,7 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
       requesterId,
       status: "pending",
       currentStep: 1,
+      metadata: metadata || null,
     })
     .returning();
 
@@ -92,7 +96,7 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
     });
   }
 
-  return request;
+  return { success: true, requestId: request.id, request };
 }
 
 export async function approveStep(
@@ -153,6 +157,47 @@ export async function approveStep(
           reviewedAt: new Date(),
         })
         .where(eq(timesheets.id, request.entityId));
+    } else if (request.entityType === "compensation_change") {
+      // Apply compensation change from metadata
+      const metadata = request.metadata as any;
+      if (metadata) {
+        await db.insert(compensationHistory).values({
+          employeeId: metadata.employeeId,
+          effectiveDate: metadata.effectiveDate,
+          payRate: metadata.payRate || "0",
+          payType: metadata.payType,
+          paySchedule: metadata.paySchedule,
+          currency: metadata.currency || "CAD",
+          changeReason: metadata.changeReason,
+        });
+      }
+    } else if (request.entityType === "job_info_change") {
+      // Apply job info change from metadata
+      const metadata = request.metadata as any;
+      if (metadata) {
+        // Update employee record
+        if (metadata.employeeUpdates) {
+          await db
+            .update(employees)
+            .set({
+              ...metadata.employeeUpdates,
+              updatedAt: new Date(),
+            })
+            .where(eq(employees.id, metadata.employeeId));
+        }
+        
+        // Record in job history (only fields that exist in job_history schema)
+        await db.insert(jobHistory).values({
+          employeeId: metadata.employeeId,
+          effectiveDate: metadata.effectiveDate,
+          jobTitle: metadata.jobTitle,
+          departmentId: metadata.departmentId,
+          divisionId: metadata.divisionId,
+          locationId: metadata.locationId,
+          managerId: metadata.managerId,
+          comment: metadata.changeReason,
+        });
+      }
     }
   } else {
     // Move to next step

@@ -50,33 +50,64 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       console.log("Skipped blob cleanup (tolerable)");
     }
 
-    await db.execute(sql`TRUNCATE TABLE audit_logs CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE documents CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE enps_responses CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE enps_survey_participants CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE enps_surveys CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE training_completions CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE training_courses CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE employee_tasks CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE task_templates CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE employee_notes CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE emergency_contacts CASCADE`);
+    // Truncate all tables in reverse dependency order
+    console.log("Truncating all tables...");
+    
+    // Auth tables (no FK deps)
+    await db.execute(sql`TRUNCATE TABLE verification_tokens CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE sessions CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE accounts CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE users CASCADE`);
+    
+    // Custom field values (depends on custom_fields & employees)
+    await db.execute(sql`TRUNCATE TABLE custom_field_values CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE custom_fields CASCADE`);
+    
+    // Approval requests (depends on workflows & employees)
+    await db.execute(sql`TRUNCATE TABLE approval_request_steps CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE approval_requests CASCADE`);
+    
+    // Time tracking (depends on employees & timesheets)
+    await db.execute(sql`TRUNCATE TABLE time_clocks CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE timesheets CASCADE`);
+    
+    // Time off (depends on employees & policies)
+    await db.execute(sql`TRUNCATE TABLE time_off_balance_adjustments CASCADE`);
     await db.execute(sql`TRUNCATE TABLE time_off_requests CASCADE`);
     await db.execute(sql`TRUNCATE TABLE time_off_balances CASCADE`);
     await db.execute(sql`TRUNCATE TABLE time_off_policies CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE equity_grants CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE bonus_details CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE compensation_history CASCADE`);
+    
+    // Employee-related (depends on employees)
+    await db.execute(sql`TRUNCATE TABLE employee_tasks CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE task_templates CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE training_completions CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE training_courses CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE enps_responses CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE enps_survey_participants CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE enps_surveys CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE documents CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employee_notes CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE emergency_contacts CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_history CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE compensation_history CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE bonus_details CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE equity_grants CASCADE`);
     await db.execute(sql`TRUNCATE TABLE employee_teams CASCADE`);
+    
+    // ATS (depends on job_openings & candidates)
     await db.execute(sql`TRUNCATE TABLE offer_letters CASCADE`);
     await db.execute(sql`TRUNCATE TABLE candidate_notes CASCADE`);
     await db.execute(sql`TRUNCATE TABLE candidates CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_openings CASCADE`);
+    
+    // Employees (depends on seats, departments, teams, etc.)
+    await db.execute(sql`TRUNCATE TABLE employees CASCADE`);
+    
+    // Workflows
     await db.execute(sql`TRUNCATE TABLE approval_workflow_steps CASCADE`);
     await db.execute(sql`TRUNCATE TABLE approval_workflows CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE access_levels CASCADE`);
-    await db.execute(sql`TRUNCATE TABLE employees CASCADE`);
+    
+    // Org structure
     await db.execute(sql`TRUNCATE TABLE seats CASCADE`);
     await db.execute(sql`TRUNCATE TABLE teams CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_levels CASCADE`);
@@ -84,8 +115,18 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE divisions CASCADE`);
     await db.execute(sql`TRUNCATE TABLE departments CASCADE`);
     await db.execute(sql`TRUNCATE TABLE locations CASCADE`);
+    
+    // System tables (no FK deps)
+    await db.execute(sql`TRUNCATE TABLE access_levels CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE people_views CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE saved_reports CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE scheduled_reports CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE holidays CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE audit_logs CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE rate_limits CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE webhooks CASCADE`);
 
-    console.log("✅ Database reset complete");
+    console.log("✅ Database reset complete (51 tables truncated)");
   }
 
   console.log("Creating locations...");

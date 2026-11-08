@@ -129,16 +129,17 @@ describe("Approval Workflows", () => {
   });
 
   test("creates 2-step approval request", async () => {
-    const request = await createApprovalRequest({
+    const result = await createApprovalRequest({
       workflowId: testWorkflowId,
       entityType: "time_off_request",
       entityId: testRequestId,
       requesterId: testEmployeeId,
     });
 
-    expect(request).toBeDefined();
-    expect(request?.status).toBe("pending");
-    expect(request?.currentStep).toBe(1);
+    expect(result.success).toBe(true);
+    expect(result.request).toBeDefined();
+    expect(result.request?.status).toBe("pending");
+    expect(result.request?.currentStep).toBe(1);
 
     // Verify steps were created
     const approvalData = await getApprovalRequestForEntity("time_off_request", testRequestId);

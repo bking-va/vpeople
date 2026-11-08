@@ -2,10 +2,11 @@
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { employees, jobHistory, compensationHistory } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { employees, jobHistory, compensationHistory, approvalWorkflows } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
+import { createApprovalRequest } from "@/lib/approvals";
 
 export async function updateEmployeeProfile(
   employeeId: number,
@@ -125,6 +126,81 @@ export async function updateEmployeeJobInfo(
     return { success: false, error: "Employee not found" };
   }
 
+  // Check if significant job change requires approval
+  const hasSignificantChange =
+    data.jobTitle ||
+    data.departmentId ||
+    data.locationId ||
+    data.managerId ||
+    data.employmentStatus;
+
+  if (hasSignificantChange) {
+    // Check if job info change approval workflow is enabled
+    const [jobWorkflow] = await db
+      .select()
+      .from(approvalWorkflows)
+      .where(
+        and(
+          eq(approvalWorkflows.type, "job_info_change"),
+          eq(approvalWorkflows.enabled, true)
+        )
+      )
+      .limit(1);
+
+    if (jobWorkflow) {
+      // Route through approval workflow
+      const effectiveDate = new Date().toISOString().split("T")[0];
+      
+      const approvalResult = await createApprovalRequest({
+        workflowId: jobWorkflow.id,
+        entityType: "job_info_change",
+        entityId: employeeId,
+        requesterId: currentEmployee.id,
+        metadata: {
+          employeeId,
+          effectiveDate,
+          jobTitle: data.jobTitle || existingEmployee.jobTitle,
+          jobFamilyId: data.jobFamilyId || existingEmployee.jobFamilyId,
+          jobLevelId: data.jobLevelId || existingEmployee.jobLevelId,
+          departmentId: data.departmentId || existingEmployee.departmentId,
+          divisionId: data.divisionId || existingEmployee.divisionId || null,
+          locationId: data.locationId || existingEmployee.locationId,
+          managerId: data.managerId || existingEmployee.managerId || null,
+          changeReason: "Job info update",
+          // Store employee table updates separately
+          employeeUpdates: data,
+        },
+      });
+
+      if (!approvalResult.success) {
+        return { success: false, error: "Failed to create approval request" };
+      }
+
+      await createAuditLog({
+        userId: session.user.id,
+        action: "job_info_change_requested",
+        entityType: "employee",
+        entityId: employeeId.toString(),
+        changes: {
+          employeeId,
+          before: existingEmployee,
+          after: data,
+          approvalRequestId: approvalResult.requestId,
+        },
+      });
+
+      revalidatePath(`/people/${employeeId}`);
+      revalidatePath("/approvals");
+
+      return { 
+        success: true, 
+        requiresApproval: true,
+        approvalRequestId: approvalResult.requestId,
+      };
+    }
+  }
+
+  // No workflow: apply immediately
   await db
     .update(employees)
     .set({
@@ -133,13 +209,7 @@ export async function updateEmployeeJobInfo(
     })
     .where(eq(employees.id, employeeId));
 
-  if (
-    data.jobTitle ||
-    data.departmentId ||
-    data.locationId ||
-    data.managerId ||
-    data.employmentStatus
-  ) {
+  if (hasSignificantChange) {
     await db.insert(jobHistory).values({
       employeeId,
       effectiveDate: new Date().toISOString().split("T")[0],
@@ -214,6 +284,68 @@ export async function updateEmployeeCompensation(
     return { success: false, error: "Employee not found" };
   }
 
+  // Check if compensation change approval workflow is enabled
+  const [compWorkflow] = await db
+    .select()
+    .from(approvalWorkflows)
+    .where(
+      and(
+        eq(approvalWorkflows.type, "compensation_change"),
+        eq(approvalWorkflows.enabled, true)
+      )
+    )
+    .limit(1);
+
+  if (compWorkflow) {
+    // Route through approval workflow
+    const approvalResult = await createApprovalRequest({
+      workflowId: compWorkflow.id,
+      entityType: "compensation_change",
+      entityId: employeeId,
+      requesterId: currentEmployee.id,
+      metadata: {
+        employeeId,
+        payRate: data.payRate,
+        payType: data.payType,
+        paySchedule: data.paySchedule,
+        currency: data.currency || "CAD",
+        effectiveDate: data.effectiveDate,
+        changeReason: data.changeReason,
+      },
+    });
+
+    if (!approvalResult.success) {
+      return { success: false, error: "Failed to create approval request" };
+    }
+
+    await createAuditLog({
+      userId: session.user.id,
+      action: "compensation_change_requested",
+      entityType: "employee",
+      entityId: employeeId.toString(),
+      changes: {
+        employeeId,
+        payRate: data.payRate,
+        payType: data.payType,
+        paySchedule: data.paySchedule,
+        currency: data.currency,
+        effectiveDate: data.effectiveDate,
+        changeReason: data.changeReason,
+        approvalRequestId: approvalResult.requestId,
+      },
+    });
+
+    revalidatePath(`/people/${employeeId}`);
+    revalidatePath("/approvals");
+
+    return { 
+      success: true, 
+      requiresApproval: true,
+      approvalRequestId: approvalResult.requestId,
+    };
+  }
+
+  // No workflow: apply immediately
   await db.insert(compensationHistory).values({
     employeeId,
     effectiveDate: data.effectiveDate,

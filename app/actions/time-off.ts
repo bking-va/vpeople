@@ -3,7 +3,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { timeOffRequests, timeOffBalances, employees, approvalRequests } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { approveStep, rejectStep, getApprovalRequestForEntity } from "@/lib/approvals";
@@ -128,20 +128,22 @@ export async function approveTimeOffRequest(requestId: number) {
 
     if (updatedApprovalData?.request.status === "approved") {
       const daysRequested = parseFloat(request.request.daysRequested);
-      await db
-        .update(timeOffBalances)
-        .set({
-          balance: db.$with(
-            `CAST(CAST(balance AS DECIMAL) - ${daysRequested} AS TEXT)`
-          ) as any,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(timeOffBalances.employeeId, request.request.employeeId),
-            eq(timeOffBalances.policyId, request.request.policyId)
-          )
-        );
+      
+      // Deduct balance in transaction with final status update
+      await db.transaction(async (tx) => {
+        await tx
+          .update(timeOffBalances)
+          .set({
+            balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(timeOffBalances.employeeId, request.request.employeeId),
+              eq(timeOffBalances.policyId, request.request.policyId)
+            )
+          );
+      });
     }
 
     revalidatePath("/time-off");
@@ -151,31 +153,32 @@ export async function approveTimeOffRequest(requestId: number) {
     return { success: true };
   } else {
     // Legacy single-step approval
-    await db
-      .update(timeOffRequests)
-      .set({
-        status: "approved",
-        reviewedBy: currentEmployee.id,
-        reviewedAt: new Date(),
-      })
-      .where(eq(timeOffRequests.id, requestId));
-
     const daysRequested = parseFloat(request.request.daysRequested);
 
-    await db
-      .update(timeOffBalances)
-      .set({
-        balance: db.$with(
-          `CAST(CAST(balance AS DECIMAL) - ${daysRequested} AS TEXT)`
-        ) as any,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(timeOffBalances.employeeId, request.request.employeeId),
-          eq(timeOffBalances.policyId, request.request.policyId)
-        )
-      );
+    // Update status and deduct balance in transaction
+    await db.transaction(async (tx) => {
+      await tx
+        .update(timeOffRequests)
+        .set({
+          status: "approved",
+          reviewedBy: currentEmployee.id,
+          reviewedAt: new Date(),
+        })
+        .where(eq(timeOffRequests.id, requestId));
+
+      await tx
+        .update(timeOffBalances)
+        .set({
+          balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(timeOffBalances.employeeId, request.request.employeeId),
+            eq(timeOffBalances.policyId, request.request.policyId)
+          )
+        );
+    });
 
     // Legacy single-step audit log
     await createAuditLog({

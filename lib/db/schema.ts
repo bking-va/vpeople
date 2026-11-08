@@ -726,6 +726,7 @@ export const approvalRequests = pgTable("approval_requests", {
     .references(() => employees.id),
   status: approvalRequestStatusEnum("status").default("pending").notNull(),
   currentStep: integer("current_step").default(1).notNull(),
+  metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
