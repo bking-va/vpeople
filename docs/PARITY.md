@@ -16,20 +16,20 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## 1. Home Dashboard Widgets
 
-- [ ] My time-off balances with Request button
-- [ ] To-do feed
-  - [ ] Time-off approvals
+- [x] My time-off balances with Request button
+- [x] To-do feed
+  - [x] Time-off approvals
   - [ ] Timesheet approvals
-  - [ ] Onboarding tasks
+  - [x] Onboarding tasks
   - [ ] Documents to sign
-- [ ] Direct reports widget
-- [ ] Headcount chart
+- [x] Direct reports widget
+- [x] Headcount chart
 - [ ] Turnover chart
-- [ ] Location charts
-- [ ] Celebrations (birthdays and anniversaries)
+- [x] Location charts
+- [x] Celebrations (birthdays and anniversaries)
 - [ ] Who's Out calendar
-- [ ] Company Links
-- [ ] New team members widget
+- [x] Company Links
+- [x] New team members widget
 - [ ] People without raise in 12+ months
 - [ ] Onboarding overdue/scheduled
 - [ ] Announcements
@@ -39,7 +39,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 2. Employee Profile Tabs
 
 ### Personal Tab
-- [ ] All standard fields
+- [x] All standard fields
 - [ ] Custom fields
   - [ ] Meal Preference-Chennai
   - [ ] Social House
@@ -57,35 +57,35 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Education table
 
 ### Job Tab
-- [ ] Hire Date
+- [x] Hire Date
 - [ ] Pay Group
-- [ ] Job Type/Level/Family
+- [x] Job Type/Level/Family
 - [ ] Acquisition source
 - [ ] SOC II scope flag
 
 ### Job Effective-Dated Tables
-- [ ] Employment Status history
-- [ ] Job Info (location, division, department, multi-team, title, reports-to)
+- [x] Employment Status history (in Job History table)
+- [x] Job Info (location, division, department, multi-team, title, reports-to)
 - [ ] Payroll & Finance
-- [ ] Compensation
+- [x] Compensation
 - [ ] Pay Adjustments
-- [ ] Annual Bonus
+- [x] Annual Bonus
 - [ ] Variable Plan
 - [ ] Variable Pay Actuals
 - [ ] Supplements
 - [ ] Internal Reporting (CAC fields)
 - [ ] Shift Timing
-- [ ] Equity
+- [x] Equity
 - [ ] Statutory Bonus
 
 ### Other Profile Tabs
 - [x] Time Off (basic implementation exists)
-- [ ] Documents with folder structure
+- [x] Documents with folder structure (stub)
 - [x] Emergency contacts (basic implementation exists)
 - [x] Notes (basic implementation exists)
-- [ ] Training
-- [ ] Benefits (policy number, member ID, dependents)
-- [ ] Assets and company credit cards
+- [x] Training (stub)
+- [x] Benefits (stub - policy number, member ID, dependents)
+- [x] Assets and company credit cards (stub)
 - [x] Onboarding (basic implementation exists)
 - [x] Offboarding (basic implementation exists)
 

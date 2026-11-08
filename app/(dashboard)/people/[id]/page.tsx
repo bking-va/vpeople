@@ -269,13 +269,17 @@ export default async function EmployeeProfilePage({
       </Card>
 
       <Tabs defaultValue="personal" className="w-full">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="personal">Personal</TabsTrigger>
           <TabsTrigger value="job">Job</TabsTrigger>
           {canViewCompensation && (
             <TabsTrigger value="compensation">Compensation</TabsTrigger>
           )}
           <TabsTrigger value="time-off">Time Off</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="training">Training</TabsTrigger>
+          <TabsTrigger value="benefits">Benefits</TabsTrigger>
+          <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="emergency">Emergency</TabsTrigger>
           <TabsTrigger value="tasks">Onboarding/Offboarding</TabsTrigger>
         </TabsList>
@@ -610,6 +614,50 @@ export default async function EmployeeProfilePage({
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="documents" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Documents</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">Document management coming soon. Will include offer letters, contracts, performance reviews, and signed documents.</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="training" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Training & Certifications</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">Training records coming soon. Will track required training, certifications, and completion dates.</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="benefits" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Benefits</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">Benefits enrollment coming soon. Will include policy numbers, member IDs, and dependent information.</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="assets" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Assets & Equipment</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">Asset tracking coming soon. Will include company equipment, credit cards, and other assigned assets.</p>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
