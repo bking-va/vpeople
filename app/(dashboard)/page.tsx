@@ -317,8 +317,8 @@ export default async function HomePage() {
               {headcountByDept.reduce((sum, dept) => sum + dept.count, 0)}
             </div>
             <p className="text-xs text-muted-foreground">Active Employees</p>
-            <div className="mt-4 space-y-1">
-              {headcountByDept.slice(0, 3).map((dept) => (
+            <div className="mt-4 space-y-1 max-h-32 overflow-y-auto">
+              {headcountByDept.map((dept) => (
                 <div key={dept.departmentId} className="flex justify-between text-xs">
                   <span className="text-muted-foreground">{dept.department?.name || "No Department"}</span>
                   <span className="font-medium">{dept.count}</span>

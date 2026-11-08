@@ -579,18 +579,21 @@ export async function runSeed(options: { reset?: boolean } = {}) {
                 : remote;
 
       const isManager = i % 10 === 0;
-      const managerId =
+      // Department heads (executives)
+      const deptHead =
         dept.id === tech.id
-          ? executives[1]?.id
+          ? executives[1]?.id // CTO
           : dept.id === services.id
-            ? ceo.id
+            ? executives[3]?.id // Use 4th exec as Services head
             : dept.id === sales.id
-              ? executives[2]?.id
+              ? executives[2]?.id // VP of Sales
               : dept.id === marketing.id
-                ? ceo.id
+                ? ceo.id // Marketing reports to CEO
                 : dept.id === product.id
-                  ? ceo.id
-                  : executives[0]?.id;
+                  ? ceo.id // Product reports to CEO for now
+                  : executives[0]?.id; // CPO for people ops
+      
+      const managerId = deptHead;
 
       const titles =
         dept.id === tech.id
@@ -667,12 +670,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       .onConflictDoNothing();
   }
 
+  // Get all employees including CEO and executives for time-off balances
   allEmployees = await db
     .select()
-    .from(schema.employees)
-    .where(
-      sql`email NOT IN ('brendan.king@vendasta.com', 'jean.parchewsky@vendasta.com', 'david.chen@vendasta.com', 'sarah.martinez@vendasta.com', 'raj.patel@vendasta.com')`
-    );
+    .from(schema.employees);
 
   console.log("Creating seats...");
 
