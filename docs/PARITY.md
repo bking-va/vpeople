@@ -132,13 +132,14 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Custom lists
 
 ### Custom Fields
-- [x] Custom fields schema ✅ Done (custom_fields + custom_field_values tables)
+- [x] Custom fields schema ⚠️ Partial (custom_fields + custom_field_values tables)
 - [x] Field types (text, number, date, select, textarea, checkbox)
 - [x] Entity type support (employee, job, compensation, etc.)
 - [x] Section/tab assignment
 - [x] Required field option
-- [x] Settings page to manage custom fields
-- [ ] Custom field creation form - Partial (schema ready, form UI not implemented)
+- [x] Settings page to list custom fields
+- [ ] Custom field creation/edit forms - Missing
+- [ ] Custom field CRUD API - Missing
 - [ ] Display custom fields on entity pages - Missing
 - [ ] Edit custom field values - Missing
 
@@ -164,13 +165,15 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Edit name, description
   - [x] Edit approval requirements (manager/admin)
   - [x] Edit auto-approve days
-- [x] Multi-step approval chains with custom approvers ✅ Done
+- [x] Multi-step approval chains infrastructure ⚠️ Partial
   - [x] approval_requests and approval_request_steps tables
   - [x] Time off requests with multi-step approvals (via lib/approvals.ts)
   - [x] Timesheet approvals with multi-step support (schema ready)
   - [x] Legacy single-step fallback when no workflow attached
   - [x] Approval progress UI with step tracking and status icons
   - [x] ApprovalStatus component showing current step and approver
+  - [ ] Workflow step builder UI - Missing (no way to define steps in Settings)
+  - [ ] Seeded workflow steps - Missing (no test data)
 - [ ] Information Updates (by location) - Missing
 - [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled)
 - [ ] Compensation changes with approval - Missing
@@ -197,10 +200,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Display name format
 
 ### Integrations
-- [x] iCalendar feeds ✅ Done
-  - [x] Who's out calendar (GET /api/calendar/[token]/time-off)
-  - [x] Holidays calendar (GET /api/calendar/[token]/holidays)
-  - [x] Per-user secret calendar token
+- [x] iCalendar feeds ⚠️ Partial
+  - [x] Who's out calendar (GET /api/calendar/[token]/time-off) ✅ Works if token exists
+  - [x] Holidays calendar (GET /api/calendar/[token]/holidays) ✅ Works if token exists
+  - [x] Per-user secret calendar token schema (calendarToken field)
+  - [ ] Token generation UI - Missing (no way to create/view tokens)
+  - [ ] Token regeneration - Missing
+  - [ ] Subscribe URLs display - Missing
   - [ ] Birthdays calendar - Missing
 - [x] Outbound webhooks ✅ Done
 
@@ -450,14 +456,17 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 14. SSO and Security
 
 - [x] Google SSO restricted to @vendasta.com
-- [x] Basic audit log ✅ Done (audit_logs table)
-- [x] Comprehensive audit log ✅ Done (/settings/audit admin page)
+- [x] Basic audit log ⚠️ Partial (audit_logs table)
+- [x] Comprehensive audit log ⚠️ Partial (/settings/audit admin page)
   - [x] Action tracking with user attribution
   - [x] Entity type and ID tracking
   - [x] Changes object with old/new values
-  - [x] Sensitive field redaction (salary, SIN/SSN, bank)
+  - [x] Sensitive field redaction (salary, SIN/SSN, bank) in UI
   - [x] Last 100 events display
-- [ ] Full change history per entity - Partial (logged but no entity-specific view)
+  - [x] Employee creation/termination logged
+  - [ ] Document deletion logging - Missing (DELETE route doesn't create audit log)
+  - [ ] Compensation changes logging - Not yet implemented
+  - [ ] Full change history per entity - Missing (no entity-specific view)
 - [ ] Security settings page
 - [ ] Session management
 - [ ] Two-factor authentication option
@@ -486,4 +495,4 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ---
 
 **Last Updated:** 2026-11-08  
-**Current Phase:** Break persistence, multi-step approval UI, New Employee wizard, Terminate flow, custom fields, audit trail, iCalendar feeds, org chart export - Comprehensive feature completion
+**Current Phase:** Critical bug fixes complete (user resolution, break minutes, days calculation). Remaining: workflow step builder UI, custom fields CRUD, iCal token generation
