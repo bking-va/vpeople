@@ -32,6 +32,7 @@ import { getUserPermissions } from "@/lib/permissions";
 import Link from "next/link";
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
+import { CompensationEditForm } from "@/components/compensation-edit-form";
 
 export default async function EmployeeProfilePage({
   params,
@@ -153,6 +154,7 @@ export default async function EmployeeProfilePage({
   
   // Allow viewing own data or use DB permissions
   const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
+  const canEditCompensation = permissions.canEditCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
   const canEditEmployee = isViewingSelf || permissions.canManageUsers;
 
@@ -511,6 +513,11 @@ export default async function EmployeeProfilePage({
                 </CardContent>
               </Card>
             )}
+
+            <CompensationEditForm
+              employeeId={employee.id}
+              canEdit={canEditCompensation}
+            />
           </TabsContent>
         )}
 

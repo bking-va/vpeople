@@ -67,10 +67,30 @@ export async function GET(request: NextRequest) {
         )
       );
 
-    const monthHours = monthTimesheets.reduce(
+    let monthHours = monthTimesheets.reduce(
       (sum, sheet) => sum + parseFloat(sheet.totalHours.toString()),
       0
     );
+
+    // Also add clock hours from this month (may not be in timesheets yet)
+    const monthClockRecords = await db
+      .select()
+      .from(timeClocks)
+      .where(
+        and(
+          eq(timeClocks.employeeId, employee.id),
+          gte(timeClocks.clockIn, startOfMonth)
+        )
+      );
+
+    for (const record of monthClockRecords) {
+      if (record.clockOut) {
+        const duration =
+          (new Date(record.clockOut).getTime() - new Date(record.clockIn).getTime()) /
+          (1000 * 60 * 60);
+        monthHours += duration;
+      }
+    }
 
     return NextResponse.json({
       weekHours,

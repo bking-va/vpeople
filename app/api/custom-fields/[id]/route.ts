@@ -40,6 +40,7 @@ export async function PATCH(
       options,
       isRequired,
       orderIndex,
+      visibility,
     } = data;
 
     const updateData: any = {};
@@ -51,6 +52,7 @@ export async function PATCH(
       updateData.options = options ? JSON.stringify(options) : null;
     if (isRequired !== undefined) updateData.isRequired = isRequired;
     if (orderIndex !== undefined) updateData.orderIndex = orderIndex;
+    if (visibility !== undefined) updateData.visibility = visibility;
 
     const [field] = await db
       .update(customFields)

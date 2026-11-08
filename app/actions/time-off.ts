@@ -102,6 +102,24 @@ export async function approveTimeOffRequest(requestId: number) {
       currentEmployee.id
     );
 
+    // Create audit log for this step approval
+    await createAuditLog({
+      userId: session.user.id,
+      action: "time_off_approved",
+      entityType: "time_off_request",
+      entityId: requestId.toString(),
+      changes: {
+        requestId,
+        employeeId: request.request.employeeId,
+        policyId: request.request.policyId,
+        startDate: request.request.startDate,
+        endDate: request.request.endDate,
+        daysRequested: request.request.daysRequested,
+        stepOrder: currentStep.step.stepOrder,
+        reviewedBy: currentEmployee.id,
+      },
+    });
+
     // If final approval, deduct balance
     const updatedApprovalData = await getApprovalRequestForEntity(
       "time_off_request",
@@ -125,6 +143,12 @@ export async function approveTimeOffRequest(requestId: number) {
           )
         );
     }
+
+    revalidatePath("/time-off");
+    revalidatePath("/time-off/approvals");
+    revalidatePath(`/people/${request.request.employeeId}`);
+
+    return { success: true };
   } else {
     // Legacy single-step approval
     await db
@@ -152,28 +176,29 @@ export async function approveTimeOffRequest(requestId: number) {
           eq(timeOffBalances.policyId, request.request.policyId)
         )
       );
+
+    // Legacy single-step audit log
+    await createAuditLog({
+      userId: session.user.id,
+      action: "time_off_approved",
+      entityType: "time_off_request",
+      entityId: requestId.toString(),
+      changes: {
+        requestId,
+        employeeId: request.request.employeeId,
+        policyId: request.request.policyId,
+        startDate: request.request.startDate,
+        endDate: request.request.endDate,
+        daysRequested: request.request.daysRequested,
+        reviewedBy: currentEmployee.id,
+      },
+    });
+
+    revalidatePath("/time-off");
+    revalidatePath(`/people/${request.request.employeeId}`);
+
+    return { success: true };
   }
-
-  await createAuditLog({
-    userId: session.user.id,
-    action: "time_off_approved",
-    entityType: "time_off_request",
-    entityId: requestId.toString(),
-    changes: {
-      requestId,
-      employeeId: request.request.employeeId,
-      policyId: request.request.policyId,
-      startDate: request.request.startDate,
-      endDate: request.request.endDate,
-      daysRequested: request.request.daysRequested,
-      reviewedBy: currentEmployee.id,
-    },
-  });
-
-  revalidatePath("/time-off");
-  revalidatePath(`/people/${request.request.employeeId}`);
-
-  return { success: true };
 }
 
 export async function denyTimeOffRequest(requestId: number, reason?: string) {
@@ -270,6 +295,31 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
       currentEmployee.id,
       reason
     );
+
+    // Create audit log for this step rejection
+    await createAuditLog({
+      userId: session.user.id,
+      action: "time_off_denied",
+      entityType: "time_off_request",
+      entityId: requestId.toString(),
+      changes: {
+        requestId,
+        employeeId: request.request.employeeId,
+        policyId: request.request.policyId,
+        startDate: request.request.startDate,
+        endDate: request.request.endDate,
+        daysRequested: request.request.daysRequested,
+        stepOrder: currentStep.step.stepOrder,
+        reviewedBy: currentEmployee.id,
+        reason,
+      },
+    });
+
+    revalidatePath("/time-off");
+    revalidatePath("/time-off/approvals");
+    revalidatePath(`/people/${request.request.employeeId}`);
+
+    return { success: true };
   } else {
     // Legacy single-step denial
     await db
@@ -281,27 +331,28 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
         reviewNotes: reason,
       })
       .where(eq(timeOffRequests.id, requestId));
+
+    // Legacy single-step audit log
+    await createAuditLog({
+      userId: session.user.id,
+      action: "time_off_denied",
+      entityType: "time_off_request",
+      entityId: requestId.toString(),
+      changes: {
+        requestId,
+        employeeId: request.request.employeeId,
+        policyId: request.request.policyId,
+        startDate: request.request.startDate,
+        endDate: request.request.endDate,
+        daysRequested: request.request.daysRequested,
+        reviewedBy: currentEmployee.id,
+        reason,
+      },
+    });
+
+    revalidatePath("/time-off");
+    revalidatePath(`/people/${request.request.employeeId}`);
+
+    return { success: true };
   }
-
-  await createAuditLog({
-    userId: session.user.id,
-    action: "time_off_denied",
-    entityType: "time_off_request",
-    entityId: requestId.toString(),
-    changes: {
-      requestId,
-      employeeId: request.request.employeeId,
-      policyId: request.request.policyId,
-      startDate: request.request.startDate,
-      endDate: request.request.endDate,
-      daysRequested: request.request.daysRequested,
-      reviewedBy: currentEmployee.id,
-      reason,
-    },
-  });
-
-  revalidatePath("/time-off");
-  revalidatePath(`/people/${request.request.employeeId}`);
-
-  return { success: true };
 }

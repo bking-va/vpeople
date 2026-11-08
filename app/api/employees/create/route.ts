@@ -115,7 +115,19 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ employee: newEmployee });
+    // Return minimal DTO without sensitive data
+    return NextResponse.json({
+      employee: {
+        id: newEmployee.id,
+        employeeNumber: newEmployee.employeeNumber,
+        firstName: newEmployee.firstName,
+        lastName: newEmployee.lastName,
+        email: newEmployee.email,
+        hireDate: newEmployee.hireDate,
+        employmentStatus: newEmployee.employmentStatus,
+        jobTitle: newEmployee.jobTitle,
+      },
+    });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Failed to create employee:", errorMessage);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { customFieldValues, employees } from "@/lib/db/schema";
+import { customFieldValues, customFields, employees } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserPermissions } from "@/lib/permissions";
 
@@ -19,10 +19,54 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Entity ID required" }, { status: 400 });
     }
 
-    const values = await db
+    const targetEmployeeId = parseInt(entityId, 10);
+    const permissions = await getUserPermissions(session.user.email);
+
+    // Check if user can view this employee's data
+    const isViewingSelf = session.user.employeeId === targetEmployeeId;
+    
+    // Get target employee to check manager chain
+    const [targetEmployee] = await db
       .select()
+      .from(employees)
+      .where(eq(employees.id, targetEmployeeId))
+      .limit(1);
+
+    if (!targetEmployee) {
+      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+    }
+
+    const isManager = targetEmployee.managerId === session.user.employeeId;
+    const isHROrAdmin = permissions.canManageUsers;
+
+    // Fetch all custom field values with their field definitions
+    const valuesWithFields = await db
+      .select({
+        value: customFieldValues,
+        field: customFields,
+      })
       .from(customFieldValues)
-      .where(eq(customFieldValues.entityId, parseInt(entityId, 10)));
+      .leftJoin(customFields, eq(customFieldValues.customFieldId, customFields.id))
+      .where(eq(customFieldValues.entityId, targetEmployeeId));
+
+    // Filter values based on visibility and user permissions
+    const visibleValues = valuesWithFields.filter(({ field }) => {
+      if (!field) return false;
+
+      switch (field.visibility) {
+        case "everyone":
+          return true;
+        case "manager_hr":
+          return isViewingSelf || isManager || isHROrAdmin;
+        case "hr_only":
+          return isViewingSelf || isHROrAdmin;
+        default:
+          return false;
+      }
+    });
+
+    // Return only the value objects
+    const values = visibleValues.map(({ value }) => value);
 
     return NextResponse.json({ values });
   } catch (error: unknown) {

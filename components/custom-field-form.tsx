@@ -25,6 +25,7 @@ interface CustomField {
   options: string | null;
   isRequired: boolean;
   orderIndex: number | null;
+  visibility: string;
 }
 
 interface CustomFieldFormProps {
@@ -42,6 +43,7 @@ export function CustomFieldForm({ field }: CustomFieldFormProps) {
     options: field?.options || "",
     isRequired: field?.isRequired || false,
     orderIndex: field?.orderIndex || 0,
+    visibility: field?.visibility || "everyone",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -61,6 +63,7 @@ export function CustomFieldForm({ field }: CustomFieldFormProps) {
         section: formData.section,
         isRequired: formData.isRequired,
         orderIndex: formData.orderIndex,
+        visibility: formData.visibility,
       };
 
       // Parse options if field type is select
@@ -214,6 +217,28 @@ export function CustomFieldForm({ field }: CustomFieldFormProps) {
             />
             <p className="text-sm text-muted-foreground">
               Lower numbers appear first
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="visibility">Field Visibility *</Label>
+            <Select
+              value={formData.visibility}
+              onValueChange={(value) =>
+                setFormData({ ...formData, visibility: value })
+              }
+            >
+              <SelectTrigger id="visibility">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="everyone">Everyone</SelectItem>
+                <SelectItem value="manager_hr">Manager + HR/Admin</SelectItem>
+                <SelectItem value="hr_only">HR/Admin Only</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              Controls who can view this field on employee profiles
             </p>
           </div>
 

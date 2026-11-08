@@ -1580,6 +1580,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       options: JSON.stringify(["Small", "Medium", "Large", "X-Large", "2X-Large"]),
       isRequired: false,
       orderIndex: 1,
+      visibility: "everyone" as const,
     },
     {
       name: "Dietary Preferences",
@@ -1589,6 +1590,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       options: null,
       isRequired: false,
       orderIndex: 2,
+      visibility: "hr_only" as const,
     },
   ];
 

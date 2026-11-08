@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       options,
       isRequired,
       orderIndex,
+      visibility,
     } = data;
 
     const [field] = await db
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest) {
         options: options ? JSON.stringify(options) : null,
         isRequired: isRequired || false,
         orderIndex: orderIndex || 0,
+        visibility: visibility || "everyone",
       })
       .returning();
 

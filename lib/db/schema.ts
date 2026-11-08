@@ -752,6 +752,12 @@ export const customFieldTypeEnum = pgEnum("custom_field_type", [
   "checkbox",
 ]);
 
+export const customFieldVisibilityEnum = pgEnum("custom_field_visibility", [
+  "everyone",
+  "manager_hr",
+  "hr_only",
+]);
+
 export const customFields = pgTable("custom_fields", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -761,6 +767,7 @@ export const customFields = pgTable("custom_fields", {
   options: text("options"), // JSON array for select type
   isRequired: boolean("is_required").default(false).notNull(),
   orderIndex: integer("order_index").default(0),
+  visibility: customFieldVisibilityEnum("visibility").default("everyone").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

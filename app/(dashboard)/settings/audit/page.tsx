@@ -99,34 +99,16 @@ export default async function AuditLogPage() {
                       
                       {log.changes && typeof log.changes === "object" && Object.keys(log.changes).length > 0 ? (
                         <div className="mt-2 text-xs text-muted-foreground space-y-1">
-                          {Object.entries(log.changes as Record<string, unknown>).map(([key, value]) => {
-                            const isSensitive =
-                              key.toLowerCase().includes("salary") ||
-                              key.toLowerCase().includes("compensation") ||
-                              key.toLowerCase().includes("sin") ||
-                              key.toLowerCase().includes("ssn") ||
-                              key.toLowerCase().includes("bank");
-
-                            if (isSensitive) {
-                              return (
-                                <div key={key} className="flex gap-2">
-                                  <span className="font-medium">{key}:</span>
-                                  <span className="italic">Changed (value redacted)</span>
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <div key={key} className="flex gap-2">
-                                <span className="font-medium">{key}:</span>
-                                <span>
-                                  {typeof value === "object"
-                                    ? JSON.stringify(value)
-                                    : String(value)}
-                                </span>
-                              </div>
-                            );
-                          })}
+                          {Object.entries(log.changes as Record<string, unknown>).map(([key, value]) => (
+                            <div key={key} className="flex gap-2">
+                              <span className="font-medium">{key}:</span>
+                              <span>
+                                {typeof value === "object"
+                                  ? JSON.stringify(value)
+                                  : String(value)}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       ) : null}
                       

@@ -117,7 +117,18 @@ export async function POST(
       },
     });
 
-    return NextResponse.json({ employee: updatedEmployee });
+    // Return minimal DTO without sensitive data
+    return NextResponse.json({
+      employee: {
+        id: updatedEmployee.id,
+        employeeNumber: updatedEmployee.employeeNumber,
+        firstName: updatedEmployee.firstName,
+        lastName: updatedEmployee.lastName,
+        email: updatedEmployee.email,
+        employmentStatus: updatedEmployee.employmentStatus,
+        terminationDate: updatedEmployee.terminationDate,
+      },
+    });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Failed to terminate employee:", errorMessage);
