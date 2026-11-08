@@ -98,9 +98,11 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 3. People Views
 
 - [x] List view (basic)
-- [ ] Directory cards (group and filter by location)
+- [x] Directory with filters (department, location, search)
+- [x] Export to CSV
 - [x] Org chart (basic)
 - [ ] Org chart export
+- [ ] Saved views
 - [ ] New Employee wizard
 - [ ] Terminate employee flow
   - [ ] Termination reasons
@@ -128,19 +130,20 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Custom lists
 
 ### Access Levels
-- [x] Basic RBAC (employee, manager, admin)
-- [ ] Full Admin level
+- [x] Basic RBAC (employee, manager, admin, full_admin)
+- [x] Settings page UI showing access levels
 - [ ] No Access level
 - [ ] Post-Employment level
 - [ ] Custom levels (scoped by region/department)
-- [ ] Per-field-group permissions
-  - [ ] Compensation restrictions
-  - [ ] SIN/SSN restrictions
-  - [ ] Bank data restrictions
+- [x] Per-field-group permissions (basic)
+  - [x] Compensation restrictions
+  - [x] SIN/SSN restrictions
+  - [x] Bank data restrictions
 - [ ] Multiple levels per user
 - [ ] Access history log
 
 ### Approval Workflows
+- [x] Settings page UI showing workflow config
 - [ ] Information Updates (by location)
 - [x] Time Off (reports-to) - basic
 - [ ] Compensation changes
@@ -215,6 +218,11 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ---
 
 ## 7. Hiring (ATS)
+
+- [x] Basic hiring dashboard with metrics
+- [x] Job openings UI (empty state)
+- [x] Application pipeline UI (empty state)
+- [x] Candidate sources UI (empty state)
 
 ### Job Openings
 - [ ] Job opening statuses
