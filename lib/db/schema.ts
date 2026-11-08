@@ -236,6 +236,7 @@ export const employees = pgTable("employees", {
   photoUrl: text("photo_url"),
   dietaryRestrictions: text("dietary_restrictions"),
   tshirtSize: text("tshirt_size"),
+  calendarToken: text("calendar_token"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
