@@ -222,7 +222,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 5. Time Off
 
 - [x] Basic policies (seeded, not editable)
-- [ ] Policy management UI (create, edit policies)
+- [x] Policy management UI (create, edit policies) ✅ Done (631648c - Settings page + CRUD API + integration tests)
 - [ ] Categories
 - [ ] Accrual rules that run on schedule
 - [ ] Carryover rules

@@ -59,6 +59,26 @@ export default async function SettingsPage() {
           </Card>
         </Link>
 
+        <Link href="/settings/time-off-policies">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
+            <CardHeader>
+              <CardTitle>Time Off Policies</CardTitle>
+              <CardDescription>
+                Manage vacation and leave policies
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Configure time-off policies including accrual rates, carryover limits, and approval requirements.
+                Manage vacation, sick leave, and other leave types.
+              </p>
+              <Button variant="outline" className="mt-4 w-full">
+                Manage Policies →
+              </Button>
+            </CardContent>
+          </Card>
+        </Link>
+
         <Card>
           <CardHeader>
             <CardTitle>Organizational Structure</CardTitle>
