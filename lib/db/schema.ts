@@ -931,6 +931,7 @@ export const timeClocks = pgTable("time_clocks", {
   clockIn: timestamp("clock_in").notNull(),
   clockOut: timestamp("clock_out"),
   breakMinutes: integer("break_minutes").default(0),
+  breakStart: timestamp("break_start"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

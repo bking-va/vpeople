@@ -10,8 +10,6 @@ export function ClockWidget() {
   const [currentClock, setCurrentClock] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [onBreak, setOnBreak] = useState(false);
-  const [breakStart, setBreakStart] = useState<Date | null>(null);
 
   useEffect(() => {
     fetchClockStatus();
@@ -42,8 +40,6 @@ export function ClockWidget() {
 
       if (response.ok) {
         await fetchClockStatus();
-        setOnBreak(false);
-        setBreakStart(null);
       } else {
         alert("Clock action failed");
       }
@@ -56,37 +52,26 @@ export function ClockWidget() {
   };
 
   const handleBreak = async (breakAction: "start" | "end") => {
-    if (breakAction === "start") {
-      setOnBreak(true);
-      setBreakStart(new Date());
-    } else {
-      if (!breakStart || !currentClock) return;
-      
-      setIsLoading(true);
-      try {
-        const breakMinutes = Math.floor((new Date().getTime() - breakStart.getTime()) / 60000);
-        const response = await fetch("/api/time-tracking/clock", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clockId: currentClock.id,
-            breakMinutes: (currentClock.breakMinutes || 0) + breakMinutes,
-          }),
-        });
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/time-tracking/clock", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: breakAction === "start" ? "start_break" : "end_break",
+        }),
+      });
 
-        if (response.ok) {
-          await fetchClockStatus();
-          setOnBreak(false);
-          setBreakStart(null);
-        } else {
-          alert("Break update failed");
-        }
-      } catch (error) {
-        console.error("Break update failed:", error);
-        alert("Break update failed");
-      } finally {
-        setIsLoading(false);
+      if (response.ok) {
+        await fetchClockStatus();
+      } else {
+        alert("Break action failed");
       }
+    } catch (error) {
+      console.error("Break action failed:", error);
+      alert("Break action failed");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -100,8 +85,9 @@ export function ClockWidget() {
     diff -= breakMs;
     
     // Subtract current ongoing break
-    if (onBreak && breakStart) {
-      const currentBreakMs = currentTime.getTime() - breakStart.getTime();
+    if (currentClock.breakStart) {
+      const breakStartTime = new Date(currentClock.breakStart);
+      const currentBreakMs = currentTime.getTime() - breakStartTime.getTime();
       diff -= currentBreakMs;
     }
     
@@ -112,6 +98,8 @@ export function ClockWidget() {
       .toString()
       .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   };
+
+  const onBreak = currentClock?.breakStart != null;
 
   return (
     <Card>

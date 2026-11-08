@@ -126,38 +126,78 @@ export async function PUT(request: NextRequest) {
     }
 
     const data = await request.json();
-    const { clockId, breakMinutes } = data;
+    const { action } = data;
 
-    if (!clockId || breakMinutes === undefined) {
+    if (!action || (action !== "start_break" && action !== "end_break")) {
       return NextResponse.json(
-        { error: "Clock ID and break minutes required" },
+        { error: "Invalid action. Must be 'start_break' or 'end_break'" },
         { status: 400 }
       );
     }
 
-    // Update break minutes on the clock entry
-    const [updated] = await db
-      .update(timeClocks)
-      .set({
-        breakMinutes,
-        updatedAt: new Date(),
-      })
+    // Find active clock entry
+    const [existing] = await db
+      .select()
+      .from(timeClocks)
       .where(
         and(
-          eq(timeClocks.id, clockId),
-          eq(timeClocks.employeeId, employee.id)
+          eq(timeClocks.employeeId, employee.id),
+          isNull(timeClocks.clockOut)
         )
       )
-      .returning();
+      .limit(1);
 
-    if (!updated) {
+    if (!existing) {
       return NextResponse.json(
-        { error: "Clock entry not found" },
-        { status: 404 }
+        { error: "No active clock entry found" },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json({ clockEntry: updated });
+    if (action === "start_break") {
+      if (existing.breakStart) {
+        return NextResponse.json(
+          { error: "Break already in progress" },
+          { status: 400 }
+        );
+      }
+
+      const [updated] = await db
+        .update(timeClocks)
+        .set({
+          breakStart: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(timeClocks.id, existing.id))
+        .returning();
+
+      return NextResponse.json({ clockEntry: updated });
+    } else if (action === "end_break") {
+      if (!existing.breakStart) {
+        return NextResponse.json(
+          { error: "No break in progress" },
+          { status: 400 }
+        );
+      }
+
+      const now = new Date();
+      const breakStartTime = new Date(existing.breakStart);
+      const elapsedMinutes = Math.floor((now.getTime() - breakStartTime.getTime()) / (1000 * 60));
+
+      const [updated] = await db
+        .update(timeClocks)
+        .set({
+          breakMinutes: (existing.breakMinutes || 0) + elapsedMinutes,
+          breakStart: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(timeClocks.id, existing.id))
+        .returning();
+
+      return NextResponse.json({ clockEntry: updated });
+    }
+
+    return NextResponse.json({ error: "Invalid state" }, { status: 500 });
   } catch (error: any) {
     console.error("Failed to update break time:", error);
     return NextResponse.json(

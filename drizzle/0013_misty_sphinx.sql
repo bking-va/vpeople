@@ -1,0 +1,1 @@
+ALTER TABLE "time_clocks" ADD COLUMN "break_start" timestamp;
