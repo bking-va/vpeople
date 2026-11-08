@@ -31,6 +31,7 @@ import { auth } from "@/lib/auth";
 import { getUserPermissions } from "@/lib/permissions";
 import Link from "next/link";
 import { ProfileDocuments } from "@/components/profile-documents";
+import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 
 export default async function EmployeeProfilePage({
   params,
@@ -153,6 +154,7 @@ export default async function EmployeeProfilePage({
   // Allow viewing own data or use DB permissions
   const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
+  const canEditEmployee = isViewingSelf || permissions.canManageUsers;
 
   // Only query sensitive personal info if authorized
   const sensitivePersonalInfo = canViewSensitivePersonalInfo
@@ -346,6 +348,16 @@ export default async function EmployeeProfilePage({
               <InfoField label="GitHub" value={employee.githubUrl} />
             </CardContent>
           </Card>
+
+          <Card>
+            <CardContent>
+              <CustomFieldsDisplay
+                section="personal"
+                entityId={employee.id}
+                canEdit={canEditEmployee}
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="job" className="space-y-4">
@@ -410,6 +422,16 @@ export default async function EmployeeProfilePage({
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardContent>
+              <CustomFieldsDisplay
+                section="job"
+                entityId={employee.id}
+                canEdit={canEditEmployee}
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {canViewCompensation && (

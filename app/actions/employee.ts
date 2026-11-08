@@ -20,21 +20,19 @@ export async function updateEmployeeProfile(
 ) {
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.employeeId) {
     return { success: false, error: "Unauthorized" };
   }
 
-  const currentUserEmployee = await db
+  const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, session.user.employeeId))
     .limit(1);
 
-  if (!currentUserEmployee.length) {
+  if (!currentEmployee) {
     return { success: false, error: "Employee record not found" };
   }
-
-  const currentEmployee = currentUserEmployee[0];
   const isAdmin = currentEmployee.accessLevel === "full_admin";
   const isSelf = currentEmployee.id === employeeId;
 
@@ -95,21 +93,19 @@ export async function updateEmployeeJobInfo(
 ) {
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.employeeId) {
     return { success: false, error: "Unauthorized" };
   }
 
-  const currentUserEmployee = await db
+  const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, session.user.employeeId))
     .limit(1);
 
-  if (!currentUserEmployee.length) {
+  if (!currentEmployee) {
     return { success: false, error: "Employee record not found" };
   }
-
-  const currentEmployee = currentUserEmployee[0];
   const isAdmin = currentEmployee.accessLevel === "full_admin";
 
   if (!isAdmin) {
@@ -186,21 +182,19 @@ export async function updateEmployeeCompensation(
 ) {
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.employeeId) {
     return { success: false, error: "Unauthorized" };
   }
 
-  const currentUserEmployee = await db
+  const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, session.user.employeeId))
     .limit(1);
 
-  if (!currentUserEmployee.length) {
+  if (!currentEmployee) {
     return { success: false, error: "Employee record not found" };
   }
-
-  const currentEmployee = currentUserEmployee[0];
   const isAdmin = currentEmployee.accessLevel === "full_admin";
 
   if (!isAdmin) {

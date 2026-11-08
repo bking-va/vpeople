@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { approvalWorkflows } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { WorkflowForm } from "@/components/workflow-form";
+import { WorkflowSteps } from "@/components/workflow-steps";
 
 export default async function EditWorkflowPage({
   params,
@@ -37,6 +38,8 @@ export default async function EditWorkflowPage({
       </div>
 
       <WorkflowForm workflow={workflow} />
+      
+      <WorkflowSteps workflowId={workflow.id} />
     </div>
   );
 }

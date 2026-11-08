@@ -9,6 +9,7 @@ import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TimeOffActions } from "@/components/time-off-actions";
+import { CalendarFeeds } from "@/components/calendar-feeds";
 
 export default async function TimeOffPage() {
   const session = await auth();
@@ -196,6 +197,8 @@ export default async function TimeOffPage() {
           )}
         </CardContent>
       </Card>
+
+      <CalendarFeeds employeeId={employee.id} />
     </div>
   );
 }

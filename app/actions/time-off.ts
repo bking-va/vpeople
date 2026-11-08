@@ -11,7 +11,7 @@ import { approveStep, rejectStep, getApprovalRequestForEntity } from "@/lib/appr
 export async function approveTimeOffRequest(requestId: number) {
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.employeeId) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -29,17 +29,15 @@ export async function approveTimeOffRequest(requestId: number) {
     return { success: false, error: "Request not found" };
   }
 
-  const currentUserEmployee = await db
+  const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, session.user.employeeId))
     .limit(1);
 
-  if (!currentUserEmployee.length) {
+  if (!currentEmployee) {
     return { success: false, error: "Employee record not found" };
   }
-
-  const currentEmployee = currentUserEmployee[0];
 
   const isManager = request.employee?.managerId === currentEmployee.id;
   const isAdmin = session.user.role === "admin" || currentEmployee.accessLevel === "full_admin";
@@ -181,7 +179,7 @@ export async function approveTimeOffRequest(requestId: number) {
 export async function denyTimeOffRequest(requestId: number, reason?: string) {
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.employeeId) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -199,17 +197,15 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
     return { success: false, error: "Request not found" };
   }
 
-  const currentUserEmployee = await db
+  const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, session.user.employeeId))
     .limit(1);
 
-  if (!currentUserEmployee.length) {
+  if (!currentEmployee) {
     return { success: false, error: "Employee record not found" };
   }
-
-  const currentEmployee = currentUserEmployee[0];
 
   const isManager = request.employee?.managerId === currentEmployee.id;
   const isAdmin = session.user.role === "admin" || currentEmployee.accessLevel === "full_admin";

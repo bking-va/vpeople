@@ -69,9 +69,18 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
     // Determine approver based on role
     if (step.approverRole === "manager" && requester.managerId) {
       approverId = requester.managerId;
-    } else if (step.approverRole === "admin" || step.approverRole === "hr") {
-      // For now, leave approverId null for admin/HR approvals
-      // These will be shown to all admins/HR users
+    } else if (step.approverRole === "manager_manager" && requester.managerId) {
+      // Get manager's manager
+      const [manager] = await db
+        .select()
+        .from(employees)
+        .where(eq(employees.id, requester.managerId))
+        .limit(1);
+      if (manager && manager.managerId) {
+        approverId = manager.managerId;
+      }
+    } else if (step.approverRole === "admin" || step.approverRole === "hr" || step.approverRole === "full_admin") {
+      // For admin/HR/full_admin, leave null - shown to all with that access level
       approverId = null;
     }
 
@@ -79,7 +88,7 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
       approvalRequestId: request.id,
       stepOrder: step.stepOrder,
       approverId,
-      status: step.stepOrder === 1 ? "pending" : "pending",
+      status: "pending",
     });
   }
 
@@ -147,11 +156,25 @@ export async function approveStep(
     }
   } else {
     // Move to next step
-    const nextStep = allSteps.findIndex((s) => s.status === "pending");
-    if (nextStep !== -1) {
+    const currentStepIndex = allSteps.findIndex((s) => s.stepOrder === stepOrder);
+    if (currentStepIndex !== -1 && currentStepIndex + 1 < allSteps.length) {
+      const nextStepObj = allSteps[currentStepIndex + 1];
+      
+      // Mark next step as pending
+      await db
+        .update(approvalRequestSteps)
+        .set({ status: "pending" })
+        .where(
+          and(
+            eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+            eq(approvalRequestSteps.stepOrder, nextStepObj.stepOrder)
+          )
+        );
+
+      // Update request current step
       await db
         .update(approvalRequests)
-        .set({ currentStep: allSteps[nextStep].stepOrder })
+        .set({ currentStep: nextStepObj.stepOrder })
         .where(eq(approvalRequests.id, approvalRequestId));
     }
   }

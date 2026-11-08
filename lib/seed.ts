@@ -342,10 +342,43 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     },
   ];
 
-  await db
+  const insertedWorkflows = await db
     .insert(schema.approvalWorkflows)
     .values(workflowValues)
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning();
+
+  console.log("Creating workflow steps...");
+
+  // Get the time off workflow (either just inserted or existing)
+  const [timeOffWorkflow] = await db
+    .select()
+    .from(schema.approvalWorkflows)
+    .where(eq(schema.approvalWorkflows.type, "time_off"))
+    .limit(1);
+
+  if (timeOffWorkflow) {
+    // Create 2-step approval: manager first, then full_admin
+    const workflowStepValues = [
+      {
+        workflowId: timeOffWorkflow.id,
+        stepOrder: 1,
+        approverRole: "manager",
+        requiredCount: 1,
+      },
+      {
+        workflowId: timeOffWorkflow.id,
+        stepOrder: 2,
+        approverRole: "full_admin",
+        requiredCount: 1,
+      },
+    ];
+
+    await db
+      .insert(schema.approvalWorkflowSteps)
+      .values(workflowStepValues)
+      .onConflictDoNothing();
+  }
 
   console.log("Creating teams...");
 
@@ -861,6 +894,18 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   allEmployees = await db
     .select()
     .from(schema.employees);
+
+  console.log("Generating calendar tokens for employees...");
+
+  // Generate calendar tokens for all employees
+  const { randomBytes } = await import("crypto");
+  for (const emp of allEmployees) {
+    const token = randomBytes(32).toString("hex");
+    await db
+      .update(schema.employees)
+      .set({ calendarToken: token })
+      .where(eq(schema.employees.id, emp.id));
+  }
 
   console.log("Creating seats...");
 
@@ -1523,6 +1568,79 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   ]);
 
   await db.insert(schema.documents).values(documentsData);
+
+  console.log("Creating custom fields...");
+
+  const customFieldsData = [
+    {
+      name: "T-Shirt Size",
+      fieldType: "select" as const,
+      entityType: "employee" as const,
+      section: "personal",
+      options: JSON.stringify(["Small", "Medium", "Large", "X-Large", "2X-Large"]),
+      isRequired: false,
+      orderIndex: 1,
+    },
+    {
+      name: "Dietary Preferences",
+      fieldType: "textarea" as const,
+      entityType: "employee" as const,
+      section: "personal",
+      options: null,
+      isRequired: false,
+      orderIndex: 2,
+    },
+  ];
+
+  const insertedCustomFields = await db
+    .insert(schema.customFields)
+    .values(customFieldsData)
+    .onConflictDoNothing()
+    .returning();
+
+  // Seed some sample custom field values for employees
+  if (insertedCustomFields.length > 0 && allEmployees.length > 0) {
+    const customFieldValuesData = [];
+    
+    // Set T-Shirt Size for first few employees
+    const sizes = ["Small", "Medium", "Large", "X-Large", "2X-Large"];
+    const tshirtField = insertedCustomFields.find(f => f.name === "T-Shirt Size");
+    const dietaryField = insertedCustomFields.find(f => f.name === "Dietary Preferences");
+    
+    if (tshirtField) {
+      for (let i = 0; i < Math.min(10, allEmployees.length); i++) {
+        customFieldValuesData.push({
+          customFieldId: tshirtField.id,
+          entityId: allEmployees[i].id,
+          value: sizes[i % sizes.length],
+        });
+      }
+    }
+    
+    if (dietaryField) {
+      const dietaryPrefs = [
+        "Vegetarian",
+        "Vegan",
+        "Gluten-free",
+        "No restrictions",
+        "Dairy-free",
+      ];
+      for (let i = 0; i < Math.min(10, allEmployees.length); i++) {
+        customFieldValuesData.push({
+          customFieldId: dietaryField.id,
+          entityId: allEmployees[i].id,
+          value: dietaryPrefs[i % dietaryPrefs.length],
+        });
+      }
+    }
+
+    if (customFieldValuesData.length > 0) {
+      await db
+        .insert(schema.customFieldValues)
+        .values(customFieldValuesData)
+        .onConflictDoNothing();
+    }
+  }
 
   console.log("Creating holidays...");
 
