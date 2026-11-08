@@ -106,8 +106,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Org chart (basic) ✅ Done
 - [x] Org chart export ✅ Done (GET /api/org-chart/export generates CSV with full reporting structure)
 - [x] Saved views schema (people_views table) ✅ Done
-- [x] Saved views UI (create, edit, delete, apply) ⚠️ Partial (PeopleViewSelector component exists but not wired into /people)
-- [x] Column chooser UI ⚠️ Partial (ColumnChooser component exists, table view renders columns)
+- [x] Saved views UI (create, edit, delete, apply) ✅ Complete (PeopleViewSelector wired into /people and /people/directory)
+- [x] Column chooser UI ✅ Complete (ColumnChooserDialog wired into /people/directory with localStorage persistence)
 - [ ] New Employee wizard - Missing
 - [ ] Terminate employee flow - Missing
   - [ ] Termination reasons - Missing
