@@ -107,11 +107,20 @@ export default async function CandidateDetailPage({
             </Link>
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href={`/hiring/openings/${candidate.jobOpeningId}/candidates`}>
-            Back to Candidates
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          {(session.user.role === "admin" || session.user.role === "full_admin") && (
+            <Button asChild>
+              <Link href={`/hiring/candidates/${candidate.id}/offer`}>
+                {offer ? "Edit Offer" : "Create Offer"}
+              </Link>
+            </Button>
+          )}
+          <Button asChild variant="outline">
+            <Link href={`/hiring/openings/${candidate.jobOpeningId}/candidates`}>
+              Back to Candidates
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
