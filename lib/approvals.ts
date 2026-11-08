@@ -338,14 +338,23 @@ export async function approveStep(
       // Apply job info change from metadata
       const metadata = request.metadata as any;
       if (metadata) {
+        // Build employee updates from metadata
+        const employeeUpdates: any = {
+          updatedAt: new Date(),
+        };
+        
+        // Map job info fields to employee record
+        if (metadata.jobTitle !== undefined) employeeUpdates.jobTitle = metadata.jobTitle;
+        if (metadata.departmentId !== undefined) employeeUpdates.departmentId = metadata.departmentId;
+        if (metadata.divisionId !== undefined) employeeUpdates.divisionId = metadata.divisionId;
+        if (metadata.locationId !== undefined) employeeUpdates.locationId = metadata.locationId;
+        if (metadata.managerId !== undefined) employeeUpdates.managerId = metadata.managerId;
+        
         // Update employee record
-        if (metadata.employeeUpdates) {
+        if (Object.keys(employeeUpdates).length > 1) {
           await db
             .update(employees)
-            .set({
-              ...metadata.employeeUpdates,
-              updatedAt: new Date(),
-            })
+            .set(employeeUpdates)
             .where(eq(employees.id, metadata.employeeId));
         }
         
@@ -353,12 +362,12 @@ export async function approveStep(
         await db.insert(jobHistory).values({
           employeeId: metadata.employeeId,
           effectiveDate: metadata.effectiveDate,
-          jobTitle: metadata.jobTitle,
-          departmentId: metadata.departmentId,
-          divisionId: metadata.divisionId,
-          locationId: metadata.locationId,
-          managerId: metadata.managerId,
-          comment: metadata.changeReason,
+          jobTitle: metadata.jobTitle || null,
+          departmentId: metadata.departmentId || null,
+          divisionId: metadata.divisionId || null,
+          locationId: metadata.locationId || null,
+          managerId: metadata.managerId || null,
+          comment: metadata.changeReason || null,
         });
 
         // Audit log

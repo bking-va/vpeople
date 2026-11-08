@@ -11,6 +11,7 @@ import {
   approvalWorkflowSteps,
   approvalRequests,
   approvalRequestSteps,
+  auditLogs,
 } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
@@ -126,7 +127,8 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
   });
 
   afterAll(async () => {
-    // Clean up
+    // Clean up (delete audit logs first due to FK constraint)
+    await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
     await db.delete(jobHistory).where(eq(jobHistory.employeeId, testEmployee.id));
     await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
     await db
