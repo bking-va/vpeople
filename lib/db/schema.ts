@@ -702,6 +702,21 @@ export const approvalWorkflowSteps = pgTable("approval_workflow_steps", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const peopleViews = pgTable("people_views", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  columns: text("columns").notNull(), // JSON array of column names
+  filters: text("filters"), // JSON object of filter criteria
+  sortBy: text("sort_by"),
+  sortOrder: text("sort_order").default("asc"),
+  isDefault: boolean("is_default").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),
 }));
