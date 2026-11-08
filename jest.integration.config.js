@@ -6,6 +6,10 @@ const createJestConfig = nextJest({
 
 const customJestConfig = {
   testEnvironment: 'node',
+  // One Postgres DB is shared across the suite. Parallel workers race on
+  // afterAll cleanup (especially audit_logs), which made global counts flake.
+  maxWorkers: 1,
+  forceExit: true,
   setupFiles: ['<rootDir>/__tests__/integration/setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',

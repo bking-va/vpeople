@@ -10,6 +10,9 @@ import {
   jobHistory,
 } from "@/lib/db/schema";
 import { desc, eq, sql, and, gte } from "drizzle-orm";
+import { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
+
+export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 
 export async function getAdditionsTerminations(year: number) {
   const start = `${year}-01-01`;
@@ -131,6 +134,37 @@ export async function getLastPayChangeReport() {
     }
   }
   return Array.from(latest.values());
+}
+
+export async function getPeopleWithoutRaise(asOf: Date = new Date(), months = 12) {
+  const cutoff = raiseCutoffDate(asOf, months);
+  const latest = await getLastPayChangeReport();
+  const latestByEmployee = new Map(latest.map((row) => [row.employeeId, row]));
+
+  const active = await db
+    .select({
+      id: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      jobTitle: employees.jobTitle,
+      hireDate: employees.hireDate,
+    })
+    .from(employees)
+    .where(sql`${employees.employmentStatus} <> 'terminated'`);
+
+  return active
+    .map((emp) => {
+      const last = latestByEmployee.get(emp.id);
+      const lastRaiseDate = last?.effectiveDate ?? null;
+      return {
+        ...emp,
+        lastRaiseDate,
+        lastPayRate: last?.payRate ?? null,
+        overdue: isRaiseOverdue(lastRaiseDate, cutoff),
+      };
+    })
+    .filter((row) => row.overdue)
+    .sort((a, b) => (a.lastRaiseDate || a.hireDate || "").localeCompare(b.lastRaiseDate || b.hireDate || ""));
 }
 
 export async function getBirthdaysReport() {

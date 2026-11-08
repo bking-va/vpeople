@@ -92,7 +92,7 @@ export default async function ReportsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
+            <div className="text-2xl font-bold">13</div>
             <p className="text-xs text-muted-foreground">Standard reports</p>
           </CardContent>
         </Card>
@@ -167,6 +167,10 @@ export default async function ReportsPage() {
               <Link href="/reports/standard?type=last-pay-change" className="block p-3 border rounded-lg hover:bg-accent">
                 <div className="font-medium">Last Pay Change</div>
                 <div className="text-sm text-muted-foreground">Most recent compensation change per employee</div>
+              </Link>
+              <Link href="/reports/standard?type=no-raise" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">No Raise in 12+ Months</div>
+                <div className="text-sm text-muted-foreground">Active employees whose last pay change is older than a year</div>
               </Link>
               <Link href="/reports/standard?type=birthdays" className="block p-3 border rounded-lg hover:bg-accent">
                 <div className="font-medium">Birthdays</div>

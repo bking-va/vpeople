@@ -14,6 +14,7 @@ import {
   getAgeGenderReport,
   getJobHistoryReport,
   getEmploymentStatusHistoryReport,
+  getPeopleWithoutRaise,
 } from "@/lib/reports/standard";
 import { getUserPermissions } from "@/lib/permissions";
 
@@ -215,6 +216,30 @@ export default async function StandardReportsPage({
               <span className="text-muted-foreground">{row.effectiveDate}</span>
             </div>
           ))}
+        </CardContent>
+      </Card>
+    );
+  } else if (type === "no-raise") {
+    title = "People without a raise in 12+ months";
+    const rows = await getPeopleWithoutRaise();
+    body = (
+      <Card>
+        <CardContent className="pt-6 space-y-2">
+          {rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Everyone has a raise in the last 12 months</p>
+          ) : (
+            rows.map((row) => (
+              <div key={row.id} className="text-sm flex justify-between">
+                <Link href={`/people/${row.id}`} className="text-primary hover:underline">
+                  {row.firstName} {row.lastName}
+                </Link>
+                <span className="text-muted-foreground">
+                  {row.lastRaiseDate || "no raise on file"}
+                  {permissions?.canViewCompensation && row.lastPayRate ? ` · ${row.lastPayRate}` : ""}
+                </span>
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
     );

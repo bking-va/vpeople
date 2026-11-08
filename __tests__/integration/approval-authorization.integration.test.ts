@@ -11,7 +11,7 @@ import {
   approvalRequestSteps,
   auditLogs,
 } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   createApprovalRequest,
   approveStep,
@@ -37,6 +37,17 @@ const db = drizzle(pool, {
     auditLogs,
   },
 });
+
+function approvalRequestIdFromChanges(changes: unknown): number | null {
+  if (!changes || typeof changes !== "object") return null;
+  const id = (changes as { approvalRequestId?: unknown }).approvalRequestId;
+  return typeof id === "number" ? id : null;
+}
+
+async function auditLogsForRequest(action: string, requestId: number) {
+  const rows = await db.select().from(auditLogs).where(eq(auditLogs.action, action));
+  return rows.filter((row) => approvalRequestIdFromChanges(row.changes) === requestId);
+}
 
 describe("Approval Authorization Integration Tests (Real Postgres)", () => {
   let testCEO: any;
@@ -275,14 +286,10 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     // Approve step 2 (different admin) - this triggers comp insert + audit log
     await approveStep(approvalResult.requestId!, 2, testAdmin.id);
     
-    // Verify both step and compensation audit logs were created
-    const auditLog = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "compensation_updated"))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-    
+    const auditLog = await auditLogsForRequest(
+      "compensation_updated",
+      approvalResult.requestId!
+    );
     expect(auditLog.length).toBe(1);
     expect(auditLog[0].employeeId).toBe(testAdmin.id);
     expect(auditLog[0].action).toBe("compensation_updated");
@@ -306,39 +313,22 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
       },
     });
 
-    const auditCountBefore = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "approval_step_approved"));
+    const requestId = approvalResult.requestId!;
 
-    // Approve step 1 (manager)
-    await approveStep(approvalResult.requestId!, 1, testManager.id);
+    await approveStep(requestId, 1, testManager.id);
 
-    // Check audit log for step 1
-    const auditLogsAfterStep1 = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "approval_step_approved"))
-      .orderBy(desc(auditLogs.createdAt));
+    const afterStep1 = await auditLogsForRequest("approval_step_approved", requestId);
+    expect(afterStep1).toHaveLength(1);
+    expect(afterStep1[0].employeeId).toBe(testManager.id);
+    expect(afterStep1[0].entityType).toBe("compensation_change");
 
-    expect(auditLogsAfterStep1.length).toBe(auditCountBefore.length + 1);
-    const step1Log = auditLogsAfterStep1[0];
-    expect(step1Log.employeeId).toBe(testManager.id);
-    expect(step1Log.entityType).toBe("compensation_change");
+    await approveStep(requestId, 2, testAdmin.id);
 
-    // Approve step 2 (different admin)
-    await approveStep(approvalResult.requestId!, 2, testAdmin.id);
-
-    // Check audit log for step 2
-    const auditLogsAfterStep2 = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "approval_step_approved"))
-      .orderBy(desc(auditLogs.createdAt));
-
-    expect(auditLogsAfterStep2.length).toBe(auditCountBefore.length + 2);
-    const step2Log = auditLogsAfterStep2[0];
-    expect(step2Log.employeeId).toBe(testAdmin.id);
+    const afterStep2 = await auditLogsForRequest("approval_step_approved", requestId);
+    expect(afterStep2).toHaveLength(2);
+    expect(afterStep2.map((row) => row.employeeId).sort()).toEqual(
+      [testManager.id, testAdmin.id].sort()
+    );
   });
 
   test("separation of duties: requester cannot give final approval", async () => {
@@ -512,16 +502,13 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
 
     await rejectStep(approvalResult.requestId!, 1, testManager.id, "Not this cycle");
 
-    const [rejectLog] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "approval_step_rejected"))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-
-    expect(rejectLog).toBeDefined();
-    expect(rejectLog.employeeId).toBe(testManager.id);
-    expect(rejectLog.entityType).toBe("compensation_change");
+    const rejectLogs = await auditLogsForRequest(
+      "approval_step_rejected",
+      approvalResult.requestId!
+    );
+    expect(rejectLogs).toHaveLength(1);
+    expect(rejectLogs[0].employeeId).toBe(testManager.id);
+    expect(rejectLogs[0].entityType).toBe("compensation_change");
 
     const [updated] = await db
       .select()
@@ -550,15 +537,12 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     await approveStep(approvalResult.requestId!, 1, testManager.id);
     await approveStep(approvalResult.requestId!, 2, testAdmin.id);
 
-    const [compLog] = await db
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.action, "compensation_updated"))
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
-
-    expect(compLog).toBeDefined();
-    const changes = compLog.changes as Record<string, unknown>;
+    const compLogs = await auditLogsForRequest(
+      "compensation_updated",
+      approvalResult.requestId!
+    );
+    expect(compLogs).toHaveLength(1);
+    const changes = compLogs[0].changes as Record<string, unknown>;
     expect(changes.payRate).toBe("103000");
     expect(changes.payRate).not.toBe("[REDACTED]");
   });

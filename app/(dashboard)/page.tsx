@@ -32,6 +32,7 @@ import { ClockWidget } from "@/components/clock-widget";
 import { getWhosOut } from "@/lib/whos-out";
 import { isOutOnDate } from "@/lib/date-overlap";
 import { getTurnoverReport } from "@/lib/reports/turnover";
+import { getPeopleWithoutRaise } from "@/lib/reports/standard";
 
 export default async function HomePage() {
   const session = await auth();
@@ -223,6 +224,31 @@ export default async function HomePage() {
     .limit(5);
 
   const turnover = isAdmin ? await getTurnoverReport() : null;
+  const peopleWithoutRaise = isAdmin ? await getPeopleWithoutRaise() : [];
+
+  const onboardingAsOf = new Date().toISOString().slice(0, 10);
+  const onboardingTasks = isAdmin
+    ? await db
+        .select({
+          id: employeeTasks.id,
+          title: employeeTasks.title,
+          dueDate: employeeTasks.dueDate,
+          status: employeeTasks.status,
+        })
+        .from(employeeTasks)
+        .where(
+          and(
+            eq(employeeTasks.taskType, "onboarding"),
+            eq(employeeTasks.status, "pending")
+          )
+        )
+    : [];
+  const onboardingOverdue = onboardingTasks.filter(
+    (task) => task.dueDate && task.dueDate < onboardingAsOf
+  );
+  const onboardingScheduled = onboardingTasks.filter(
+    (task) => !task.dueDate || task.dueDate >= onboardingAsOf
+  );
 
   // Fetch headcount by department
   const headcountByDept = await db
@@ -483,6 +509,52 @@ export default async function HomePage() {
               </div>
               <Button asChild size="sm" variant="outline" className="w-full mt-3">
                 <Link href="/reports/turnover">View report</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {isAdmin && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">No raise in 12+ months</CardTitle>
+              <AlertCircle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{peopleWithoutRaise.length}</div>
+              <p className="text-xs text-muted-foreground">Active employees</p>
+              <div className="mt-2 space-y-1">
+                {peopleWithoutRaise.slice(0, 3).map((row) => (
+                  <Link
+                    key={row.id}
+                    href={`/people/${row.id}`}
+                    className="block text-xs text-primary hover:underline truncate"
+                  >
+                    {row.firstName} {row.lastName}
+                    {row.lastRaiseDate ? ` · ${row.lastRaiseDate}` : " · never"}
+                  </Link>
+                ))}
+              </div>
+              <Button asChild size="sm" variant="outline" className="w-full mt-3">
+                <Link href="/reports/standard?type=no-raise">View report</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {isAdmin && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Onboarding tasks</CardTitle>
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{onboardingOverdue.length}</div>
+              <p className="text-xs text-muted-foreground">
+                Overdue · {onboardingScheduled.length} scheduled
+              </p>
+              <Button asChild size="sm" variant="outline" className="w-full mt-3">
+                <Link href="/onboarding">Open onboarding</Link>
               </Button>
             </CardContent>
           </Card>

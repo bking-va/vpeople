@@ -4,10 +4,13 @@ import { resolve, join } from 'path';
 
 // Load from .env.local in workspace root
 const envPath = join(__dirname, '../../.env.local');
-const result = config({ path: envPath });
+const result = config({ path: envPath, quiet: true });
 
 if (result.error) {
-  console.error('Failed to load .env.local:', result.error);
+  // GitHub Actions sets DATABASE_URL in the job env; .env.local is local-only.
+  if (!process.env.DATABASE_URL) {
+    console.error("Failed to load .env.local and DATABASE_URL is unset:", result.error);
+  }
 } else {
-  console.log('Loaded environment from:', envPath);
+  console.log("Loaded environment from:", envPath);
 }

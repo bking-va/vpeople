@@ -30,8 +30,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Who's Out calendar ✅ Done (dashboard widget of who's out today + /time-off/calendar month view)
 - [x] Company Links ✅ Done
 - [x] New team members widget ✅ Done
-- [ ] People without raise in 12+ months - Missing
-- [ ] Onboarding overdue/scheduled - Missing
+- [x] People without raise in 12+ months ✅ Done (dashboard widget + `/reports/standard?type=no-raise`; pay amounts hidden without canViewCompensation)
+- [x] Onboarding overdue/scheduled ✅ Done (dashboard overdue/scheduled counts; `/onboarding` already listed tasks)
 - [ ] Announcements - Missing
 
 ---

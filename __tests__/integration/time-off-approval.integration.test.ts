@@ -15,7 +15,7 @@ import {
   approvalRequestSteps,
   auditLogs,
 } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
 
 // Use real Postgres connection with configured DATABASE_URL
@@ -40,6 +40,12 @@ const db = drizzle(pool, {
     auditLogs,
   },
 });
+
+function approvalRequestIdFromChanges(changes: unknown): number | null {
+  if (!changes || typeof changes !== "object") return null;
+  const id = (changes as { approvalRequestId?: unknown }).approvalRequestId;
+  return typeof id === "number" ? id : null;
+}
 
 describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
   let testPolicy: any;
@@ -208,17 +214,19 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
     // Step 1: Manager approval (should NOT deduct balance, but must write audit)
     await approveStep(approvalResult.requestId!, 1, testManager.id);
 
-    const step1Audit = await db
-      .select()
-      .from(auditLogs)
-      .where(
-        and(
-          eq(auditLogs.employeeId, testManager.id),
-          eq(auditLogs.action, "approval_step_approved")
+    const step1Audit = (
+      await db
+        .select()
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.employeeId, testManager.id),
+            eq(auditLogs.action, "approval_step_approved")
+          )
         )
-      )
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
+    ).filter(
+      (row) => approvalRequestIdFromChanges(row.changes) === approvalResult.requestId
+    );
     expect(step1Audit.length).toBe(1);
     expect(step1Audit[0].entityType).toBe("time_off_request");
 
@@ -254,17 +262,19 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
       .where(eq(timeOffRequests.id, request.id));
     expect(finalRequest.status).toBe("approved");
 
-    const step2Audit = await db
-      .select()
-      .from(auditLogs)
-      .where(
-        and(
-          eq(auditLogs.employeeId, testAdmin.id),
-          eq(auditLogs.action, "approval_step_approved")
+    const step2Audit = (
+      await db
+        .select()
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.employeeId, testAdmin.id),
+            eq(auditLogs.action, "approval_step_approved")
+          )
         )
-      )
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(1);
+    ).filter(
+      (row) => approvalRequestIdFromChanges(row.changes) === approvalResult.requestId
+    );
     expect(step2Audit.length).toBe(1);
 
     const [timeOffAudit] = await db
@@ -273,10 +283,10 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
       .where(
         and(
           eq(auditLogs.employeeId, testAdmin.id),
-          eq(auditLogs.action, "time_off_approved")
+          eq(auditLogs.action, "time_off_approved"),
+          eq(auditLogs.entityId, request.id.toString())
         )
       )
-      .orderBy(desc(auditLogs.createdAt))
       .limit(1);
     expect(timeOffAudit).toBeDefined();
     expect(timeOffAudit.entityType).toBe("time_off_request");
