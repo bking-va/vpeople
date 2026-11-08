@@ -1296,6 +1296,51 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.insert(schema.candidates).values(candidatesData);
   }
 
+  console.log("Creating holidays...");
+
+  const holidaysData = [
+    // Canada 2027
+    { name: "New Year's Day", date: "2027-01-01", country: "CA" },
+    { name: "Good Friday", date: "2027-04-02", country: "CA" },
+    { name: "Victoria Day", date: "2027-05-24", country: "CA" },
+    { name: "Canada Day", date: "2027-07-01", country: "CA" },
+    { name: "Labour Day", date: "2027-09-06", country: "CA" },
+    { name: "Thanksgiving", date: "2027-10-11", country: "CA" },
+    { name: "Remembrance Day", date: "2027-11-11", country: "CA" },
+    { name: "Christmas Day", date: "2027-12-25", country: "CA" },
+    { name: "Boxing Day", date: "2027-12-26", country: "CA" },
+    
+    // United States 2027
+    { name: "New Year's Day", date: "2027-01-01", country: "US" },
+    { name: "Martin Luther King Jr. Day", date: "2027-01-18", country: "US" },
+    { name: "Presidents' Day", date: "2027-02-15", country: "US" },
+    { name: "Memorial Day", date: "2027-05-31", country: "US" },
+    { name: "Independence Day", date: "2027-07-04", country: "US" },
+    { name: "Labor Day", date: "2027-09-06", country: "US" },
+    { name: "Thanksgiving", date: "2027-11-25", country: "US" },
+    { name: "Christmas Day", date: "2027-12-25", country: "US" },
+    
+    // India 2027
+    { name: "Republic Day", date: "2027-01-26", country: "IN" },
+    { name: "Holi", date: "2027-03-29", country: "IN" },
+    { name: "Good Friday", date: "2027-04-02", country: "IN" },
+    { name: "Independence Day", date: "2027-08-15", country: "IN" },
+    { name: "Gandhi Jayanti", date: "2027-10-02", country: "IN" },
+    { name: "Diwali", date: "2027-11-04", country: "IN" },
+    { name: "Christmas Day", date: "2027-12-25", country: "IN" },
+  ];
+
+  await db
+    .insert(schema.holidays)
+    .values(
+      holidaysData.map((h) => ({
+        ...h,
+        isRecurring: true,
+        locationId: null,
+      }))
+    )
+    .onConflictDoNothing();
+
   console.log("✅ Seeding completed!");
   console.log(
     `Created ${allEmployees.length} employees`

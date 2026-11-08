@@ -717,6 +717,30 @@ export const peopleViews = pgTable("people_views", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const holidays = pgTable("holidays", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  date: date("date").notNull(),
+  country: text("country").notNull(), // CA, US, IN
+  locationId: integer("location_id").references(() => locations.id),
+  isRecurring: boolean("is_recurring").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const timeOffBalanceAdjustments = pgTable("time_off_balance_adjustments", {
+  id: serial("id").primaryKey(),
+  balanceId: integer("balance_id")
+    .notNull()
+    .references(() => timeOffBalances.id, { onDelete: "cascade" }),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  reason: text("reason").notNull(),
+  adjustedBy: integer("adjusted_by")
+    .notNull()
+    .references(() => employees.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),
 }));
