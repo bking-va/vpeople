@@ -214,7 +214,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 6. Time & Attendance
 
 - [x] Clock in/out ✅ Done (ClockWidget component + /api/time-tracking/clock)
-- [ ] Break tracking - Missing
+- [x] Break tracking ✅ Done (Start/End break buttons, elapsed time subtracts breaks)
 - [x] Timesheets with approval ⚠️ Partial (DB schema + API routes + /time-tracking page UI)
 - [ ] Projects - Missing
   - [ ] Team live view - Missing
@@ -373,7 +373,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Field selection ✅ Done (/reports/custom page with multi-select)
 - [x] Filters ⚠️ Partial (filter UI exists; backend filtering not fully implemented)
 - [x] Group-by ✅ Done (grouping selector and preview)
-- [ ] Save reports - Missing
+- [x] Save reports ✅ Done (Save Report button + dialog, saved_reports table + API)
+- [x] Scheduled reports ✅ Done (scheduled_reports table + API; schedules stored, no external delivery)
 - [ ] Share reports - Missing
 - [x] Export CSV ✅ Done (preview endpoint returns CSV)
 - [ ] Access level enforcement - Missing
