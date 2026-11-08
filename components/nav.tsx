@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Button } from "./ui/button";
-import { Users, Building2, LayoutGrid, Calendar, ListTodo, Settings } from "lucide-react";
+import { Users, Building2, LayoutGrid, Calendar, ListTodo, Settings, Briefcase } from "lucide-react";
 
 export async function Nav() {
   const session = await auth();
@@ -49,14 +49,30 @@ export async function Nav() {
               <ListTodo className="h-4 w-4" />
               Tasks
             </Link>
-            {session?.user?.role === "admin" && (
-              <Link
-                href="/admin"
-                className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
-              >
-                <Settings className="h-4 w-4" />
-                Admin
-              </Link>
+            <Link
+              href="/hiring"
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+            >
+              <Briefcase className="h-4 w-4" />
+              Hiring
+            </Link>
+            {(session?.user?.role === "admin" || session?.user?.role === "full_admin") && (
+              <>
+                <Link
+                  href="/settings"
+                  className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+                >
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </Link>
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+                >
+                  <Settings className="h-4 w-4" />
+                  Admin
+                </Link>
+              </>
             )}
           </div>
         </div>
