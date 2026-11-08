@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         .update(timeClocks)
         .set({
           clockOut: new Date(),
-          breakMinutes: data.breakMinutes || 0,
+          breakMinutes: data.breakMinutes !== undefined ? data.breakMinutes : existing.breakMinutes,
           notes: data.notes || null,
           updatedAt: new Date(),
         })

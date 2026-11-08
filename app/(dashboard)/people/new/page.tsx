@@ -20,10 +20,15 @@ export default async function NewEmployeePage() {
   }
 
   // Check if user has permission to add employees
+  const employeeId = session.user.employeeId;
+  if (!employeeId) {
+    redirect("/people");
+  }
+
   const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, employeeId))
     .limit(1);
 
   if (!currentEmployee || currentEmployee.accessLevel !== "full_admin") {

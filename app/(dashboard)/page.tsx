@@ -76,9 +76,7 @@ export default async function HomePage() {
   const pendingDaysByPolicy = new Map<number, number>();
   
   for (const request of allFutureRequests) {
-    const start = new Date(request.startDate);
-    const end = new Date(request.endDate);
-    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const days = parseFloat(request.daysRequested);
     
     if (request.status === "approved") {
       const current = scheduledDaysByPolicy.get(request.policyId) || 0;

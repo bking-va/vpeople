@@ -17,10 +17,15 @@ export default async function CustomFieldsPage() {
   }
 
   // Check if user is full admin
+  const employeeId = session.user.employeeId;
+  if (!employeeId) {
+    redirect("/settings");
+  }
+
   const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, employeeId))
     .limit(1);
 
   if (!currentEmployee || currentEmployee.accessLevel !== "full_admin") {

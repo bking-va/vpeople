@@ -17,13 +17,18 @@ export default async function TerminateEmployeePage({
   }
 
   const resolvedParams = await params;
-  const employeeId = parseInt(resolvedParams.id, 10);
+  const targetEmployeeId = parseInt(resolvedParams.id, 10);
 
   // Check if user has permission
+  const currentEmployeeId = session.user.employeeId;
+  if (!currentEmployeeId) {
+    redirect("/people");
+  }
+
   const [currentEmployee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.userId, session.user.id))
+    .where(eq(employees.id, currentEmployeeId))
     .limit(1);
 
   if (!currentEmployee || currentEmployee.accessLevel !== "full_admin") {
@@ -34,7 +39,7 @@ export default async function TerminateEmployeePage({
   const [employee] = await db
     .select()
     .from(employees)
-    .where(eq(employees.id, employeeId))
+    .where(eq(employees.id, targetEmployeeId))
     .limit(1);
 
   if (!employee) {
@@ -42,7 +47,7 @@ export default async function TerminateEmployeePage({
   }
 
   if (employee.employmentStatus === "terminated") {
-    redirect(`/people/${employeeId}`);
+    redirect(`/people/${targetEmployeeId}`);
   }
 
   return (

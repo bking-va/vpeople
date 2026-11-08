@@ -34,8 +34,13 @@ export async function DELETE(
     }
 
     // Check permissions: must be owner, admin, or HR
-    const permissions = await getUserPermissions(session.user.id);
-    const isOwner = document.employeeId === parseInt(session.user.id, 10);
+    if (!session.user.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const permissions = await getUserPermissions(session.user.email);
+    const employeeId = session.user.employeeId;
+    const isOwner = employeeId && document.employeeId === employeeId;
     const canDelete = isOwner || permissions.canManageUsers;
 
     if (!canDelete) {

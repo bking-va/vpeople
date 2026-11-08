@@ -15,13 +15,18 @@ export async function POST(
 
   try {
     const resolvedParams = await params;
-    const employeeId = parseInt(resolvedParams.id, 10);
+    const targetEmployeeId = parseInt(resolvedParams.id, 10);
 
     // Verify the user has permission
+    const currentEmployeeId = session.user.employeeId;
+    if (!currentEmployeeId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const [currentEmployee] = await db
       .select()
       .from(employees)
-      .where(eq(employees.userId, session.user.id))
+      .where(eq(employees.id, currentEmployeeId))
       .limit(1);
 
     if (!currentEmployee || currentEmployee.accessLevel !== "full_admin") {
@@ -35,7 +40,7 @@ export async function POST(
     const [employee] = await db
       .select()
       .from(employees)
-      .where(eq(employees.id, employeeId))
+      .where(eq(employees.id, targetEmployeeId))
       .limit(1);
 
     if (!employee) {
@@ -60,7 +65,7 @@ export async function POST(
         terminationDate,
         updatedAt: new Date(),
       })
-      .where(eq(employees.id, employeeId))
+      .where(eq(employees.id, targetEmployeeId))
       .returning();
 
     // Create offboarding tasks from templates
@@ -80,7 +85,7 @@ export async function POST(
         }
 
         return {
-          employeeId,
+          employeeId: targetEmployeeId,
           templateId: template.id,
           taskType: "offboarding",
           title: template.name,
@@ -101,7 +106,7 @@ export async function POST(
       userId: session.user.id,
       action: "employee_terminated",
       entityType: "employee",
-      entityId: String(employeeId),
+      entityId: String(targetEmployeeId),
       changes: {
         terminationDate,
         terminationType,

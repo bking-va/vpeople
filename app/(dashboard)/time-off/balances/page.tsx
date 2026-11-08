@@ -43,9 +43,7 @@ export default async function TimeOffBalancesPage() {
   const pendingByEmployeePolicy = new Map<string, number>();
 
   for (const request of allFutureRequests) {
-    const start = new Date(request.startDate);
-    const end = new Date(request.endDate);
-    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const days = parseFloat(request.daysRequested);
     const key = `${request.employeeId}-${request.policyId}`;
 
     if (request.status === "approved") {
