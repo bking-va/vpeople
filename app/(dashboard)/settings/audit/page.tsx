@@ -1,11 +1,12 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { auditLogs, employees } from "@/lib/db/schema";
+import { auditLogs, employees, accessLevels } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { redactAuditLogForViewer } from "@/lib/audit";
 
 export default async function AuditLogPage() {
   const session = await auth();
@@ -29,6 +30,25 @@ export default async function AuditLogPage() {
   if (!currentEmployee || currentEmployee.accessLevel !== "full_admin") {
     redirect("/settings");
   }
+
+  // Get viewer's permissions from their access level
+  const [viewerAccessLevel] = await db
+    .select()
+    .from(accessLevels)
+    .where(eq(accessLevels.code, currentEmployee.accessLevel))
+    .limit(1);
+
+  const viewerPermissions = viewerAccessLevel
+    ? {
+        canViewCompensation: viewerAccessLevel.canViewCompensation,
+        canViewSensitivePersonalInfo: viewerAccessLevel.canViewSensitivePersonalInfo,
+        canViewBankInfo: viewerAccessLevel.canViewBankInfo,
+      }
+    : {
+        canViewCompensation: false,
+        canViewSensitivePersonalInfo: false,
+        canViewBankInfo: false,
+      };
 
   // Fetch recent audit logs
   const logs = await db
@@ -75,6 +95,11 @@ export default async function AuditLogPage() {
                 const log = item.log;
                 const employee = item.employee;
 
+                // Apply redaction based on viewer permissions
+                const displayChanges = log.changes
+                  ? redactAuditLogForViewer(log.changes, viewerPermissions)
+                  : null;
+
                 return (
                   <div
                     key={log.id}
@@ -98,9 +123,9 @@ export default async function AuditLogPage() {
                         )}
                       </div>
                       
-                      {log.changes && typeof log.changes === "object" && Object.keys(log.changes).length > 0 ? (
+                      {displayChanges && typeof displayChanges === "object" && Object.keys(displayChanges).length > 0 ? (
                         <div className="mt-2 text-xs text-muted-foreground space-y-1">
-                          {Object.entries(log.changes as Record<string, unknown>).map(([key, value]) => (
+                          {Object.entries(displayChanges as Record<string, unknown>).map(([key, value]) => (
                             <div key={key} className="flex gap-2">
                               <span className="font-medium">{key}:</span>
                               <span>

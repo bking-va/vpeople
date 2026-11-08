@@ -244,6 +244,19 @@ export async function approveStep(
     }
   }
 
+  // Separation of duties: requester cannot give final approval
+  // Check if this is the final step
+  const totalSteps = await db
+    .select()
+    .from(approvalRequestSteps)
+    .where(eq(approvalRequestSteps.approvalRequestId, approvalRequestId));
+  
+  const isFinalStep = stepOrder === Math.max(...totalSteps.map(s => s.stepOrder));
+  
+  if (isFinalStep && request.requesterId === approverId) {
+    throw new Error("You cannot give final approval to a request you submitted");
+  }
+
   // Check authorization: approver must be the assigned approver OR a full_admin for admin steps
   const isAssignedApprover = step.approverId === approverId;
   const isFullAdmin = approver.accessLevel === "full_admin";
@@ -253,21 +266,38 @@ export async function approveStep(
     throw new Error("You are not authorized to approve this step");
   }
 
-  // Update the step
-  await db
-    .update(approvalRequestSteps)
-    .set({
-      status: "approved",
-      approverId,
-      comments,
-      reviewedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
-        eq(approvalRequestSteps.stepOrder, stepOrder)
-      )
-    );
+  // Update the step and write audit log atomically
+  await db.transaction(async (tx) => {
+    await tx
+      .update(approvalRequestSteps)
+      .set({
+        status: "approved",
+        approverId,
+        comments,
+        reviewedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+          eq(approvalRequestSteps.stepOrder, stepOrder)
+        )
+      );
+
+    // Write audit log for this approval step
+    await createAuditLog({
+      employeeId: approverId,
+      action: `approval_step_approved`,
+      entityType: request.entityType,
+      entityId: request.entityId.toString(),
+      changes: {
+        approvalRequestId,
+        stepOrder,
+        entityType: request.entityType,
+        comments,
+      },
+      tx,
+    });
+  });
 
   // Fetch all steps to check if all are approved
   const allSteps = await db
@@ -524,6 +554,11 @@ export async function rejectStep(
     throw new Error("Approver not found");
   }
 
+  // Separation of duties: requester cannot reject their own submitted request
+  if (request.requesterId === approverId) {
+    throw new Error("You cannot reject a request you submitted");
+  }
+
   // Check authorization
   const isAssignedApprover = step.approverId === approverId;
   const isFullAdmin = approver.accessLevel === "full_admin";
@@ -533,21 +568,38 @@ export async function rejectStep(
     throw new Error("You are not authorized to reject this step");
   }
 
-  // Update the step
-  await db
-    .update(approvalRequestSteps)
-    .set({
-      status: "rejected",
-      approverId,
-      comments,
-      reviewedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
-        eq(approvalRequestSteps.stepOrder, stepOrder)
-      )
-    );
+  // Update the step and write audit log atomically
+  await db.transaction(async (tx) => {
+    await tx
+      .update(approvalRequestSteps)
+      .set({
+        status: "rejected",
+        approverId,
+        comments,
+        reviewedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(approvalRequestSteps.approvalRequestId, approvalRequestId),
+          eq(approvalRequestSteps.stepOrder, stepOrder)
+        )
+      );
+
+    // Write audit log for this rejection step
+    await createAuditLog({
+      employeeId: approverId,
+      action: `approval_step_rejected`,
+      entityType: request.entityType,
+      entityId: request.entityId.toString(),
+      changes: {
+        approvalRequestId,
+        stepOrder,
+        entityType: request.entityType,
+        comments,
+      },
+      tx,
+    });
+  });
 
   // Mark request as rejected
   await db

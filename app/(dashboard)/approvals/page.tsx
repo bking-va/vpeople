@@ -49,7 +49,8 @@ export default async function ApprovalsPage() {
   }
 
   // Get pending approval requests where current employee is an approver
-  // Either specific approverId or null (for admin/HR roles)
+  // Only show steps that are the current step (no earlier pending steps)
+  // Filter out requests where the employee is the affected party (self-approval block)
   const pendingSteps = await db
     .select({
       step: approvalRequestSteps,
@@ -74,7 +75,21 @@ export default async function ApprovalsPage() {
               ? sql`true`
               : sql`false`
           )
-        )
+        ),
+        // Only show if this is the current step (no earlier pending steps)
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${approvalRequestSteps} earlier
+          WHERE earlier.approval_request_id = ${approvalRequestSteps.approvalRequestId}
+          AND earlier.status = 'pending'
+          AND earlier.step_order < ${approvalRequestSteps.stepOrder}
+        )`,
+        // Block self-approval: for comp/job changes, don't show if entityId = employeeId
+        sql`NOT (
+          (${approvalRequests.entityType} = 'compensation_change' OR ${approvalRequests.entityType} = 'job_info_change')
+          AND ${approvalRequests.entityId} = ${employeeId}
+        )`,
+        // Block requester from giving final approval (separation of duties)
+        sql`${approvalRequests.requesterId} != ${employeeId}`
       )
     )
     .orderBy(approvalRequests.createdAt);

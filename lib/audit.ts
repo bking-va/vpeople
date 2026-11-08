@@ -92,19 +92,100 @@ export async function createAuditLog({
   userAgent?: string;
   tx?: any; // Transaction object from db.transaction()
 }) {
-  // Redact sensitive fields before storing
-  const redactedChanges = changes ? redactSensitiveFields(changes) : null;
-
+  // Store unredacted data - redaction happens at read time based on viewer permissions
   const dbOrTx = tx || db;
   await dbOrTx.insert(auditLogs).values({
     employeeId,
     action,
     entityType,
     entityId,
-    changes: redactedChanges,
+    changes,
     ipAddress,
     userAgent,
   });
+}
+
+/**
+ * Redact audit log changes based on viewer permissions
+ * Returns redacted changes if viewer doesn't have appropriate permissions
+ */
+export function redactAuditLogForViewer(
+  changes: any,
+  viewerPermissions: {
+    canViewCompensation: boolean;
+    canViewSensitivePersonalInfo: boolean;
+    canViewBankInfo: boolean;
+  }
+): any {
+  if (!changes || typeof changes !== "object") {
+    return changes;
+  }
+
+  const redacted: any = {};
+
+  for (const [key, value] of Object.entries(changes)) {
+    // Check if key is a compensation field
+    const isCompensationField = [
+      "payRate",
+      "payType",
+      "payPer",
+      "paySchedule",
+      "salary",
+      "hourlyRate",
+      "annualSalary",
+      "baseSalary",
+      "bonus",
+      "bonusAmount",
+      "bonusTarget",
+      "equity",
+      "equityAmount",
+      "stockOptions",
+      "commission",
+      "commissionRate",
+    ].some((field) => field.toLowerCase() === key.toLowerCase());
+
+    // Check if key is a sensitive personal identifier
+    const isSensitivePersonalField = [
+      "sin",
+      "ssn",
+      "socialSecurityNumber",
+      "socialInsuranceNumber",
+      "passport",
+      "passportNumber",
+      "nationalId",
+      "nationalIdNumber",
+      "taxId",
+      "taxIdNumber",
+    ].some((field) => field.toLowerCase() === key.toLowerCase());
+
+    // Check if key is banking info
+    const isBankingField = [
+      "bankAccount",
+      "bankAccountNumber",
+      "bankRouting",
+      "bankRoutingNumber",
+      "iban",
+      "swiftCode",
+      "accountNumber",
+      "routingNumber",
+    ].some((field) => field.toLowerCase() === key.toLowerCase());
+
+    const shouldRedact =
+      (isCompensationField && !viewerPermissions.canViewCompensation) ||
+      (isSensitivePersonalField && !viewerPermissions.canViewSensitivePersonalInfo) ||
+      (isBankingField && !viewerPermissions.canViewBankInfo);
+
+    if (shouldRedact) {
+      redacted[key] = "[REDACTED]";
+    } else if (typeof value === "object" && value !== null) {
+      // Recursively redact nested objects
+      redacted[key] = redactAuditLogForViewer(value, viewerPermissions);
+    } else {
+      redacted[key] = value;
+    }
+  }
+
+  return redacted;
 }
 
 export type AuditAction =

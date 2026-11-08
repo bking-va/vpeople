@@ -47,6 +47,14 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("Failed to reject request:", error);
     
+    // Return 409 for already-processed steps
+    if (error.message?.includes("already been processed")) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 409 }
+      );
+    }
+    
     // Return 403 for authorization errors
     if (
       error.message?.includes("not authorized") ||

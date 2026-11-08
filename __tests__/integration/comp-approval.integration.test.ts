@@ -38,6 +38,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
   let testCEO: any;
   let testManager: any;
   let testAdmin: any;
+  let testAdmin2: any; // Second admin for separation of duties
   let testEmployee: any;
   let testWorkflow: any;
 
@@ -73,6 +74,21 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
       })
       .returning();
     testAdmin = admin;
+
+    // Create second admin for separation of duties
+    const [admin2] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `COMP_ADMIN2_${testRunId}`,
+        firstName: "Comp",
+        lastName: "Admin2",
+        email: `comp.admin2.${testRunId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+        accessLevel: "full_admin",
+      })
+      .returning();
+    testAdmin2 = admin2;
 
     // Create test manager
     const [manager] = await db
@@ -135,6 +151,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
   afterAll(async () => {
     try {
       if (testAdmin?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
+      if (testAdmin2?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin2.id));
       if (testEmployee?.id) {
         await db.delete(compensationHistory).where(eq(compensationHistory.employeeId, testEmployee.id));
       }
@@ -149,6 +166,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
       if (testEmployee?.id) await db.delete(employees).where(eq(employees.id, testEmployee.id));
       if (testManager?.id) await db.delete(employees).where(eq(employees.id, testManager.id));
       if (testAdmin?.id) await db.delete(employees).where(eq(employees.id, testAdmin.id));
+      if (testAdmin2?.id) await db.delete(employees).where(eq(employees.id, testAdmin2.id));
       if (testCEO?.id) await db.delete(employees).where(eq(employees.id, testCEO.id));
     } catch (error) {
       console.error("Cleanup error:", error);
@@ -158,12 +176,12 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
   });
 
   test("comp change routes manager -> full_admin, creates record only on final approval", async () => {
-    // Create approval request for employee comp change
+    // Create approval request for employee comp change (CEO submits, admin approves final)
     const approvalResult = await createApprovalRequest({
       workflowId: testWorkflow.id,
       entityType: "compensation_change",
       entityId: testEmployee.id,
-      requesterId: testAdmin.id,
+      requesterId: testCEO.id, // CEO submits
       metadata: {
         employeeId: testEmployee.id,
         payRate: "95000",
@@ -202,7 +220,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
       .where(eq(compensationHistory.employeeId, testEmployee.id));
     expect(compsAfterStep1.length).toBe(0);
 
-    // Step 2: Admin approval
+    // Step 2: Admin approval (different admin from requester)
     await approveStep(approvalResult.requestId!, 2, testAdmin.id);
 
     // Now comp record should exist
@@ -249,7 +267,8 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
     expect(steps[1].status).toBe("pending"); // Admin step pending
 
     // Only need admin approval
-    await approveStep(approvalResult.requestId!, 2, testAdmin.id);
+    // testAdmin submits, testCEO is affected, testAdmin2 gives final approval
+    await approveStep(approvalResult.requestId!, 2, testAdmin2.id);
 
     // Verify comp record created
     const [finalComp] = await db

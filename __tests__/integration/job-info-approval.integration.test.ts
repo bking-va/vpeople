@@ -40,6 +40,7 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
   let testDept: any;
   let testManager: any;
   let testAdmin: any;
+  let testAdmin2: any; // Second admin for separation of duties
   let testEmployee: any;
   let testWorkflow: any;
 
@@ -70,6 +71,21 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
       })
       .returning();
     testAdmin = admin;
+
+    // Create second admin for separation of duties
+    const [admin2] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `JOB_ADMIN2_${testRunId}`,
+        firstName: "Job",
+        lastName: "Admin2",
+        email: `job.admin2.${testRunId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+        accessLevel: "full_admin",
+      })
+      .returning();
+    testAdmin2 = admin2;
 
     // Create test manager
     const [manager] = await db
@@ -135,6 +151,7 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
   afterAll(async () => {
     try {
       if (testAdmin?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
+      if (testAdmin2?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin2.id));
       if (testEmployee?.id) await db.delete(jobHistory).where(eq(jobHistory.employeeId, testEmployee.id));
       if (testAdmin?.id) await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
       if (testWorkflow?.id) {
@@ -144,6 +161,7 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
       if (testEmployee?.id) await db.delete(employees).where(eq(employees.id, testEmployee.id));
       if (testManager?.id) await db.delete(employees).where(eq(employees.id, testManager.id));
       if (testAdmin?.id) await db.delete(employees).where(eq(employees.id, testAdmin.id));
+      if (testAdmin2?.id) await db.delete(employees).where(eq(employees.id, testAdmin2.id));
       if (testDept?.id) await db.delete(departments).where(eq(departments.id, testDept.id));
     } catch (error) {
       console.error("Cleanup error:", error);
@@ -195,8 +213,8 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
       .where(eq(employees.id, testEmployee.id));
     expect(empAfterStep1.jobTitle).toBe(originalJobTitle);
 
-    // Step 2: Admin approval (final)
-    await approveStep(approvalResult.requestId!, 2, testAdmin.id);
+    // Step 2: Admin approval (final) - different admin from requester
+    await approveStep(approvalResult.requestId!, 2, testAdmin2.id);
 
     // Now employee record should be updated
     const [empFinal] = await db

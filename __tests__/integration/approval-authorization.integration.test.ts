@@ -244,12 +244,12 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     // This test verifies that audit log writes are atomic with comp changes
     // If audit log fails, the comp change should also roll back
     
-    // Create and fully approve a request
+    // Create and fully approve a request (testCEO submits, different admin approves)
     const approvalResult = await createApprovalRequest({
       workflowId: testWorkflow.id,
       entityType: "compensation_change",
       entityId: testEmployee.id,
-      requesterId: testAdmin.id,
+      requesterId: testCEO.id, // CEO is the requester
       metadata: {
         employeeId: testEmployee.id,
         payRate: "96000",
@@ -264,7 +264,7 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     // Approve step 1 (manager)
     await approveStep(approvalResult.requestId!, 1, testManager.id);
     
-    // Approve step 2 (admin) - this triggers comp insert + audit log
+    // Approve step 2 (different admin) - this triggers comp insert + audit log
     await approveStep(approvalResult.requestId!, 2, testAdmin.id);
     
     // Verify audit log was created (proves atomicity)
@@ -277,5 +277,112 @@ describe("Approval Authorization Integration Tests (Real Postgres)", () => {
     
     expect(auditLog.length).toBe(1);
     expect(auditLog[0].action).toBe("compensation_updated");
+  });
+
+  test("every approval step writes an audit log entry", async () => {
+    // Create approval request (CEO submits, others approve)
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testCEO.id, // CEO is the requester
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "97000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-01-03",
+        changeReason: "Merit increase",
+      },
+    });
+
+    const auditCountBefore = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "approval_step_approved"));
+
+    // Approve step 1 (manager)
+    await approveStep(approvalResult.requestId!, 1, testManager.id);
+
+    // Check audit log for step 1
+    const auditLogsAfterStep1 = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "approval_step_approved"))
+      .orderBy(desc(auditLogs.createdAt));
+
+    expect(auditLogsAfterStep1.length).toBe(auditCountBefore.length + 1);
+    const step1Log = auditLogsAfterStep1[0];
+    expect(step1Log.employeeId).toBe(testManager.id);
+    expect(step1Log.entityType).toBe("compensation_change");
+
+    // Approve step 2 (different admin)
+    await approveStep(approvalResult.requestId!, 2, testAdmin.id);
+
+    // Check audit log for step 2
+    const auditLogsAfterStep2 = await db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "approval_step_approved"))
+      .orderBy(desc(auditLogs.createdAt));
+
+    expect(auditLogsAfterStep2.length).toBe(auditCountBefore.length + 2);
+    const step2Log = auditLogsAfterStep2[0];
+    expect(step2Log.employeeId).toBe(testAdmin.id);
+  });
+
+  test("separation of duties: requester cannot give final approval", async () => {
+    // testAdmin submits a request for testEmployee
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testAdmin.id, // testAdmin is the requester
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "98000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-01-04",
+        changeReason: "Merit increase",
+      },
+    });
+
+    // Manager approves step 1
+    await approveStep(approvalResult.requestId!, 1, testManager.id);
+
+    // testAdmin (the requester) tries to give final approval at step 2 (should fail)
+    await expect(
+      approveStep(approvalResult.requestId!, 2, testAdmin.id)
+    ).rejects.toThrow("You cannot give final approval to a request you submitted");
+  });
+
+  test("step already processed returns correct error", async () => {
+    // Create and approve a request
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "compensation_change",
+      entityId: testEmployee.id,
+      requesterId: testAdmin.id,
+      metadata: {
+        employeeId: testEmployee.id,
+        payRate: "99000",
+        payType: "salary",
+        paySchedule: "annual",
+        currency: "CAD",
+        effectiveDate: "2027-01-05",
+        changeReason: "Merit increase",
+      },
+    });
+
+    // Approve step 1
+    await approveStep(approvalResult.requestId!, 1, testManager.id);
+
+    // Try to approve step 1 again (should fail)
+    await expect(
+      approveStep(approvalResult.requestId!, 1, testManager.id)
+    ).rejects.toThrow("Step has already been processed");
   });
 });
