@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
 export default async function SettingsPage() {
@@ -18,80 +19,45 @@ export default async function SettingsPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Access Levels</CardTitle>
-            <CardDescription>
-              Manage user roles and permissions
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center p-2 border-b">
-                <div>
-                  <p className="font-medium">Full Admin</p>
-                  <p className="text-sm text-muted-foreground">Complete system access</p>
-                </div>
-                <Badge>Active</Badge>
-              </div>
-              <div className="flex justify-between items-center p-2 border-b">
-                <div>
-                  <p className="font-medium">Admin</p>
-                  <p className="text-sm text-muted-foreground">HR and people management</p>
-                </div>
-                <Badge>Active</Badge>
-              </div>
-              <div className="flex justify-between items-center p-2 border-b">
-                <div>
-                  <p className="font-medium">Manager</p>
-                  <p className="text-sm text-muted-foreground">Team management</p>
-                </div>
-                <Badge>Active</Badge>
-              </div>
-              <div className="flex justify-between items-center p-2">
-                <div>
-                  <p className="font-medium">Employee</p>
-                  <p className="text-sm text-muted-foreground">Standard access</p>
-                </div>
-                <Badge>Active</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/settings/access-levels">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
+            <CardHeader>
+              <CardTitle>Access Levels</CardTitle>
+              <CardDescription>
+                Manage user roles and permissions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Configure who can view and edit compensation, sensitive personal information, and bank data.
+                Define approval rights and system administration access.
+              </p>
+              <Button variant="outline" className="mt-4 w-full">
+                Manage Access Levels →
+              </Button>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Approval Workflows</CardTitle>
-            <CardDescription>
-              Configure approval processes
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center p-2 border-b">
-                <div>
-                  <p className="font-medium">Time Off Requests</p>
-                  <p className="text-sm text-muted-foreground">Requires manager approval</p>
-                </div>
-                <Badge variant="secondary">Enabled</Badge>
-              </div>
-              <div className="flex justify-between items-center p-2 border-b">
-                <div>
-                  <p className="font-medium">Information Updates</p>
-                  <p className="text-sm text-muted-foreground">Auto-approved</p>
-                </div>
-                <Badge variant="outline">Disabled</Badge>
-              </div>
-              <div className="flex justify-between items-center p-2">
-                <div>
-                  <p className="font-medium">Compensation Changes</p>
-                  <p className="text-sm text-muted-foreground">Requires admin approval</p>
-                </div>
-                <Badge variant="secondary">Enabled</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/settings/workflows">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
+            <CardHeader>
+              <CardTitle>Approval Workflows</CardTitle>
+              <CardDescription>
+                Configure approval processes
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Enable or disable workflows for time off, compensation changes, job information updates, and more.
+                Configure approval chains and auto-approval rules.
+              </p>
+              <Button variant="outline" className="mt-4 w-full">
+                Manage Workflows →
+              </Button>
+            </CardContent>
+          </Card>
+        </Link>
 
         <Card>
           <CardHeader>

@@ -15,6 +15,13 @@
       "when": 1794145362493,
       "tag": "0001_black_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794150719770,
+      "tag": "0002_fluffy_betty_ross",
+      "breakpoints": true
     }
   ]
 }

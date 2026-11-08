@@ -1,11 +1,24 @@
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { sql, eq, inArray } from "drizzle-orm";
+import { runMigrations } from "./migrate";
 
 const VENDASTA_DOMAIN = "vendasta.com";
 
 export async function runSeed(options: { reset?: boolean } = {}) {
   const { reset = false } = options;
+
+  // Run migrations first to ensure schema is up to date
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required");
+  }
+  
+  try {
+    await runMigrations(process.env.DATABASE_URL);
+  } catch (error) {
+    console.error("Migration failed, cannot proceed with seed:", error);
+    throw error;
+  }
 
   console.log("🌱 Seeding database...");
 
@@ -25,6 +38,13 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE compensation_history CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_history CASCADE`);
     await db.execute(sql`TRUNCATE TABLE employee_teams CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE offer_letters CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE candidate_notes CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE candidates CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE job_openings CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE approval_workflow_steps CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE approval_workflows CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE access_levels CASCADE`);
     await db.execute(sql`TRUNCATE TABLE employees CASCADE`);
     await db.execute(sql`TRUNCATE TABLE seats CASCADE`);
     await db.execute(sql`TRUNCATE TABLE teams CASCADE`);
@@ -191,6 +211,110 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     (d) => d.name === "Corporate Marketing"
   )!;
   const financeDiv = allDivisions.find((d) => d.name === "Finance")!;
+
+  console.log("Creating access levels...");
+
+  const accessLevelValues = [
+    {
+      name: "Employee",
+      code: "employee",
+      description: "Standard employee access",
+      canViewCompensation: false,
+      canEditCompensation: false,
+      canViewSensitivePersonalInfo: false,
+      canEditSensitivePersonalInfo: false,
+      canViewBankInfo: false,
+      canEditBankInfo: false,
+      canManageUsers: false,
+      canManageSettings: false,
+      canApproveTimeOff: false,
+      canApproveCompensationChanges: false,
+    },
+    {
+      name: "Manager",
+      code: "manager",
+      description: "Team manager with approval rights",
+      canViewCompensation: false,
+      canEditCompensation: false,
+      canViewSensitivePersonalInfo: false,
+      canEditSensitivePersonalInfo: false,
+      canViewBankInfo: false,
+      canEditBankInfo: false,
+      canManageUsers: false,
+      canManageSettings: false,
+      canApproveTimeOff: true,
+      canApproveCompensationChanges: false,
+    },
+    {
+      name: "Admin",
+      code: "admin",
+      description: "HR administrator with full people management",
+      canViewCompensation: true,
+      canEditCompensation: true,
+      canViewSensitivePersonalInfo: true,
+      canEditSensitivePersonalInfo: true,
+      canViewBankInfo: true,
+      canEditBankInfo: true,
+      canManageUsers: true,
+      canManageSettings: false,
+      canApproveTimeOff: true,
+      canApproveCompensationChanges: true,
+    },
+    {
+      name: "Full Admin",
+      code: "full_admin",
+      description: "System administrator with all permissions",
+      canViewCompensation: true,
+      canEditCompensation: true,
+      canViewSensitivePersonalInfo: true,
+      canEditSensitivePersonalInfo: true,
+      canViewBankInfo: true,
+      canEditBankInfo: true,
+      canManageUsers: true,
+      canManageSettings: true,
+      canApproveTimeOff: true,
+      canApproveCompensationChanges: true,
+    },
+  ];
+
+  await db
+    .insert(schema.accessLevels)
+    .values(accessLevelValues)
+    .onConflictDoNothing();
+
+  console.log("Creating approval workflows...");
+
+  const workflowValues = [
+    {
+      name: "Time Off Approval",
+      type: "time_off" as const,
+      enabled: true,
+      requiresManagerApproval: true,
+      requiresAdminApproval: false,
+      description: "Requires manager approval for time-off requests",
+    },
+    {
+      name: "Compensation Change Approval",
+      type: "compensation_change" as const,
+      enabled: true,
+      requiresManagerApproval: true,
+      requiresAdminApproval: true,
+      description: "Requires both manager and admin approval for compensation changes",
+    },
+    {
+      name: "Job Info Change Approval",
+      type: "job_info_change" as const,
+      enabled: false,
+      requiresManagerApproval: false,
+      requiresAdminApproval: true,
+      description: "Requires admin approval for job information changes",
+    },
+  ];
+
+  await db
+    .insert(schema.approvalWorkflows)
+    .values(workflowValues)
+    .onConflictDoNothing();
 
   console.log("Creating teams...");
 

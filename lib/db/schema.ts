@@ -648,3 +648,67 @@ export const offerLettersRelations = relations(offerLetters, ({ one }) => ({
     references: [candidates.id],
   }),
 }));
+
+// Access Control Tables
+
+export const accessLevels = pgTable("access_levels", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  code: text("code").notNull().unique(),
+  description: text("description"),
+  canViewCompensation: boolean("can_view_compensation").default(false).notNull(),
+  canEditCompensation: boolean("can_edit_compensation").default(false).notNull(),
+  canViewSensitivePersonalInfo: boolean("can_view_sensitive_personal_info").default(false).notNull(),
+  canEditSensitivePersonalInfo: boolean("can_edit_sensitive_personal_info").default(false).notNull(),
+  canViewBankInfo: boolean("can_view_bank_info").default(false).notNull(),
+  canEditBankInfo: boolean("can_edit_bank_info").default(false).notNull(),
+  canManageUsers: boolean("can_manage_users").default(false).notNull(),
+  canManageSettings: boolean("can_manage_settings").default(false).notNull(),
+  canApproveTimeOff: boolean("can_approve_time_off").default(false).notNull(),
+  canApproveCompensationChanges: boolean("can_approve_compensation_changes").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const approvalWorkflowTypeEnum = pgEnum("approval_workflow_type", [
+  "time_off",
+  "compensation_change",
+  "employment_status_change",
+  "job_info_change",
+  "information_update",
+]);
+
+export const approvalWorkflows = pgTable("approval_workflows", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  type: approvalWorkflowTypeEnum("type").notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  requiresManagerApproval: boolean("requires_manager_approval").default(true).notNull(),
+  requiresAdminApproval: boolean("requires_admin_approval").default(false).notNull(),
+  autoApproveAfterDays: integer("auto_approve_after_days"),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const approvalWorkflowSteps = pgTable("approval_workflow_steps", {
+  id: serial("id").primaryKey(),
+  workflowId: integer("workflow_id")
+    .notNull()
+    .references(() => approvalWorkflows.id, { onDelete: "cascade" }),
+  stepOrder: integer("step_order").notNull(),
+  approverRole: text("approver_role").notNull(), // "manager", "admin", "hr", etc.
+  requiredCount: integer("required_count").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
+  steps: many(approvalWorkflowSteps),
+}));
+
+export const approvalWorkflowStepsRelations = relations(approvalWorkflowSteps, ({ one }) => ({
+  workflow: one(approvalWorkflows, {
+    fields: [approvalWorkflowSteps.workflowId],
+    references: [approvalWorkflows.id],
+  }),
+}));
