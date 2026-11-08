@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate, formatCurrency, calculateTenure } from "@/lib/utils";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
+import { getUserPermissions } from "@/lib/permissions";
 import Link from "next/link";
 
 export default async function EmployeeProfilePage({
@@ -144,8 +145,12 @@ export default async function EmployeeProfilePage({
   const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
   const isManager = employee.managerId === session.user.employeeId;
 
-  const canViewCompensation = isAdmin || isViewingSelf || isManager;
-  const canViewSensitivePersonalInfo = isAdmin || isViewingSelf;
+  // Get DB-backed permissions
+  const permissions = await getUserPermissions(session.user.email!);
+  
+  // Allow viewing own data or use DB permissions
+  const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
+  const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
 
   // Only query sensitive personal info if authorized
   const sensitivePersonalInfo = canViewSensitivePersonalInfo
