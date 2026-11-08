@@ -64,6 +64,13 @@ export async function authenticateApiKey(
       return null;
     }
 
+    // Update last used timestamp (fire and forget)
+    db.update(employees)
+      .set({ apiKeyLastUsedAt: new Date() })
+      .where(eq(employees.id, employee.id))
+      .then(() => {})
+      .catch((err) => console.error("Failed to update apiKeyLastUsedAt:", err));
+
     // Return full permissions from access level
     const perms = employee.permissions || {
       canViewCompensation: false,

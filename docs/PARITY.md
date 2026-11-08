@@ -108,8 +108,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Saved views schema (people_views table) ✅ Done
 - [x] Saved views UI (create, edit, delete, apply) ✅ Complete (PeopleViewSelector wired into /people and /people/directory)
 - [x] Column chooser UI ✅ Complete (ColumnChooserDialog wired into /people/directory with localStorage persistence)
-- [ ] New Employee wizard - Missing
-- [ ] Terminate employee flow - Missing
+- [x] New Employee wizard ✅ Done (/people/new - see section 9)
+- [x] Terminate employee flow ✅ Done (/people/[id]/terminate - see section 9)
   - [ ] Termination reasons - Missing
   - [ ] Canadian ROE code mapping - Missing
 - [ ] Rehire flow - Missing
@@ -179,9 +179,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Seeded workflow steps ✅ Done (dbed588 - 2-step time off workflow)
 - [ ] Information Updates (by location) - Missing
 - [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled)
-- [ ] Compensation changes with approval - Missing
+- [x] Compensation changes with approval ✅ Done (a50adbb - routes through workflow when enabled, applies on final approval)
 - [ ] Employment Status changes with approval - Missing
-- [ ] Job Info changes with approval - Missing
+- [x] Job Info changes with approval ✅ Done (a50adbb - routes through workflow when enabled for significant changes)
 - [ ] Promotion workflow - Missing
 - [x] Enable/disable per workflow ✅ Done
 - [ ] Configurable requester and approver paths - Partial (approver role-based)
@@ -456,7 +456,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] API key management ✅ Done
   - [x] Per-integration keys ✅ Done (generate/revoke UI at /settings/api-keys)
   - [x] Scope configuration ✅ Done (inherits from user access level)
-  - [x] Last-used timestamps ⚠️ Partial (column exists, not updated on use)
+  - [x] Last-used timestamps ✅ Done (apiKeyLastUsedAt updated on each successful auth)
   - [x] Permission enforcement ✅ Done (field-level filtering for compensation/SIN/bank)
   - [x] Security tests ✅ Done (bamboo-security.test.ts verifies auth + scope)
 - [ ] Support for 31 Bamboo integrations - Missing
@@ -474,8 +474,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Sensitive field redaction (salary, SIN/SSN, bank) in UI
   - [x] Last 100 events display
   - [x] Employee creation/termination logged
-  - [ ] Document deletion logging - Missing (DELETE route doesn't create audit log)
-  - [ ] Compensation changes logging - Not yet implemented
+  - [x] Document deletion logging ✅ Done (DELETE route creates audit log with document details)
+  - [x] Compensation changes logging ✅ Done (logged in updateEmployeeCompensation and approval completion)
   - [ ] Full change history per entity - Missing (no entity-specific view)
 - [ ] Security settings page
 - [ ] Session management

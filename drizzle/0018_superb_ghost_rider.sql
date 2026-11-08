@@ -1,0 +1,1 @@
+ALTER TABLE "employees" ADD COLUMN "api_key_last_used_at" timestamp;

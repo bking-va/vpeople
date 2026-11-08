@@ -233,6 +233,7 @@ export const employees = pgTable("employees", {
   jobLevelId: integer("job_level_id").references(() => jobLevels.id),
   accessLevel: accessLevelEnum("access_level").default("employee").notNull(),
   apiKeyHash: text("api_key_hash").unique(),
+  apiKeyLastUsedAt: timestamp("api_key_last_used_at"),
   photoUrl: text("photo_url"),
   dietaryRestrictions: text("dietary_restrictions"),
   tshirtSize: text("tshirt_size"),
