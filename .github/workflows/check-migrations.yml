@@ -1,0 +1,32 @@
+name: Check Migrations
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Check all migrations are in journal
+        run: npm run db:check
+      
+      - name: Verify no uncommitted migrations
+        run: |
+          if [ -n "$(git status --porcelain drizzle/)" ]; then
+            echo "Error: Uncommitted changes in drizzle/ directory"
+            git status drizzle/
+            exit 1
+          fi

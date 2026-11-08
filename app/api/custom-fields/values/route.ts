@@ -53,7 +53,10 @@ export async function GET(request: NextRequest) {
     const visibleValues = valuesWithFields.filter(({ field }) => {
       if (!field) return false;
 
-      switch (field.visibility) {
+      // Default to "everyone" if visibility is missing (backwards compatibility)
+      const visibility = field.visibility || "everyone";
+
+      switch (visibility) {
         case "everyone":
           return true;
         case "manager_hr":
@@ -61,7 +64,8 @@ export async function GET(request: NextRequest) {
         case "hr_only":
           return isViewingSelf || isHROrAdmin;
         default:
-          return false;
+          // Unknown visibility, default to everyone for safety
+          return true;
       }
     });
 

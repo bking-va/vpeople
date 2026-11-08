@@ -43,7 +43,7 @@ export function CustomFieldForm({ field }: CustomFieldFormProps) {
     options: field?.options || "",
     isRequired: field?.isRequired || false,
     orderIndex: field?.orderIndex || 0,
-    visibility: field?.visibility || "everyone",
+    visibility: (field?.visibility as string | undefined) || "everyone",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {

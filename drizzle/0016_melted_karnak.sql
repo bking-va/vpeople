@@ -1,0 +1,2 @@
+CREATE TYPE "public"."custom_field_visibility" AS ENUM('everyone', 'manager_hr', 'hr_only');--> statement-breakpoint
+ALTER TABLE "custom_fields" ADD COLUMN "visibility" "custom_field_visibility" DEFAULT 'everyone' NOT NULL;
