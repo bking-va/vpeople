@@ -33,6 +33,7 @@ import Link from "next/link";
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 import { CompensationEditForm } from "@/components/compensation-edit-form";
+import { JobInfoEditForm } from "@/components/job-info-edit-form";
 
 export default async function EmployeeProfilePage({
   params,
@@ -434,6 +435,23 @@ export default async function EmployeeProfilePage({
               />
             </CardContent>
           </Card>
+
+          {canEditEmployee && (
+            <JobInfoEditForm
+              employeeId={employee.id}
+              canEdit={canEditEmployee}
+              currentData={{
+                jobTitle: employee.jobTitle || undefined,
+                departmentId: employee.departmentId || undefined,
+                divisionId: employee.divisionId || undefined,
+                locationId: employee.locationId || undefined,
+                managerId: employee.managerId || undefined,
+                employmentStatus: employee.employmentStatus,
+                jobFamilyId: employee.jobFamilyId || undefined,
+                jobLevelId: employee.jobLevelId || undefined,
+              }}
+            />
+          )}
         </TabsContent>
 
         {canViewCompensation && (

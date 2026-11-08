@@ -10,6 +10,8 @@ import { Key, Copy, Eye, EyeOff, AlertTriangle } from "lucide-react";
 
 export default function ApiKeysPage() {
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [apiKeyCreatedAt, setApiKeyCreatedAt] = useState<string | null>(null);
+  const [apiKeyLastUsedAt, setApiKeyLastUsedAt] = useState<string | null>(null);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -24,6 +26,8 @@ export default function ApiKeysPage() {
       if (response.ok) {
         const data = await response.json();
         setHasApiKey(data.hasApiKey);
+        setApiKeyCreatedAt(data.createdAt);
+        setApiKeyLastUsedAt(data.lastUsedAt);
       }
     } catch (error) {
       console.error("Failed to check API key:", error);
@@ -134,11 +138,28 @@ export default function ApiKeysPage() {
 
           <div className="space-y-2">
             <Label>Status</Label>
-            <div className="flex items-center gap-2">
-              <Key className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">
-                {hasApiKey ? "API key is active" : "No API key generated"}
-              </span>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">
+                  {hasApiKey ? "API key is active" : "No API key generated"}
+                </span>
+              </div>
+              {hasApiKey && apiKeyCreatedAt && (
+                <div className="text-xs text-muted-foreground">
+                  Created: {new Date(apiKeyCreatedAt).toLocaleString()}
+                </div>
+              )}
+              {hasApiKey && apiKeyLastUsedAt && (
+                <div className="text-xs text-muted-foreground">
+                  Last used: {new Date(apiKeyLastUsedAt).toLocaleString()}
+                </div>
+              )}
+              {hasApiKey && !apiKeyLastUsedAt && (
+                <div className="text-xs text-muted-foreground">
+                  Never used
+                </div>
+              )}
             </div>
           </div>
 

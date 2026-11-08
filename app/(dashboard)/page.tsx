@@ -89,13 +89,14 @@ export default async function HomePage() {
   }
 
   // Add available, pending, and scheduled to each item
+  // Note: stored balance already reflects approved deductions, so available = stored balance
   const timeOffDataWithAvailable = timeOffData.map(item => {
     const totalBalance = parseFloat(item.balance.balance);
     const scheduled = scheduledDaysByPolicy.get(item.balance.policyId) || 0;
     const pending = pendingDaysByPolicy.get(item.balance.policyId) || 0;
     return {
       ...item,
-      availableBalance: Math.max(0, totalBalance - scheduled),
+      availableBalance: Math.max(0, totalBalance),
       pendingDays: pending,
       scheduledDays: scheduled,
     };

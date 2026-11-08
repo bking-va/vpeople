@@ -13,7 +13,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const [employee] = await db
-      .select({ apiKeyHash: employees.apiKeyHash })
+      .select({
+        apiKeyHash: employees.apiKeyHash,
+        apiKeyCreatedAt: employees.apiKeyCreatedAt,
+        apiKeyLastUsedAt: employees.apiKeyLastUsedAt,
+      })
       .from(employees)
       .where(eq(employees.email, session.user.email))
       .limit(1);
@@ -25,7 +29,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ hasApiKey: !!employee.apiKeyHash });
+    return NextResponse.json({
+      hasApiKey: !!employee.apiKeyHash,
+      createdAt: employee.apiKeyCreatedAt,
+      lastUsedAt: employee.apiKeyLastUsedAt,
+    });
   } catch (error: any) {
     console.error("Failed to check API key:", error);
     return NextResponse.json(
@@ -64,6 +72,8 @@ export async function POST(request: NextRequest) {
       .update(employees)
       .set({
         apiKeyHash,
+        apiKeyCreatedAt: new Date(),
+        apiKeyLastUsedAt: null,
         updatedAt: new Date(),
       })
       .where(eq(employees.id, employee.id));

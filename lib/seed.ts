@@ -376,10 +376,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     {
       name: "Job Info Change Approval",
       type: "job_info_change" as const,
-      enabled: false,
-      requiresManagerApproval: false,
+      enabled: true,
+      requiresManagerApproval: true,
       requiresAdminApproval: true,
-      description: "Requires admin approval for job information changes",
+      description: "Requires manager and admin approval for job information changes",
     },
   ];
 
@@ -418,6 +418,64 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db
       .insert(schema.approvalWorkflowSteps)
       .values(workflowStepValues)
+      .onConflictDoNothing();
+  }
+
+  // Seed workflow steps for compensation_change workflow
+  const [compWorkflow] = await db
+    .select()
+    .from(schema.approvalWorkflows)
+    .where(eq(schema.approvalWorkflows.type, "compensation_change"))
+    .limit(1);
+
+  if (compWorkflow) {
+    const compStepValues = [
+      {
+        workflowId: compWorkflow.id,
+        stepOrder: 1,
+        approverRole: "manager",
+        requiredCount: 1,
+      },
+      {
+        workflowId: compWorkflow.id,
+        stepOrder: 2,
+        approverRole: "full_admin",
+        requiredCount: 1,
+      },
+    ];
+
+    await db
+      .insert(schema.approvalWorkflowSteps)
+      .values(compStepValues)
+      .onConflictDoNothing();
+  }
+
+  // Seed workflow steps for job_info_change workflow
+  const [jobWorkflow] = await db
+    .select()
+    .from(schema.approvalWorkflows)
+    .where(eq(schema.approvalWorkflows.type, "job_info_change"))
+    .limit(1);
+
+  if (jobWorkflow) {
+    const jobStepValues = [
+      {
+        workflowId: jobWorkflow.id,
+        stepOrder: 1,
+        approverRole: "manager",
+        requiredCount: 1,
+      },
+      {
+        workflowId: jobWorkflow.id,
+        stepOrder: 2,
+        approverRole: "full_admin",
+        requiredCount: 1,
+      },
+    ];
+
+    await db
+      .insert(schema.approvalWorkflowSteps)
+      .values(jobStepValues)
       .onConflictDoNothing();
   }
 
@@ -626,6 +684,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   const employeesData = [];
   let empNumber = 6;
   const departmentDirectors: Record<number, number | null> = {}; // Track first employee per dept
+  const departmentTeamLeads: Record<number, number[]> = {}; // Track team leads per dept
 
   const firstNames = [
     "Emma",
@@ -808,7 +867,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
                 ? toronto
                 : remote;
 
-      const isManager = i % 10 === 0;
+      const isManager = i % 15 === 0; // Fewer managers = larger teams
       const isFirstInDept = !departmentDirectors[dept.id];
       
       // Department heads (executives)
@@ -825,8 +884,8 @@ export async function runSeed(options: { reset?: boolean } = {}) {
                   ? ceo.id // Product reports to CEO for now
                   : executives[0]?.id; // CPO for people ops
       
-      // First person in each department reports to exec, rest report to that director
-      const managerId = isFirstInDept ? deptHead : departmentDirectors[dept.id];
+      // Temporary manager assignment (will be fixed by post-processing)
+      const managerId = isFirstInDept ? deptHead : deptHead;
 
       const titles =
         dept.id === tech.id
@@ -902,7 +961,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       .values(employeesData)
       .onConflictDoNothing();
     
-    console.log("Fixing reporting structure - routing through department directors...");
+    console.log("Fixing reporting structure - creating team lead hierarchy...");
     // Get all non-executive employees by department
     for (const dept of [tech, services, sales, marketing, product, peopleOps]) {
       const deptEmployees = await db
@@ -917,15 +976,30 @@ export async function runSeed(options: { reset?: boolean } = {}) {
         .orderBy(schema.employees.id);
       
       if (deptEmployees.length > 1) {
-        // First employee is the director - others report to them
         const directorId = deptEmployees[0].id;
-        const teamMemberIds = deptEmployees.slice(1).map(e => e.id);
+        const remaining = deptEmployees.slice(1);
         
-        if (teamMemberIds.length > 0) {
+        // Create team leads: ~1 lead per 6-8 employees
+        const numLeads = Math.max(1, Math.min(4, Math.floor(remaining.length / 7)));
+        const teamLeads = remaining.slice(0, numLeads);
+        const teamMembers = remaining.slice(numLeads);
+        
+        // Team leads report to director
+        if (teamLeads.length > 0) {
           await db
             .update(schema.employees)
             .set({ managerId: directorId })
-            .where(inArray(schema.employees.id, teamMemberIds));
+            .where(inArray(schema.employees.id, teamLeads.map(e => e.id)));
+        }
+        
+        // Team members report to leads in round-robin
+        for (let i = 0; i < teamMembers.length; i++) {
+          const leadIdx = i % teamLeads.length;
+          const leadId = teamLeads[leadIdx]?.id || directorId;
+          await db
+            .update(schema.employees)
+            .set({ managerId: leadId })
+            .where(eq(schema.employees.id, teamMembers[i].id));
         }
       }
     }

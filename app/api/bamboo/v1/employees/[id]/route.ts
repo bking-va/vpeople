@@ -54,7 +54,7 @@ export async function GET(
     // Filter sensitive fields based on permissions
     const filtered = filterEmployeeFields(emp, auth.permissions);
 
-    const bambooFormat = {
+    const bambooFormat: any = {
       id: filtered.id.toString(),
       employeeNumber: filtered.employeeNumber,
       firstName: filtered.firstName,
@@ -68,6 +68,28 @@ export async function GET(
       hireDate: filtered.hireDate,
       status: filtered.employmentStatus,
     };
+
+    // Include compensation fields if permitted
+    if (filtered.payRate !== undefined) bambooFormat.payRate = filtered.payRate;
+    if (filtered.salary !== undefined) bambooFormat.salary = filtered.salary;
+    if (filtered.hourlyRate !== undefined) bambooFormat.hourlyRate = filtered.hourlyRate;
+    if (filtered.currency !== undefined) bambooFormat.currency = filtered.currency;
+    if (filtered.bonusAmount !== undefined) bambooFormat.bonusAmount = filtered.bonusAmount;
+    if (filtered.bonusDate !== undefined) bambooFormat.bonusDate = filtered.bonusDate;
+    if (filtered.equityShares !== undefined) bambooFormat.equityShares = filtered.equityShares;
+    if (filtered.equityValue !== undefined) bambooFormat.equityValue = filtered.equityValue;
+
+    // Include sensitive personal info if permitted
+    if (filtered.sin !== undefined) bambooFormat.sin = filtered.sin;
+    if (filtered.ssn !== undefined) bambooFormat.ssn = filtered.ssn;
+    if (filtered.passportNumber !== undefined) bambooFormat.passportNumber = filtered.passportNumber;
+    if (filtered.nationalId !== undefined) bambooFormat.nationalId = filtered.nationalId;
+
+    // Include bank info if permitted
+    if (filtered.bankName !== undefined) bambooFormat.bankName = filtered.bankName;
+    if (filtered.bankAccountNumber !== undefined) bambooFormat.bankAccountNumber = filtered.bankAccountNumber;
+    if (filtered.bankRoutingNumber !== undefined) bambooFormat.bankRoutingNumber = filtered.bankRoutingNumber;
+    if (filtered.bankSwiftCode !== undefined) bambooFormat.bankSwiftCode = filtered.bankSwiftCode;
 
     return NextResponse.json(bambooFormat);
   } catch (error: any) {

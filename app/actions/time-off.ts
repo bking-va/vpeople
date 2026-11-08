@@ -129,44 +129,8 @@ export async function approveTimeOffRequest(requestId: number) {
     if (updatedApprovalData?.request.status === "approved") {
       const daysRequested = parseFloat(request.request.daysRequested);
       
-      // Deduct balance in transaction with final status update
-      await db.transaction(async (tx) => {
-        await tx
-          .update(timeOffBalances)
-          .set({
-            balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(timeOffBalances.employeeId, request.request.employeeId),
-              eq(timeOffBalances.policyId, request.request.policyId)
-            )
-          );
-      });
-    }
-
-    revalidatePath("/time-off");
-    revalidatePath("/time-off/approvals");
-    revalidatePath(`/people/${request.request.employeeId}`);
-
-    return { success: true };
-  } else {
-    // Legacy single-step approval
-    const daysRequested = parseFloat(request.request.daysRequested);
-
-    // Update status and deduct balance in transaction
-    await db.transaction(async (tx) => {
-      await tx
-        .update(timeOffRequests)
-        .set({
-          status: "approved",
-          reviewedBy: currentEmployee.id,
-          reviewedAt: new Date(),
-        })
-        .where(eq(timeOffRequests.id, requestId));
-
-      await tx
+      // Deduct balance (atomic operation)
+      await db
         .update(timeOffBalances)
         .set({
           balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
@@ -178,7 +142,40 @@ export async function approveTimeOffRequest(requestId: number) {
             eq(timeOffBalances.policyId, request.request.policyId)
           )
         );
-    });
+    }
+
+    revalidatePath("/time-off");
+    revalidatePath("/time-off/approvals");
+    revalidatePath(`/people/${request.request.employeeId}`);
+
+    return { success: true };
+  } else {
+    // Legacy single-step approval
+    const daysRequested = parseFloat(request.request.daysRequested);
+
+    // Update status
+    await db
+      .update(timeOffRequests)
+      .set({
+        status: "approved",
+        reviewedBy: currentEmployee.id,
+        reviewedAt: new Date(),
+      })
+      .where(eq(timeOffRequests.id, requestId));
+
+    // Deduct balance
+    await db
+      .update(timeOffBalances)
+      .set({
+        balance: sql`CAST(CAST(${timeOffBalances.balance} AS DECIMAL) - ${daysRequested} AS TEXT)`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(timeOffBalances.employeeId, request.request.employeeId),
+          eq(timeOffBalances.policyId, request.request.policyId)
+        )
+      );
 
     // Legacy single-step audit log
     await createAuditLog({

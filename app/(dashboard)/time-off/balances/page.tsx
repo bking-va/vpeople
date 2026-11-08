@@ -56,6 +56,7 @@ export default async function TimeOffBalancesPage() {
   }
 
   // Enhance balances with available, pending, and scheduled
+  // Note: stored balance already reflects approved deductions, so available = stored balance
   const balancesWithDetails = allBalances.map(item => {
     const key = `${item.balance.employeeId}-${item.balance.policyId}`;
     const totalBalance = parseFloat(item.balance.balance);
@@ -63,7 +64,7 @@ export default async function TimeOffBalancesPage() {
     const pending = pendingByEmployeePolicy.get(key) || 0;
     return {
       ...item,
-      availableBalance: Math.max(0, totalBalance - scheduled),
+      availableBalance: Math.max(0, totalBalance),
       pendingDays: pending,
       scheduledDays: scheduled,
     };

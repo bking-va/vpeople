@@ -52,6 +52,19 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
     .where(eq(employees.id, requesterId))
     .limit(1);
 
+  // For compensation_change and job_info_change, fetch the affected employee
+  let affectedEmployee = requester;
+  if (entityType === "compensation_change" || entityType === "job_info_change") {
+    const [affected] = await db
+      .select()
+      .from(employees)
+      .where(eq(employees.id, entityId))
+      .limit(1);
+    if (affected) {
+      affectedEmployee = affected;
+    }
+  }
+
   // Create approval request
   const [request] = await db
     .insert(approvalRequests)
@@ -69,19 +82,33 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
   // Create approval request steps
   for (const step of steps) {
     let approverId: number | null = null;
+    let stepStatus: "pending" | "approved" | "rejected" | "skipped" = "pending";
 
     // Determine approver based on role
-    if (step.approverRole === "manager" && requester.managerId) {
-      approverId = requester.managerId;
-    } else if (step.approverRole === "manager_manager" && requester.managerId) {
-      // Get manager's manager
-      const [manager] = await db
-        .select()
-        .from(employees)
-        .where(eq(employees.id, requester.managerId))
-        .limit(1);
-      if (manager && manager.managerId) {
-        approverId = manager.managerId;
+    if (step.approverRole === "manager") {
+      if (affectedEmployee.managerId) {
+        approverId = affectedEmployee.managerId;
+      } else {
+        // No manager (e.g., CEO) - auto-approve this step
+        stepStatus = "approved";
+      }
+    } else if (step.approverRole === "manager_manager") {
+      if (affectedEmployee.managerId) {
+        // Get manager's manager
+        const [manager] = await db
+          .select()
+          .from(employees)
+          .where(eq(employees.id, affectedEmployee.managerId))
+          .limit(1);
+        if (manager && manager.managerId) {
+          approverId = manager.managerId;
+        } else {
+          // Manager has no manager - auto-approve this step
+          stepStatus = "approved";
+        }
+      } else {
+        // No manager - auto-approve this step
+        stepStatus = "approved";
       }
     } else if (step.approverRole === "admin" || step.approverRole === "hr" || step.approverRole === "full_admin") {
       // For admin/HR/full_admin, leave null - shown to all with that access level
@@ -92,8 +119,40 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
       approvalRequestId: request.id,
       stepOrder: step.stepOrder,
       approverId,
-      status: "pending",
+      status: stepStatus,
+      reviewedAt: stepStatus === "approved" ? new Date() : null,
     });
+  }
+
+  // If first step(s) are auto-approved, advance to next pending step
+  const allCreatedSteps = await db
+    .select()
+    .from(approvalRequestSteps)
+    .where(eq(approvalRequestSteps.approvalRequestId, request.id))
+    .orderBy(approvalRequestSteps.stepOrder);
+
+  let currentStepOrder = 1;
+  for (const step of allCreatedSteps) {
+    if (step.status !== "approved") {
+      currentStepOrder = step.stepOrder;
+      break;
+    }
+  }
+
+  // Check if all steps are auto-approved
+  const allApproved = allCreatedSteps.every((s) => s.status === "approved");
+  if (allApproved) {
+    // All steps auto-approved, mark request as approved
+    await db
+      .update(approvalRequests)
+      .set({ status: "approved", currentStep: currentStepOrder })
+      .where(eq(approvalRequests.id, request.id));
+  } else if (currentStepOrder > 1) {
+    // Some steps skipped, update currentStep
+    await db
+      .update(approvalRequests)
+      .set({ currentStep: currentStepOrder })
+      .where(eq(approvalRequests.id, request.id));
   }
 
   return { success: true, requestId: request.id, request };
