@@ -1,29 +1,33 @@
-import { auth } from "@/lib/auth";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export default auth((req) => {
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const isLoggedIn = !!req.auth;
 
   // Public routes that don't require authentication
   const publicRoutes = ["/auth/signin", "/auth/error"];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
   const isAuthApiRoute = pathname.startsWith("/api/auth/");
+  const isApiRoute = pathname.startsWith("/api/");
 
-  // Allow public routes and auth API routes
-  if (isPublicRoute || isAuthApiRoute) {
+  // Allow public routes, auth API routes, and other API routes
+  if (isPublicRoute || isApiRoute) {
     return NextResponse.next();
   }
 
-  // Redirect to sign-in if not authenticated
-  if (!isLoggedIn) {
+  // Check for session cookie (NextAuth uses __Secure-next-auth.session-token in production or next-auth.session-token in dev)
+  const sessionCookie =
+    req.cookies.get("__Secure-next-auth.session-token") ||
+    req.cookies.get("next-auth.session-token");
+
+  // Redirect to sign-in if no session cookie
+  if (!sessionCookie) {
     const signInUrl = new URL("/auth/signin", req.url);
     signInUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(signInUrl);
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [
