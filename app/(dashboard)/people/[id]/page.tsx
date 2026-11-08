@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import {
   employees,
@@ -35,6 +35,10 @@ export default async function EmployeeProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const session = await auth();
+  if (!session?.user) {
+    redirect("/auth/signin");
+  }
+
   const { id } = await params;
   const employeeId = parseInt(id);
 
@@ -42,8 +46,53 @@ export default async function EmployeeProfilePage({
     notFound();
   }
 
+  // Only select safe fields initially (exclude sin, ssn, etc.)
   const [employee] = await db
-    .select()
+    .select({
+      id: employees.id,
+      employeeNumber: employees.employeeNumber,
+      userId: employees.userId,
+      firstName: employees.firstName,
+      middleName: employees.middleName,
+      lastName: employees.lastName,
+      preferredName: employees.preferredName,
+      email: employees.email,
+      personalEmail: employees.personalEmail,
+      workPhone: employees.workPhone,
+      mobilePhone: employees.mobilePhone,
+      homePhone: employees.homePhone,
+      extension: employees.extension,
+      jobTitle: employees.jobTitle,
+      departmentId: employees.departmentId,
+      divisionId: employees.divisionId,
+      locationId: employees.locationId,
+      managerId: employees.managerId,
+      hireDate: employees.hireDate,
+      employmentStatus: employees.employmentStatus,
+      terminationDate: employees.terminationDate,
+      jobFamilyId: employees.jobFamilyId,
+      jobLevelId: employees.jobLevelId,
+      accessLevel: employees.accessLevel,
+      photoUrl: employees.photoUrl,
+      linkedInUrl: employees.linkedInUrl,
+      twitterUrl: employees.twitterUrl,
+      githubUrl: employees.githubUrl,
+      addressStreet1: employees.addressStreet1,
+      addressStreet2: employees.addressStreet2,
+      addressCity: employees.addressCity,
+      addressProvince: employees.addressProvince,
+      addressPostalCode: employees.addressPostalCode,
+      addressCountry: employees.addressCountry,
+      birthDate: employees.birthDate,
+      gender: employees.gender,
+      maritalStatus: employees.maritalStatus,
+      nationality: employees.nationality,
+      citizenship: employees.citizenship,
+      dietaryRestrictions: employees.dietaryRestrictions,
+      tshirtSize: employees.tshirtSize,
+      createdAt: employees.createdAt,
+      updatedAt: employees.updatedAt,
+    })
     .from(employees)
     .where(eq(employees.id, employeeId))
     .limit(1);
@@ -74,7 +123,14 @@ export default async function EmployeeProfilePage({
   ]);
 
   const directReports = await db
-    .select()
+    .select({
+      id: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      preferredName: employees.preferredName,
+      email: employees.email,
+      jobTitle: employees.jobTitle,
+    })
     .from(employees)
     .where(eq(employees.managerId, employeeId));
 
@@ -84,10 +140,25 @@ export default async function EmployeeProfilePage({
     .where(eq(jobHistory.employeeId, employeeId))
     .orderBy(desc(jobHistory.effectiveDate));
 
-  const canViewCompensation = 
-    session?.user?.role === "admin" ||
-    session?.user?.employeeId === employeeId ||
-    directReports.some(r => r.id === session?.user?.employeeId);
+  const isViewingSelf = session.user.employeeId === employeeId;
+  const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
+  const isManager = employee.managerId === session.user.employeeId;
+
+  const canViewCompensation = isAdmin || isViewingSelf || isManager;
+  const canViewSensitivePersonalInfo = isAdmin || isViewingSelf;
+
+  // Only query sensitive personal info if authorized
+  const sensitivePersonalInfo = canViewSensitivePersonalInfo
+    ? await db
+        .select({
+          sin: employees.sin,
+          ssn: employees.ssn,
+        })
+        .from(employees)
+        .where(eq(employees.id, employeeId))
+        .limit(1)
+        .then((rows) => rows[0] || { sin: null, ssn: null })
+    : { sin: null, ssn: null };
 
   const [compHistory, bonuses, equity] = canViewCompensation
     ? await Promise.all([
@@ -224,8 +295,8 @@ export default async function EmployeeProfilePage({
               <InfoField label="Marital Status" value={employee.maritalStatus} />
               <InfoField label="Nationality" value={employee.nationality} />
               <InfoField label="Citizenship" value={employee.citizenship} />
-              {canViewCompensation && <InfoField label="SIN" value={employee.sin} />}
-              {canViewCompensation && <InfoField label="SSN" value={employee.ssn} />}
+              {canViewSensitivePersonalInfo && <InfoField label="SIN" value={sensitivePersonalInfo.sin} />}
+              {canViewSensitivePersonalInfo && <InfoField label="SSN" value={sensitivePersonalInfo.ssn} />}
             </CardContent>
           </Card>
 

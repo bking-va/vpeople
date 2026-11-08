@@ -14,6 +14,14 @@ declare module "next-auth" {
       employeeId: number | null;
     } & DefaultSession["user"];
   }
+
+  interface User {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    employeeId?: number | null;
+  }
 }
 
 const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
@@ -40,6 +48,30 @@ const authConfig = {
                 return null;
               }
 
+              // Look up employee record first to get proper role/access level
+              const [employee] = await db
+                .select()
+                .from(employees)
+                .where(eq(employees.email, email))
+                .limit(1);
+
+              // Determine session role from employee access level
+              // Session role can be "employee" | "manager" | "admin" | "full_admin"
+              let sessionRole = "employee";
+              if (employee?.accessLevel === "full_admin") {
+                sessionRole = "full_admin";
+              } else if (employee?.accessLevel === "global_view") {
+                sessionRole = "admin";
+              } else if (employee?.accessLevel === "regional_view") {
+                sessionRole = "admin";
+              } else if (employee?.accessLevel === "manager") {
+                sessionRole = "manager";
+              }
+
+              // Map to userRoleEnum for database (only supports "employee" | "manager" | "admin")
+              const dbRole: "employee" | "manager" | "admin" = 
+                sessionRole === "full_admin" ? "admin" : sessionRole as "employee" | "manager" | "admin";
+
               let [user] = await db
                 .select()
                 .from(users)
@@ -52,18 +84,30 @@ const authConfig = {
                   .values({
                     id: `dev-${Date.now()}`,
                     email,
-                    name: email.split("@")[0],
+                    name: employee?.preferredName || employee?.firstName || email.split("@")[0],
                     emailVerified: new Date(),
-                    role: "employee",
+                    role: dbRole,
                   })
                   .returning();
+              } else if (user.role !== dbRole) {
+                // Update user role if employee access level changed
+                await db
+                  .update(users)
+                  .set({ role: dbRole })
+                  .where(eq(users.id, user.id));
+                user.role = dbRole;
               }
 
               return {
                 id: user.id,
                 email: user.email!,
-                name: user.name!,
-                role: user.role || "employee",
+                name: employee?.preferredName
+                  ? `${employee.preferredName} ${employee.lastName}`
+                  : employee
+                    ? `${employee.firstName} ${employee.lastName}`
+                    : user.name!,
+                role: sessionRole,
+                employeeId: employee?.id || null,
               };
             },
           }),
@@ -93,13 +137,19 @@ const authConfig = {
         token.id = user.id;
         token.role = user.role || "employee";
 
-        const [employee] = await db
-          .select({ id: employees.id })
-          .from(employees)
-          .where(eq(employees.email, user.email))
-          .limit(1);
+        // Use employeeId from user if available (from Credentials provider)
+        if (user.employeeId !== undefined) {
+          token.employeeId = user.employeeId;
+        } else {
+          // Otherwise look it up (for OAuth providers)
+          const [employee] = await db
+            .select({ id: employees.id })
+            .from(employees)
+            .where(eq(employees.email, user.email))
+            .limit(1);
 
-        token.employeeId = employee?.id || null;
+          token.employeeId = employee?.id || null;
+        }
       }
       return token;
     },

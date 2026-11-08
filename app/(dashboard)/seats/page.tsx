@@ -4,6 +4,8 @@ import { eq, isNull } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 interface SeatNode {
   id: number;
@@ -19,6 +21,11 @@ interface SeatNode {
 }
 
 async function buildSeatTree(): Promise<SeatNode[]> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/auth/signin");
+  }
+
   const allSeats = await db
     .select({
       seat: seats,

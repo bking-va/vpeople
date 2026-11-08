@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export default async function AdminPage() {
   const session = await auth();
 
-  if (session?.user?.role !== "admin") {
+  if (!session?.user || (session.user.role !== "admin" && session.user.role !== "full_admin")) {
     redirect("/people");
   }
 

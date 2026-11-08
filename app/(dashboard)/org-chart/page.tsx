@@ -4,6 +4,8 @@ import { eq, isNull } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import Link from "next/link";
 import { Users } from "lucide-react";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 interface EmployeeNode {
   id: number;
@@ -16,6 +18,11 @@ interface EmployeeNode {
 }
 
 async function buildOrgTree(): Promise<EmployeeNode[]> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/auth/signin");
+  }
+
   const allEmployees = await db
     .select({
       id: employees.id,
