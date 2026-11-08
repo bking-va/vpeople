@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { head } from "@vercel/blob";
 
 export async function GET(
   request: NextRequest,
@@ -55,28 +54,41 @@ export async function GET(
       );
     }
 
-    // Generate signed download URL for private blob
+    // Stream the file through this route using server-side token
     if (!document.fileUrl) {
-      return NextResponse.json({
-        url: null,
-        expiresAt: null,
-      });
+      return NextResponse.json(
+        { error: "Document file not available" },
+        { status: 404 }
+      );
     }
 
-    try {
-      const blobInfo = await head(document.fileUrl);
-      return NextResponse.json({
-        url: blobInfo.downloadUrl,
-        expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour
-      });
-    } catch (blobError) {
-      console.error("Failed to generate signed URL:", blobError);
-      // Return null if blob doesn't exist yet (e.g., seeded placeholder)
-      return NextResponse.json({
-        url: null,
-        expiresAt: null,
-      });
+    // Fetch blob with server-side token and stream to client
+    const blobResponse = await fetch(document.fileUrl, {
+      headers: {
+        Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
+      },
+    });
+
+    if (!blobResponse.ok) {
+      console.error("Blob fetch failed:", blobResponse.status);
+      return NextResponse.json(
+        { error: "Document file not available" },
+        { status: 404 }
+      );
     }
+
+    // Get filename from document or blob URL
+    const filename = document.title || "download";
+    const contentType = blobResponse.headers.get("content-type") || "application/octet-stream";
+
+    // Stream response with proper headers
+    return new NextResponse(blobResponse.body, {
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "private, max-age=0",
+      },
+    });
   } catch (error: any) {
     console.error("Document download failed:", error);
     return NextResponse.json(

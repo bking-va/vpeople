@@ -49,17 +49,17 @@ export default async function ENPSPage() {
       .where(eq(enpsSurveyParticipants.surveyId, activeSurvey.id));
     
     totalParticipants = participants.length;
-    totalResponses = participants.filter((p) => p.hasResponded).length;
     
     const responses = await db
       .select()
       .from(enpsResponses)
       .where(eq(enpsResponses.surveyId, activeSurvey.id));
 
+    totalResponses = responses.length;
     promoters = responses.filter((r) => r.score >= 9).length;
     detractors = responses.filter((r) => r.score <= 6).length;
 
-    if (totalResponses > 0) {
+    if (totalResponses > 0 && totalParticipants > 0) {
       enpsScore = Math.round(((promoters - detractors) / totalResponses) * 100);
       responseRate = Math.round((totalResponses / totalParticipants) * 100);
     }

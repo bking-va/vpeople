@@ -25,7 +25,38 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   if (reset) {
     console.log("⚠️  Resetting database (--reset flag detected)...");
 
+    // Delete document blobs before truncating documents table
+    try {
+      const { documents } = await import("@/lib/db/schema");
+      const existingDocs = await db.select({ fileUrl: documents.fileUrl }).from(documents);
+      
+      if (existingDocs.length > 0 && process.env.BLOB_READ_WRITE_TOKEN) {
+        const { del } = await import("@vercel/blob");
+        let deletedCount = 0;
+        for (const doc of existingDocs) {
+          if (doc.fileUrl) {
+            try {
+              await del(doc.fileUrl);
+              deletedCount++;
+            } catch (err) {
+              // Tolerate blob deletion failures (orphans are acceptable)
+              console.log(`Skipped blob deletion: ${doc.fileUrl}`);
+            }
+          }
+        }
+        console.log(`Deleted ${deletedCount} document blobs`);
+      }
+    } catch (err) {
+      console.log("Skipped blob cleanup (tolerable)");
+    }
+
     await db.execute(sql`TRUNCATE TABLE audit_logs CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE documents CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE enps_responses CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE enps_survey_participants CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE enps_surveys CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE training_completions CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE training_courses CASCADE`);
     await db.execute(sql`TRUNCATE TABLE employee_tasks CASCADE`);
     await db.execute(sql`TRUNCATE TABLE task_templates CASCADE`);
     await db.execute(sql`TRUNCATE TABLE employee_notes CASCADE`);
@@ -1011,7 +1042,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
         balances.push({
           employeeId: employee.id,
           policyId: policy.id,
-          balance: String(Math.floor(Math.random() * 10) + 5),
+          balance: String(10), // Start with 10 days standard balance
         });
       }
     }
@@ -1408,7 +1439,27 @@ export async function runSeed(options: { reset?: boolean } = {}) {
 
   console.log("Creating sample documents...");
   
-  const documentsData = [
+  // Helper to create and upload placeholder documents
+  const createPlaceholderBlob = async (title: string, content: string) => {
+    try {
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        console.log("Skipping blob upload (no token)");
+        return null;
+      }
+      
+      const { put } = await import("@vercel/blob");
+      const blob = await put(`seed/${title}.txt`, content, {
+        access: "private",
+        addRandomSuffix: true,
+      });
+      return blob.url;
+    } catch (error) {
+      console.error(`Failed to upload ${title}:`, error);
+      return null;
+    }
+  };
+
+  const documentsData = await Promise.all([
     {
       employeeId: ceo.id,
       title: "Employment Agreement - CEO",
@@ -1417,6 +1468,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       signedAt: new Date("2020-01-15"),
       signedBy: ceo.id,
       uploadedBy: ceo.id,
+      fileUrl: await createPlaceholderBlob(
+        "employment-agreement-ceo",
+        `EMPLOYMENT AGREEMENT\n\nThis Employment Agreement is entered into on January 15, 2020.\n\nEmployee: ${ceo.firstName} ${ceo.lastName}\nPosition: Chief Executive Officer\n\nTerms and conditions...\n`
+      ),
     },
     {
       employeeId: executives[0]?.id || ceo.id,
@@ -1424,6 +1479,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       category: "performance" as const,
       status: "draft" as const,
       uploadedBy: ceo.id,
+      fileUrl: await createPlaceholderBlob(
+        "performance-review-2026",
+        `PERFORMANCE REVIEW 2026\n\nEmployee: ${executives[0]?.firstName || ceo.firstName} ${executives[0]?.lastName || ceo.lastName}\n\nRating: Exceeds Expectations\n\nComments: Strong performance across all key areas...\n`
+      ),
     },
     {
       employeeId: allEmployees[5]?.id || ceo.id,
@@ -1433,6 +1492,10 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       signedAt: new Date("2025-06-01"),
       signedBy: allEmployees[5]?.id || ceo.id,
       uploadedBy: ceo.id,
+      fileUrl: await createPlaceholderBlob(
+        "nda-agreement",
+        `NON-DISCLOSURE AGREEMENT\n\nSigned: June 1, 2025\n\nEmployee: ${allEmployees[5]?.firstName || ceo.firstName} ${allEmployees[5]?.lastName || ceo.lastName}\n\nConfidentiality terms...\n`
+      ),
     },
     {
       employeeId: allEmployees[10]?.id || ceo.id,
@@ -1440,8 +1503,12 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       category: "benefits" as const,
       status: "pending_signature" as const,
       uploadedBy: allEmployees[10]?.id || ceo.id,
+      fileUrl: await createPlaceholderBlob(
+        "benefits-enrollment-2027",
+        `BENEFITS ENROLLMENT FORM 2027\n\nEmployee: ${allEmployees[10]?.firstName || ceo.firstName} ${allEmployees[10]?.lastName || ceo.lastName}\n\nHealth Insurance: Yes\nDental: Yes\n401k Contribution: 5%\n\nPlease sign below...\n`
+      ),
     },
-  ];
+  ]);
 
   await db.insert(schema.documents).values(documentsData);
 

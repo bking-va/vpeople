@@ -57,18 +57,8 @@ export function ProfileDocuments({
   };
 
   const handleDownload = async (docId: number) => {
-    try {
-      const response = await fetch(`/api/documents/${docId}/download`);
-      if (response.ok) {
-        const data = await response.json();
-        window.open(data.url, "_blank");
-      } else {
-        alert("Download failed");
-      }
-    } catch (error) {
-      console.error("Download failed:", error);
-      alert("Download failed");
-    }
+    // Open download URL directly - server streams the file
+    window.location.href = `/api/documents/${docId}/download`;
   };
 
   const handleSign = async (docId: number) => {

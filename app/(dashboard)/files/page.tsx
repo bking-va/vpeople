@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { db } from "@/lib/db";
 import { documents, employees } from "@/lib/db/schema";
-import { eq, count, desc, sql } from "drizzle-orm";
+import { eq, and, count, desc, sql } from "drizzle-orm";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 
@@ -55,6 +55,38 @@ export default async function FilesPage() {
     .from(documents)
     .orderBy(desc(documents.createdAt))
     .limit(10);
+
+  // Get pending signature documents for current user or managed employees
+  const pendingSignatureDocs = await db
+    .select({
+      id: documents.id,
+      title: documents.title,
+      category: documents.category,
+      createdAt: documents.createdAt,
+      employeeId: documents.employeeId,
+    })
+    .from(documents)
+    .where(
+      isAdmin 
+        ? eq(documents.status, "pending_signature")
+        : and(
+            eq(documents.status, "pending_signature"),
+            eq(documents.employeeId, employee.id)
+          )
+    )
+    .orderBy(desc(documents.createdAt))
+    .limit(10);
+
+  // Get category counts
+  const categoryCounts = await db
+    .select({
+      category: documents.category,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(documents)
+    .groupBy(documents.category);
+
+  const categoryMap = new Map(categoryCounts.map(c => [c.category, c.count]));
 
   const totalDocs = totalDocsResult.count;
   const pendingSignatures = pendingSignaturesResult.count;
@@ -131,22 +163,25 @@ export default async function FilesPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {[
-                "Contracts & Agreements",
-                "Tax Forms",
-                "Benefits & Insurance",
-                "Performance Reviews",
-                "Company Policies",
-              ].map((category) => (
+              {([
+                { key: "contract" as const, label: "Contracts & Agreements" },
+                { key: "tax_form" as const, label: "Tax Forms" },
+                { key: "benefits" as const, label: "Benefits & Insurance" },
+                { key: "performance" as const, label: "Performance Reviews" },
+                { key: "policy" as const, label: "Company Policies" },
+                { key: "other" as const, label: "Other Documents" },
+              ] as const).map((category) => (
                 <div
-                  key={category}
+                  key={category.key}
                   className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <FolderOpen className="h-5 w-5 text-muted-foreground" />
-                    <span className="font-medium">{category}</span>
+                    <span className="font-medium">{category.label}</span>
                   </div>
-                  <Badge variant="secondary">0</Badge>
+                  <Badge variant="secondary">
+                    {categoryMap.get(category.key) || 0}
+                  </Badge>
                 </div>
               ))}
             </div>
@@ -159,13 +194,42 @@ export default async function FilesPage() {
             <CardDescription>Documents requiring signature</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-12">
-              <FileCheck className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Pending Signatures</h3>
-              <p className="text-muted-foreground">
-                Documents requiring your signature will appear here
-              </p>
-            </div>
+            {pendingSignatureDocs.length === 0 ? (
+              <div className="text-center py-12">
+                <FileCheck className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Pending Signatures</h3>
+                <p className="text-muted-foreground">
+                  Documents requiring your signature will appear here
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pendingSignatureDocs.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileCheck className="h-5 w-5 text-muted-foreground" />
+                      <div>
+                        <Link
+                          href={`/people/${doc.employeeId}#documents`}
+                          className="font-medium hover:underline"
+                        >
+                          {doc.title}
+                        </Link>
+                        <p className="text-sm text-muted-foreground">
+                          {doc.category} • {formatDate(doc.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="default">
+                      Sign
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

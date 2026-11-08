@@ -60,6 +60,38 @@ export default async function HomePage() {
     .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
     .where(eq(timeOffBalances.employeeId, employeeId));
 
+  // Fetch future approved/scheduled requests to compute available balance
+  const futureRequests = await db
+    .select()
+    .from(timeOffRequests)
+    .where(
+      and(
+        eq(timeOffRequests.employeeId, employeeId),
+        eq(timeOffRequests.status, "approved"),
+        gte(timeOffRequests.startDate, new Date().toISOString().split("T")[0])
+      )
+    );
+
+  // Compute days used for each policy
+  const scheduledDaysByPolicy = new Map<number, number>();
+  for (const request of futureRequests) {
+    const start = new Date(request.startDate);
+    const end = new Date(request.endDate);
+    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const current = scheduledDaysByPolicy.get(request.policyId) || 0;
+    scheduledDaysByPolicy.set(request.policyId, current + days);
+  }
+
+  // Add available balance to each item
+  const timeOffDataWithAvailable = timeOffData.map(item => {
+    const totalBalance = parseFloat(item.balance.balance);
+    const scheduled = scheduledDaysByPolicy.get(item.balance.policyId) || 0;
+    return {
+      ...item,
+      availableBalance: Math.max(0, totalBalance - scheduled),
+    };
+  });
+
   // Fetch direct reports
   const directReports = await db
     .select({
@@ -234,12 +266,12 @@ export default async function HomePage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {timeOffData.length > 0 ? (
+            {timeOffDataWithAvailable.length > 0 ? (
               <div className="space-y-2">
-                {timeOffData.map((item) => (
+                {timeOffDataWithAvailable.map((item) => (
                   <div key={item.balance.id} className="flex justify-between items-center">
                     <span className="text-sm">{item.policy?.name}</span>
-                    <span className="text-sm font-bold">{item.balance.balance} days</span>
+                    <span className="text-sm font-bold">{item.availableBalance.toFixed(1)} days</span>
                   </div>
                 ))}
                 <Button asChild size="sm" className="w-full mt-2">
