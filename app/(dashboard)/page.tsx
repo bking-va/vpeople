@@ -60,35 +60,45 @@ export default async function HomePage() {
     .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
     .where(eq(timeOffBalances.employeeId, employeeId));
 
-  // Fetch future approved/scheduled requests to compute available balance
-  const futureRequests = await db
+  // Fetch all future requests (approved = scheduled, pending = pending)
+  const allFutureRequests = await db
     .select()
     .from(timeOffRequests)
     .where(
       and(
         eq(timeOffRequests.employeeId, employeeId),
-        eq(timeOffRequests.status, "approved"),
         gte(timeOffRequests.startDate, new Date().toISOString().split("T")[0])
       )
     );
 
-  // Compute days used for each policy
+  // Compute days scheduled and pending for each policy
   const scheduledDaysByPolicy = new Map<number, number>();
-  for (const request of futureRequests) {
+  const pendingDaysByPolicy = new Map<number, number>();
+  
+  for (const request of allFutureRequests) {
     const start = new Date(request.startDate);
     const end = new Date(request.endDate);
     const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    const current = scheduledDaysByPolicy.get(request.policyId) || 0;
-    scheduledDaysByPolicy.set(request.policyId, current + days);
+    
+    if (request.status === "approved") {
+      const current = scheduledDaysByPolicy.get(request.policyId) || 0;
+      scheduledDaysByPolicy.set(request.policyId, current + days);
+    } else if (request.status === "pending") {
+      const current = pendingDaysByPolicy.get(request.policyId) || 0;
+      pendingDaysByPolicy.set(request.policyId, current + days);
+    }
   }
 
-  // Add available balance to each item
+  // Add available, pending, and scheduled to each item
   const timeOffDataWithAvailable = timeOffData.map(item => {
     const totalBalance = parseFloat(item.balance.balance);
     const scheduled = scheduledDaysByPolicy.get(item.balance.policyId) || 0;
+    const pending = pendingDaysByPolicy.get(item.balance.policyId) || 0;
     return {
       ...item,
       availableBalance: Math.max(0, totalBalance - scheduled),
+      pendingDays: pending,
+      scheduledDays: scheduled,
     };
   });
 
@@ -267,11 +277,24 @@ export default async function HomePage() {
           </CardHeader>
           <CardContent>
             {timeOffDataWithAvailable.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {timeOffDataWithAvailable.map((item) => (
-                  <div key={item.balance.id} className="flex justify-between items-center">
-                    <span className="text-sm">{item.policy?.name}</span>
-                    <span className="text-sm font-bold">{item.availableBalance.toFixed(1)} days</span>
+                  <div key={item.balance.id} className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">{item.policy?.name}</span>
+                      <span className="text-sm font-bold">{item.availableBalance.toFixed(1)} days</span>
+                    </div>
+                    {(item.pendingDays > 0 || item.scheduledDays > 0) && (
+                      <div className="text-xs text-muted-foreground pl-1">
+                        {item.pendingDays > 0 && (
+                          <span>Pending: {item.pendingDays} days</span>
+                        )}
+                        {item.pendingDays > 0 && item.scheduledDays > 0 && <span> • </span>}
+                        {item.scheduledDays > 0 && (
+                          <span>Scheduled: {item.scheduledDays} days</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <Button asChild size="sm" className="w-full mt-2">

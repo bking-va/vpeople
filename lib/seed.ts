@@ -1039,10 +1039,22 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     if (policy) {
       const key = `${employee.id}-${policy.id}`;
       if (!existingBalanceKeys.has(key)) {
+        // Calculate tenure-based balance
+        const hireDate = new Date(employee.hireDate);
+        const now = new Date("2026-11-08");
+        const yearsOfService = (now.getTime() - hireDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+        
+        let baseBalance = 15; // < 2 years
+        if (yearsOfService >= 5) {
+          baseBalance = 25; // > 5 years
+        } else if (yearsOfService >= 2) {
+          baseBalance = 20; // 2-5 years
+        }
+        
         balances.push({
           employeeId: employee.id,
           policyId: policy.id,
-          balance: String(10), // Start with 10 days standard balance
+          balance: String(baseBalance),
         });
       }
     }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Download, FileText, CheckCircle, Clock } from "lucide-react";
+import { Upload, Download, FileText, CheckCircle, Clock, Trash2 } from "lucide-react";
 
 interface Document {
   id: number;
@@ -82,6 +82,26 @@ export function ProfileDocuments({
     }
   };
 
+  const handleDelete = async (docId: number) => {
+    if (!confirm("Are you sure you want to delete this document? This action cannot be undone.")) return;
+
+    try {
+      const response = await fetch(`/api/documents/${docId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        window.location.reload();
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || "Delete failed");
+      }
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("Delete failed");
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "signed":
@@ -155,6 +175,16 @@ export function ProfileDocuments({
                   >
                     <Download className="h-4 w-4" />
                   </Button>
+                  {canUpload && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleDelete(doc.id)}
+                      title="Delete document"
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
