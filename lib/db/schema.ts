@@ -741,6 +741,40 @@ export const timeOffBalanceAdjustments = pgTable("time_off_balance_adjustments",
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const documentCategoryEnum = pgEnum("document_category", [
+  "contract",
+  "tax_form",
+  "benefits",
+  "performance",
+  "policy",
+  "other",
+]);
+
+export const documentStatusEnum = pgEnum("document_status", [
+  "draft",
+  "pending_signature",
+  "signed",
+  "archived",
+]);
+
+export const documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  category: documentCategoryEnum("category").notNull(),
+  status: documentStatusEnum("status").default("draft").notNull(),
+  fileUrl: text("file_url"),
+  signedAt: timestamp("signed_at"),
+  signedBy: integer("signed_by").references(() => employees.id),
+  uploadedBy: integer("uploaded_by")
+    .notNull()
+    .references(() => employees.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),
 }));
