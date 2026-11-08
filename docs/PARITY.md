@@ -218,7 +218,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 6. Time & Attendance
 
 - [x] Clock in/out ✅ Done (ClockWidget component + /api/time-tracking/clock)
-- [x] Break tracking ✅ Done (Start/End break buttons, elapsed time subtracts breaks)
+- [x] Break tracking ✅ Done (Server-side persistence with breakStart timestamp, survives refresh)
 - [x] Timesheets with approval ⚠️ Partial (DB schema + API routes + /time-tracking page UI)
 - [ ] Projects - Missing
   - [ ] Team live view - Missing
@@ -314,20 +314,23 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## 9. Onboarding and Offboarding
 
-- [x] Basic task templates (partial)
-- [ ] Task list templates by role
+- [x] New Employee wizard ✅ Done (/people/new with 4-step form)
+  - [x] Auto-generates employee number
+  - [x] Triggers onboarding tasks from templates
+  - [x] Manager assignment
+- [x] Terminate/Offboard flow ✅ Done (/people/[id]/terminate)
+  - [x] Effective-dated termination
+  - [x] Triggers offboarding tasks from templates
+  - [x] Audit logging
+- [x] Basic task templates ✅ Done (onboarding/offboarding types in task_templates)
+- [x] Due dates relative to hire/termination date ✅ Done (dueDaysFromStart calculation)
+- [ ] Task list templates by role - Partial (assignedToRole exists, needs expansion)
   - [ ] Employee tasks
   - [ ] Manager tasks
   - [ ] People Ops tasks
   - [ ] Operations tasks
-- [ ] Offboarding task templates
-  - [ ] Voluntary termination
-  - [ ] Involuntary termination
-  - [ ] Contractor offboarding
-- [ ] Assignees
-- [ ] Due dates relative to hire/termination date
-- [ ] New hire packet
-- [ ] Post-employment access control
+- [ ] New hire packet - Missing
+- [ ] Post-employment access control - Missing
 
 ---
 
