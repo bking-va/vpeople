@@ -820,6 +820,17 @@ export const enpsResponses = pgTable("enps_responses", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const webhooks = pgTable("webhooks", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  events: text("events").notNull(), // JSON array of event types
+  secret: text("secret").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const approvalWorkflowsRelations = relations(approvalWorkflows, ({ many }) => ({
   steps: many(approvalWorkflowSteps),
 }));

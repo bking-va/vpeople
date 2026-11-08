@@ -134,6 +134,15 @@ export function ApplicationForm({ openingId, openingTitle }: ApplicationFormProp
             />
           </div>
 
+          {/* Honeypot field - hidden from real users */}
+          <input
+            type="text"
+            name="website"
+            style={{ position: "absolute", left: "-9999px" }}
+            tabIndex={-1}
+            autoComplete="off"
+          />
+
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded text-red-800 text-sm">
               {error}
