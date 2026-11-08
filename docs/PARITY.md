@@ -101,7 +101,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Directory with filters (department, location, search) ✅ Done (table view at /people/directory)
 - [x] Export to CSV ✅ Done
 - [x] Org chart (basic) ✅ Done
-- [ ] Org chart export - Missing
+- [x] Org chart export ✅ Done (GET /api/org-chart/export generates CSV with full reporting structure)
 - [x] Saved views schema (people_views table) ✅ Done
 - [x] Saved views UI (create, edit, delete, apply) ⚠️ Partial (PeopleViewSelector component exists but not wired into /people)
 - [x] Column chooser UI ⚠️ Partial (ColumnChooser component exists, table view renders columns)
@@ -131,6 +131,17 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Pay Groups/Schedules
 - [ ] Custom lists
 
+### Custom Fields
+- [x] Custom fields schema ✅ Done (custom_fields + custom_field_values tables)
+- [x] Field types (text, number, date, select, textarea, checkbox)
+- [x] Entity type support (employee, job, compensation, etc.)
+- [x] Section/tab assignment
+- [x] Required field option
+- [x] Settings page to manage custom fields
+- [ ] Custom field creation form - Partial (schema ready, form UI not implemented)
+- [ ] Display custom fields on entity pages - Missing
+- [ ] Edit custom field values - Missing
+
 ### Access Levels
 - [x] Basic RBAC (employee, manager, admin, full_admin) - hardcoded in session
 - [x] Settings page UI - inspection view
@@ -158,6 +169,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Time off requests with multi-step approvals (via lib/approvals.ts)
   - [x] Timesheet approvals with multi-step support (schema ready)
   - [x] Legacy single-step fallback when no workflow attached
+  - [x] Approval progress UI with step tracking and status icons
+  - [x] ApprovalStatus component showing current step and approver
 - [ ] Information Updates (by location) - Missing
 - [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled)
 - [ ] Compensation changes with approval - Missing
@@ -184,10 +197,12 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Display name format
 
 ### Integrations
-- [ ] iCalendar feeds
-  - [ ] Who's out calendar
-  - [ ] Birthdays calendar
-- [ ] Outbound webhooks
+- [x] iCalendar feeds ✅ Done
+  - [x] Who's out calendar (GET /api/calendar/[token]/time-off)
+  - [x] Holidays calendar (GET /api/calendar/[token]/holidays)
+  - [x] Per-user secret calendar token
+  - [ ] Birthdays calendar - Missing
+- [x] Outbound webhooks ✅ Done
 
 ---
 
@@ -435,8 +450,14 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ## 14. SSO and Security
 
 - [x] Google SSO restricted to @vendasta.com
-- [x] Basic audit log (partial)
-- [ ] Comprehensive audit log on every change
+- [x] Basic audit log ✅ Done (audit_logs table)
+- [x] Comprehensive audit log ✅ Done (/settings/audit admin page)
+  - [x] Action tracking with user attribution
+  - [x] Entity type and ID tracking
+  - [x] Changes object with old/new values
+  - [x] Sensitive field redaction (salary, SIN/SSN, bank)
+  - [x] Last 100 events display
+- [ ] Full change history per entity - Partial (logged but no entity-specific view)
 - [ ] Security settings page
 - [ ] Session management
 - [ ] Two-factor authentication option
@@ -465,4 +486,4 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 ---
 
 **Last Updated:** 2026-11-08  
-**Current Phase:** Multi-step approvals, vacation balance fixes, document deletion
+**Current Phase:** Break persistence, multi-step approval UI, New Employee wizard, Terminate flow, custom fields, audit trail, iCalendar feeds, org chart export - Comprehensive feature completion
