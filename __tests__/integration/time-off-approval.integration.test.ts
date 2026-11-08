@@ -13,13 +13,18 @@ import {
   approvalWorkflowSteps,
   approvalRequests,
   approvalRequestSteps,
+  auditLogs,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
 
-// Use real Postgres connection
+// Use real Postgres connection with configured DATABASE_URL
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required for integration tests");
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost/vpeople_test",
+  connectionString: process.env.DATABASE_URL,
 });
 
 const db = drizzle(pool, {
@@ -32,6 +37,7 @@ const db = drizzle(pool, {
     approvalWorkflowSteps,
     approvalRequests,
     approvalRequestSteps,
+    auditLogs,
   },
 });
 
@@ -43,11 +49,13 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
   let testWorkflow: any;
 
   beforeAll(async () => {
+    const testRunId = Date.now();
+    
     // Create test policy
     const [policy] = await db
       .insert(timeOffPolicies)
       .values({
-        name: "Integration Test Vacation",
+        name: `Integration Test Vacation ${testRunId}`,
         policyType: "vacation",
         accrualRate: "10",
         accrualPeriod: "per_year",
@@ -61,10 +69,10 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
     const [admin] = await db
       .insert(employees)
       .values({
-        employeeNumber: "INT_ADMIN",
+        employeeNumber: `INT_ADMIN_${testRunId}`,
         firstName: "Integration",
         lastName: "Admin",
-        email: "integration.admin@test.com",
+        email: `integration.admin.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         accessLevel: "full_admin",
@@ -75,10 +83,10 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
     const [manager] = await db
       .insert(employees)
       .values({
-        employeeNumber: "INT_MANAGER",
+        employeeNumber: `INT_MANAGER_${testRunId}`,
         firstName: "Integration",
         lastName: "Manager",
-        email: "integration.manager@test.com",
+        email: `integration.manager.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
       })
@@ -88,10 +96,10 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
     const [employee] = await db
       .insert(employees)
       .values({
-        employeeNumber: "INT_EMPLOYEE",
+        employeeNumber: `INT_EMPLOYEE_${testRunId}`,
         firstName: "Integration",
         lastName: "Employee",
-        email: "integration.employee@test.com",
+        email: `integration.employee.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         managerId: manager.id,
@@ -103,7 +111,7 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
     const [workflow] = await db
       .insert(approvalWorkflows)
       .values({
-        name: "Integration Test Workflow",
+        name: `Integration Test Workflow ${testRunId}`,
         type: "time_off",
         enabled: true,
         requiresManagerApproval: true,
@@ -136,31 +144,29 @@ describe("Time-Off Approval Integration Tests (Real Postgres)", () => {
   });
 
   afterAll(async () => {
-    // Clean up
-    await db.delete(timeOffBalances).where(eq(timeOffBalances.employeeId, testEmployee.id));
-    await db.delete(timeOffRequests).where(eq(timeOffRequests.employeeId, testEmployee.id));
-    await db
-      .delete(approvalRequestSteps)
-      .where(
-        eq(
-          approvalRequestSteps.approvalRequestId,
-          db
-            .select({ id: approvalRequests.id })
-            .from(approvalRequests)
-            .where(eq(approvalRequests.requesterId, testEmployee.id)) as any
-        )
-      );
-    await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testEmployee.id));
-    await db
-      .delete(approvalWorkflowSteps)
-      .where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
-    await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
-    await db.delete(employees).where(eq(employees.id, testEmployee.id));
-    await db.delete(employees).where(eq(employees.id, testManager.id));
-    await db.delete(employees).where(eq(employees.id, testAdmin.id));
-    await db.delete(timeOffPolicies).where(eq(timeOffPolicies.id, testPolicy.id));
-
-    await pool.end();
+    // Clean up - safe even if tests failed during setup
+    try {
+      if (testEmployee?.id) {
+        await db.delete(auditLogs).where(eq(auditLogs.employeeId, testEmployee.id));
+        await db.delete(auditLogs).where(eq(auditLogs.employeeId, testManager.id));
+        await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
+        await db.delete(timeOffBalances).where(eq(timeOffBalances.employeeId, testEmployee.id));
+        await db.delete(timeOffRequests).where(eq(timeOffRequests.employeeId, testEmployee.id));
+        await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testEmployee.id));
+      }
+      if (testWorkflow?.id) {
+        await db.delete(approvalWorkflowSteps).where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
+        await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
+      }
+      if (testEmployee?.id) await db.delete(employees).where(eq(employees.id, testEmployee.id));
+      if (testManager?.id) await db.delete(employees).where(eq(employees.id, testManager.id));
+      if (testAdmin?.id) await db.delete(employees).where(eq(employees.id, testAdmin.id));
+      if (testPolicy?.id) await db.delete(timeOffPolicies).where(eq(timeOffPolicies.id, testPolicy.id));
+    } catch (error) {
+      console.error("Cleanup error:", error);
+    } finally {
+      await pool.end();
+    }
   });
 
   test("2-step approval deducts balance exactly once on final approval", async () => {

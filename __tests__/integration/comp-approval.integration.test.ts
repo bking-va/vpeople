@@ -15,8 +15,12 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
 
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required for integration tests");
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost/vpeople_test",
+  connectionString: process.env.DATABASE_URL,
 });
 
 const db = drizzle(pool, {
@@ -38,14 +42,16 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
   let testWorkflow: any;
 
   beforeAll(async () => {
+    const testRunId = Date.now();
+    
     // Create test CEO (no manager)
     const [ceo] = await db
       .insert(employees)
       .values({
-        employeeNumber: "COMP_CEO",
+        employeeNumber: `COMP_CEO_${testRunId}`,
         firstName: "Comp",
         lastName: "CEO",
-        email: "comp.ceo@test.com",
+        email: `comp.ceo.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         accessLevel: "full_admin",
@@ -57,10 +63,10 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
     const [admin] = await db
       .insert(employees)
       .values({
-        employeeNumber: "COMP_ADMIN",
+        employeeNumber: `COMP_ADMIN_${testRunId}`,
         firstName: "Comp",
         lastName: "Admin",
-        email: "comp.admin@test.com",
+        email: `comp.admin.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         accessLevel: "full_admin",
@@ -72,10 +78,10 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
     const [manager] = await db
       .insert(employees)
       .values({
-        employeeNumber: "COMP_MANAGER",
+        employeeNumber: `COMP_MANAGER_${testRunId}`,
         firstName: "Comp",
         lastName: "Manager",
-        email: "comp.manager@test.com",
+        email: `comp.manager.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
       })
@@ -86,10 +92,10 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
     const [employee] = await db
       .insert(employees)
       .values({
-        employeeNumber: "COMP_EMPLOYEE",
+        employeeNumber: `COMP_EMPLOYEE_${testRunId}`,
         firstName: "Comp",
         lastName: "Employee",
-        email: "comp.employee@test.com",
+        email: `comp.employee.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         managerId: manager.id,
@@ -101,7 +107,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
     const [workflow] = await db
       .insert(approvalWorkflows)
       .values({
-        name: "Comp Test Workflow",
+        name: `Comp Test Workflow ${testRunId}`,
         type: "compensation_change",
         enabled: true,
         requiresManagerApproval: true,
@@ -127,25 +133,28 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
   });
 
   afterAll(async () => {
-    // Clean up (delete audit logs first due to FK constraint)
-    await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
-    await db
-      .delete(compensationHistory)
-      .where(eq(compensationHistory.employeeId, testEmployee.id));
-    await db
-      .delete(compensationHistory)
-      .where(eq(compensationHistory.employeeId, testCEO.id));
-    await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
-    await db
-      .delete(approvalWorkflowSteps)
-      .where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
-    await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
-    await db.delete(employees).where(eq(employees.id, testEmployee.id));
-    await db.delete(employees).where(eq(employees.id, testManager.id));
-    await db.delete(employees).where(eq(employees.id, testAdmin.id));
-    await db.delete(employees).where(eq(employees.id, testCEO.id));
-
-    await pool.end();
+    try {
+      if (testAdmin?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
+      if (testEmployee?.id) {
+        await db.delete(compensationHistory).where(eq(compensationHistory.employeeId, testEmployee.id));
+      }
+      if (testCEO?.id) {
+        await db.delete(compensationHistory).where(eq(compensationHistory.employeeId, testCEO.id));
+      }
+      if (testAdmin?.id) await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
+      if (testWorkflow?.id) {
+        await db.delete(approvalWorkflowSteps).where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
+        await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
+      }
+      if (testEmployee?.id) await db.delete(employees).where(eq(employees.id, testEmployee.id));
+      if (testManager?.id) await db.delete(employees).where(eq(employees.id, testManager.id));
+      if (testAdmin?.id) await db.delete(employees).where(eq(employees.id, testAdmin.id));
+      if (testCEO?.id) await db.delete(employees).where(eq(employees.id, testCEO.id));
+    } catch (error) {
+      console.error("Cleanup error:", error);
+    } finally {
+      await pool.end();
+    }
   });
 
   test("comp change routes manager -> full_admin, creates record only on final approval", async () => {
@@ -204,7 +213,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
       .orderBy(desc(compensationHistory.effectiveDate));
 
     expect(finalComp).toBeDefined();
-    expect(finalComp.payRate).toBe("95000");
+    expect(parseFloat(finalComp.payRate)).toBe(95000);
     expect(finalComp.payType).toBe("salary");
     expect(finalComp.effectiveDate).toBe("2027-01-01");
   });
@@ -250,7 +259,7 @@ describe("Compensation Change Approval Integration Tests (Real Postgres)", () =>
       .orderBy(desc(compensationHistory.effectiveDate));
 
     expect(finalComp).toBeDefined();
-    expect(finalComp.payRate).toBe("250000");
+    expect(parseFloat(finalComp.payRate)).toBe(250000);
   });
 
   test("wrong approver cannot approve step", async () => {

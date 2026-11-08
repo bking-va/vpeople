@@ -16,8 +16,12 @@ import {
 import { eq, desc } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
 
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required for integration tests");
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost/vpeople_test",
+  connectionString: process.env.DATABASE_URL,
 });
 
 const db = drizzle(pool, {
@@ -40,12 +44,14 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
   let testWorkflow: any;
 
   beforeAll(async () => {
+    const testRunId = Date.now();
+    
     // Create test department
     const [dept] = await db
       .insert(departments)
       .values({
-        name: "Job Test Dept",
-        code: "JOB_TEST",
+        name: `Job Test Dept ${testRunId}`,
+        code: `JOB_TEST_${testRunId}`,
       })
       .returning();
     testDept = dept;
@@ -54,10 +60,10 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
     const [admin] = await db
       .insert(employees)
       .values({
-        employeeNumber: "JOB_ADMIN",
+        employeeNumber: `JOB_ADMIN_${testRunId}`,
         firstName: "Job",
         lastName: "Admin",
-        email: "job.admin@test.com",
+        email: `job.admin.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         accessLevel: "full_admin",
@@ -69,10 +75,10 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
     const [manager] = await db
       .insert(employees)
       .values({
-        employeeNumber: "JOB_MANAGER",
+        employeeNumber: `JOB_MANAGER_${testRunId}`,
         firstName: "Job",
         lastName: "Manager",
-        email: "job.manager@test.com",
+        email: `job.manager.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         departmentId: testDept.id,
@@ -84,10 +90,10 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
     const [employee] = await db
       .insert(employees)
       .values({
-        employeeNumber: "JOB_EMPLOYEE",
+        employeeNumber: `JOB_EMPLOYEE_${testRunId}`,
         firstName: "Job",
         lastName: "Employee",
-        email: "job.employee@test.com",
+        email: `job.employee.${testRunId}@test.com`,
         hireDate: "2020-01-01",
         employmentStatus: "full_time",
         managerId: manager.id,
@@ -101,7 +107,7 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
     const [workflow] = await db
       .insert(approvalWorkflows)
       .values({
-        name: "Job Info Test Workflow",
+        name: `Job Info Test Workflow ${testRunId}`,
         type: "job_info_change",
         enabled: true,
         requiresManagerApproval: true,
@@ -127,20 +133,23 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
   });
 
   afterAll(async () => {
-    // Clean up (delete audit logs first due to FK constraint)
-    await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
-    await db.delete(jobHistory).where(eq(jobHistory.employeeId, testEmployee.id));
-    await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
-    await db
-      .delete(approvalWorkflowSteps)
-      .where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
-    await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
-    await db.delete(employees).where(eq(employees.id, testEmployee.id));
-    await db.delete(employees).where(eq(employees.id, testManager.id));
-    await db.delete(employees).where(eq(employees.id, testAdmin.id));
-    await db.delete(departments).where(eq(departments.id, testDept.id));
-
-    await pool.end();
+    try {
+      if (testAdmin?.id) await db.delete(auditLogs).where(eq(auditLogs.employeeId, testAdmin.id));
+      if (testEmployee?.id) await db.delete(jobHistory).where(eq(jobHistory.employeeId, testEmployee.id));
+      if (testAdmin?.id) await db.delete(approvalRequests).where(eq(approvalRequests.requesterId, testAdmin.id));
+      if (testWorkflow?.id) {
+        await db.delete(approvalWorkflowSteps).where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
+        await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
+      }
+      if (testEmployee?.id) await db.delete(employees).where(eq(employees.id, testEmployee.id));
+      if (testManager?.id) await db.delete(employees).where(eq(employees.id, testManager.id));
+      if (testAdmin?.id) await db.delete(employees).where(eq(employees.id, testAdmin.id));
+      if (testDept?.id) await db.delete(departments).where(eq(departments.id, testDept.id));
+    } catch (error) {
+      console.error("Cleanup error:", error);
+    } finally {
+      await pool.end();
+    }
   });
 
   test("job info change applies to employee and creates job_history on final approval", async () => {
@@ -206,6 +215,6 @@ describe("Job Info Change Approval Integration Tests (Real Postgres)", () => {
     expect(history).toBeDefined();
     expect(history.jobTitle).toBe("Senior Developer");
     expect(history.effectiveDate).toBe("2027-01-01");
-    expect(history.changeReason).toBe("Promotion");
+    expect(history.comment).toBe("Promotion");
   });
 });
