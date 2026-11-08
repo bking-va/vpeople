@@ -40,16 +40,19 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ### Personal Tab
 - [x] All standard fields
-- [ ] Custom fields
-  - [ ] Meal Preference-Chennai
-  - [ ] Social House
-  - [ ] Tshirt
-  - [ ] VendastaID
-  - [ ] GitHub
-  - [ ] Google ID
-  - [ ] Alternate emails
-  - [ ] Languages
-  - [ ] Disabilities
+- [x] Custom fields ✅ Complete (dbed588)
+  - [x] Custom field display on personal tab ✅ Done
+  - [x] Custom field editing (permission-aware) ✅ Done
+  - [x] Seeded: T-Shirt Size (select) ✅ Done
+  - [x] Seeded: Dietary Preferences (textarea) ✅ Done
+  - [ ] Meal Preference-Chennai (can add via Settings)
+  - [ ] Social House (can add via Settings)
+  - [ ] VendastaID (can add via Settings)
+  - [ ] GitHub (can add via Settings)
+  - [ ] Google ID (can add via Settings)
+  - [ ] Alternate emails (can add via Settings)
+  - [ ] Languages (can add via Settings)
+  - [ ] Disabilities (can add via Settings)
 - [ ] Address fields
 - [ ] Contact information
 - [ ] Social links
@@ -132,16 +135,16 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Custom lists
 
 ### Custom Fields
-- [x] Custom fields schema ⚠️ Partial (custom_fields + custom_field_values tables)
-- [x] Field types (text, number, date, select, textarea, checkbox)
-- [x] Entity type support (employee, job, compensation, etc.)
-- [x] Section/tab assignment
-- [x] Required field option
-- [x] Settings page to list custom fields
-- [ ] Custom field creation/edit forms - Missing
-- [ ] Custom field CRUD API - Missing
-- [ ] Display custom fields on entity pages - Missing
-- [ ] Edit custom field values - Missing
+- [x] Custom fields schema ✅ Complete
+- [x] Field types (text, number, date, select, textarea, checkbox) ✅ Complete
+- [x] Entity type support (employee, job, compensation, etc.) ✅ Complete
+- [x] Section/tab assignment ✅ Complete
+- [x] Required field option ✅ Complete
+- [x] Settings page to list custom fields ✅ Complete
+- [x] Custom field creation/edit forms ✅ Done (dbed588)
+- [x] Custom field CRUD API ✅ Done (dbed588)
+- [x] Display custom fields on entity pages ✅ Done (dbed588 - personal & job tabs)
+- [x] Edit custom field values ✅ Done (dbed588 - permission-aware)
 
 ### Access Levels
 - [x] Basic RBAC (employee, manager, admin, full_admin) - hardcoded in session
@@ -165,15 +168,15 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Edit name, description
   - [x] Edit approval requirements (manager/admin)
   - [x] Edit auto-approve days
-- [x] Multi-step approval chains infrastructure ⚠️ Partial
+- [x] Multi-step approval chains infrastructure ✅ Complete (dbed588)
   - [x] approval_requests and approval_request_steps tables
   - [x] Time off requests with multi-step approvals (via lib/approvals.ts)
   - [x] Timesheet approvals with multi-step support (schema ready)
   - [x] Legacy single-step fallback when no workflow attached
   - [x] Approval progress UI with step tracking and status icons
   - [x] ApprovalStatus component showing current step and approver
-  - [ ] Workflow step builder UI - Missing (no way to define steps in Settings)
-  - [ ] Seeded workflow steps - Missing (no test data)
+  - [x] Workflow step builder UI ✅ Done (dbed588 - WorkflowSteps component)
+  - [x] Seeded workflow steps ✅ Done (dbed588 - 2-step time off workflow)
 - [ ] Information Updates (by location) - Missing
 - [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled)
 - [ ] Compensation changes with approval - Missing
@@ -200,13 +203,14 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Display name format
 
 ### Integrations
-- [x] iCalendar feeds ⚠️ Partial
-  - [x] Who's out calendar (GET /api/calendar/[token]/time-off) ✅ Works if token exists
-  - [x] Holidays calendar (GET /api/calendar/[token]/holidays) ✅ Works if token exists
+- [x] iCalendar feeds ✅ Complete (dbed588)
+  - [x] Who's out calendar (GET /api/calendar/[token]/time-off)
+  - [x] Holidays calendar (GET /api/calendar/[token]/holidays)
   - [x] Per-user secret calendar token schema (calendarToken field)
-  - [ ] Token generation UI - Missing (no way to create/view tokens)
-  - [ ] Token regeneration - Missing
-  - [ ] Subscribe URLs display - Missing
+  - [x] Token generation UI ✅ Done (dbed588 - CalendarFeeds component)
+  - [x] Token regeneration ✅ Done (dbed588 - POST /api/calendar/generate-token)
+  - [x] Subscribe URLs display ✅ Done (dbed588 - shown on /time-off page)
+  - [x] Vercel Authentication caveat documented ✅ Done (alert in CalendarFeeds)
   - [ ] Birthdays calendar - Missing
 - [x] Outbound webhooks ✅ Done
 
@@ -376,7 +380,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Pay by Title
 - [ ] Pay by Department
 - [ ] Pay by Location
-- [ ] Audit Trail
+- [x] Audit Trail ✅ Complete (dbed588)
+  - [x] Document deletion logged
+  - [x] Compensation changes logged  
+  - [x] Employee creation/termination logged
+  - [x] Time off approval/denial logged
+  - [x] Job info updates logged
+  - [x] Sensitive field redaction (salary, SIN, SSN, bank)
 - [ ] Change History
 - [ ] Missing Data report
 - [ ] Point-in-Time report
