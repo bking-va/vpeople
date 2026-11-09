@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { employees, departments, locations } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { csvRow } from "@/lib/csv";
 import { getHeadcountReport, headcountToCsv } from "@/lib/reports/headcount";
 import { getTurnoverReport } from "@/lib/reports/turnover";
 import { turnoverToCsv } from "@/lib/reports/turnover-format";
-import { csvRow } from "@/lib/csv";
-import { getUserPermissions } from "@/lib/permissions";
-import { visibleProfileEmail } from "@/lib/authz";
 import {
   getPayByTitleReport,
   getPayByDepartmentReport,
@@ -18,95 +12,90 @@ import {
   getEmploymentStatusHistoryReport,
   type PayGroupRow,
 } from "@/lib/reports/standard";
+import { parseReportFilters, runCustomEmployeeReport } from "@/lib/reports/custom";
+import { getReportViewer } from "@/lib/reports/viewer";
+import { filterRowsByEmployeeScope, scopedEmployeeIds } from "@/lib/employee-scope";
+import { isFullAdmin, isViewingAccessLevel } from "@/lib/authz";
+
+function csvResponse(csvData: string, reportType: string) {
+  return new NextResponse(csvData, {
+    headers: {
+      "Content-Type": "text/csv",
+      "Content-Disposition": `attachment; filename="${reportType}-${new Date().toISOString().split("T")[0]}.csv"`,
+    },
+  });
+}
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
+  const { session, viewer } = await getReportViewer();
+  if (!session?.user || !viewer) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (session.user.role !== "admin" && session.user.role !== "full_admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);
   const reportType = searchParams.get("type") || "employees";
+  const isOrgAdmin =
+    session.user.role === "admin" ||
+    session.user.role === "full_admin" ||
+    isFullAdmin(viewer.accessLevel) ||
+    isViewingAccessLevel(viewer.accessLevel) ||
+    viewer.canManageUsers === true;
 
   try {
-    let csvData = "";
-
-    if (reportType === "employees") {
-      const data = await db
-        .select({
-          employeeNumber: employees.employeeNumber,
-          firstName: employees.firstName,
-          lastName: employees.lastName,
-          email: employees.email,
-          jobTitle: employees.jobTitle,
-          department: departments.name,
-          location: locations.name,
-          hireDate: employees.hireDate,
-          employmentStatus: employees.employmentStatus,
-        })
-        .from(employees)
-        .leftJoin(departments, eq(employees.departmentId, departments.id))
-        .leftJoin(locations, eq(employees.locationId, locations.id));
-
-      // CSV header
-      csvData =
-        csvRow([
-          "Employee Number",
-          "First Name",
-          "Last Name",
-          "Email",
-          "Job Title",
-          "Department",
-          "Location",
-          "Hire Date",
-          "Status",
-        ]) + "\n";
-
-      const exportPermissions = session.user.email
-        ? await getUserPermissions(session.user.email)
-        : null;
-      for (const row of data) {
-        csvData +=
-          csvRow([
-            row.employeeNumber,
-            row.firstName,
-            row.lastName,
-            visibleProfileEmail(row.email, {
-              isViewingSelf: false,
-              canViewSensitivePersonalInfo: Boolean(exportPermissions?.canViewSensitivePersonalInfo),
-            }),
-            row.jobTitle,
-            row.department || "",
-            row.location || "",
-            row.hireDate || "",
-            row.employmentStatus,
-          ]) + "\n";
+    if (reportType === "employees" || reportType === "custom") {
+      const fields =
+        searchParams.get("fields")?.split(",").filter(Boolean) || [
+          "employeeNumber",
+          "firstName",
+          "lastName",
+          "email",
+          "jobTitle",
+          "department",
+          "location",
+          "hireDate",
+          "employmentStatus",
+        ];
+      const result = await runCustomEmployeeReport({
+        fields,
+        groupBy: searchParams.get("groupBy"),
+        filters: parseReportFilters(searchParams),
+        viewer,
+      });
+      const header = fields;
+      let csvData = csvRow(header) + "\n";
+      for (const row of result.rows) {
+        if ("_group" in row) continue;
+        csvData += csvRow(header.map((field) => row[field])) + "\n";
       }
-    } else if (reportType === "headcount") {
-      const report = await getHeadcountReport();
-      csvData = headcountToCsv(report);
-    } else if (reportType === "turnover") {
-      const report = await getTurnoverReport();
-      csvData = turnoverToCsv(report);
-    } else if (
+      return csvResponse(csvData, reportType);
+    }
+
+    if (reportType === "headcount" || reportType === "turnover") {
+      if (!isOrgAdmin) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (reportType === "headcount") {
+        return csvResponse(headcountToCsv(await getHeadcountReport()), reportType);
+      }
+      return csvResponse(turnoverToCsv(await getTurnoverReport()), reportType);
+    }
+
+    if (
       reportType === "pay-by-title" ||
       reportType === "pay-by-department" ||
       reportType === "pay-by-location" ||
       reportType === "salary-history"
     ) {
-      const permissions = session.user.email
-        ? await getUserPermissions(session.user.email)
-        : null;
-      const canViewPay = Boolean(permissions?.canViewCompensation);
-      if (!canViewPay) {
+      if (!viewer.canViewCompensation) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       if (reportType === "salary-history") {
-        const rows = await getSalaryHistoryReport({ canViewCompensation: canViewPay });
-        csvData =
+        const allowed = await scopedEmployeeIds(viewer);
+        const rows = filterRowsByEmployeeScope(
+          await getSalaryHistoryReport({ canViewCompensation: true }),
+          allowed
+        );
+        let csvData =
           csvRow([
             "Employee",
             "Job Title",
@@ -128,23 +117,26 @@ export async function GET(request: NextRequest) {
               row.changeReason,
             ]) + "\n";
         }
-      } else {
-        const rows: PayGroupRow[] =
-          reportType === "pay-by-title"
-            ? await getPayByTitleReport({ canViewCompensation: canViewPay })
-            : reportType === "pay-by-department"
-              ? await getPayByDepartmentReport({ canViewCompensation: canViewPay })
-              : await getPayByLocationReport({ canViewCompensation: canViewPay });
-        csvData = csvRow(["Group", "Count", "Avg Pay", "Min Pay", "Max Pay", "Currency", "Pay Type"]) + "\n";
-        for (const row of rows) {
-          csvData += csvRow([row.group, row.count, row.avgPay, row.minPay, row.maxPay, row.currency, row.payType]) + "\n";
-        }
+        return csvResponse(csvData, reportType);
       }
-    } else if (reportType === "time-off-schedule") {
+      const rows: PayGroupRow[] =
+        reportType === "pay-by-title"
+          ? await getPayByTitleReport({ canViewCompensation: true })
+          : reportType === "pay-by-department"
+            ? await getPayByDepartmentReport({ canViewCompensation: true })
+            : await getPayByLocationReport({ canViewCompensation: true });
+      let csvData = csvRow(["Group", "Count", "Avg Pay", "Min Pay", "Max Pay", "Currency", "Pay Type"]) + "\n";
+      for (const row of rows) {
+        csvData += csvRow([row.group, row.count, row.avgPay, row.minPay, row.maxPay, row.currency, row.payType]) + "\n";
+      }
+      return csvResponse(csvData, reportType);
+    }
+
+    if (reportType === "time-off-schedule") {
+      const allowed = await scopedEmployeeIds(viewer);
       const year = new Date().getUTCFullYear();
-      const rows = await getTimeOffScheduleReport(year);
-      csvData =
-        csvRow(["Employee", "Policy", "Start", "End", "Days", "Status"]) + "\n";
+      const rows = filterRowsByEmployeeScope(await getTimeOffScheduleReport(year), allowed);
+      let csvData = csvRow(["Employee", "Policy", "Start", "End", "Days", "Status"]) + "\n";
       for (const row of rows) {
         csvData +=
           csvRow([
@@ -156,9 +148,13 @@ export async function GET(request: NextRequest) {
             row.status,
           ]) + "\n";
       }
-    } else if (reportType === "employment-status") {
-      const rows = await getEmploymentStatusHistoryReport();
-      csvData =
+      return csvResponse(csvData, reportType);
+    }
+
+    if (reportType === "employment-status") {
+      const allowed = await scopedEmployeeIds(viewer);
+      const rows = filterRowsByEmployeeScope(await getEmploymentStatusHistoryReport(), allowed);
+      let csvData =
         csvRow(["Employee", "Status", "Effective Date", "Comment", "Department", "Location"]) +
         "\n";
       for (const row of rows) {
@@ -172,14 +168,10 @@ export async function GET(request: NextRequest) {
             row.location,
           ]) + "\n";
       }
+      return csvResponse(csvData, reportType);
     }
 
-    return new NextResponse(csvData, {
-      headers: {
-        "Content-Type": "text/csv",
-        "Content-Disposition": `attachment; filename="${reportType}-${new Date().toISOString().split("T")[0]}.csv"`,
-      },
-    });
+    return NextResponse.json({ error: "Unknown report type" }, { status: 400 });
   } catch (error: any) {
     console.error("Export failed:", error);
     return NextResponse.json(
