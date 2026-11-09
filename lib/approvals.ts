@@ -222,7 +222,7 @@ export async function approveStep(
 
   // Verify approver is authorized for this step
   const [approver] = await db
-    .select()
+    .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)
     .where(eq(employees.id, approverId))
     .limit(1);
@@ -540,7 +540,7 @@ export async function rejectStep(
 
   // Verify approver is authorized
   const [approver] = await db
-    .select()
+    .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)
     .where(eq(employees.id, approverId))
     .limit(1);

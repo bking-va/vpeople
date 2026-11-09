@@ -51,7 +51,14 @@ const authConfig = {
 
               // Look up employee record first to get proper role/access level
               const [employee] = await db
-                .select()
+                .select({
+                  id: employees.id,
+                  userId: employees.userId,
+                  firstName: employees.firstName,
+                  lastName: employees.lastName,
+                  preferredName: employees.preferredName,
+                  accessLevel: employees.accessLevel,
+                })
                 .from(employees)
                 .where(eq(employees.email, email))
                 .limit(1);

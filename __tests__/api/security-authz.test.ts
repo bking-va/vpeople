@@ -12,7 +12,7 @@ import {
 import { calendarDaysInclusive, takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
 import { csvField, csvRow } from "@/lib/csv";
-import { accrualPeriodKey } from "@/lib/time-off-accrual-period";
+import { accrualPeriodKey, legacyBiweeklyPeriodKeys } from "@/lib/time-off-accrual-period";
 
 describe("field-level authz helpers", () => {
   test("visa document numbers are redacted for coworkers", () => {
@@ -159,5 +159,17 @@ describe("biweekly accrual period", () => {
     expect(week1).toBe(week2);
     expect(week1).not.toBe(week3);
     expect(week1).toMatch(/-F\d{2}$/);
+  });
+
+  test("New Year week uses ISO week-year, not Gregorian year", () => {
+    const late = accrualPeriodKey("biweekly", new Date("2025-12-29T12:00:00Z"));
+    const early = accrualPeriodKey("biweekly", new Date("2026-01-01T12:00:00Z"));
+    expect(late).toBe("2026-F01");
+    expect(early).toBe("2026-F01");
+  });
+
+  test("legacy ISO-week keys cover both weeks in the fortnight", () => {
+    const keys = legacyBiweeklyPeriodKeys(new Date("2026-01-05T12:00:00Z"));
+    expect(keys).toEqual(expect.arrayContaining(["2026-W01", "2026-W02"]));
   });
 });

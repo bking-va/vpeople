@@ -558,6 +558,19 @@ describe("Security authz integration (Real Postgres)", () => {
     expect(res.status).toBe(403);
   });
 
+  test("full admin can create job titles even when session role is admin", async () => {
+    session({ email: admin.email, employeeId: admin.id, role: "admin" });
+    const req = new NextRequest("http://localhost/api/settings/job-titles", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: `Allowed Title ${runId}` }),
+    });
+    const res = await createJobTitle(req);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    if (body.jobTitle?.id) ids.titles.push(body.jobTitle.id);
+  });
+
   test("custom-field compensation values are hidden from coworkers", async () => {
     session({ email: outsider.email, employeeId: outsider.id, role: "employee" });
     const req = new NextRequest(

@@ -6,8 +6,12 @@ import {
   timeOffBalanceAdjustments,
   employees,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
-import { accrualPeriodKey, accrualAmount } from "@/lib/time-off-accrual-period";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import {
+  accrualPeriodKey,
+  accrualAmount,
+  legacyBiweeklyPeriodKeys,
+} from "@/lib/time-off-accrual-period";
 
 export { accrualPeriodKey, accrualAmount } from "@/lib/time-off-accrual-period";
 
@@ -36,6 +40,24 @@ export async function runTimeOffAccruals(asOf: Date = new Date()) {
   for (const row of rows) {
     const periodKey = accrualPeriodKey(row.accrualPeriod, asOf);
     if (!periodKey) continue;
+
+    if (row.accrualPeriod === "biweekly") {
+      const legacyKeys = legacyBiweeklyPeriodKeys(asOf);
+      const already = await db
+        .select({ id: timeOffAccrualRuns.id })
+        .from(timeOffAccrualRuns)
+        .where(
+          and(
+            eq(timeOffAccrualRuns.balanceId, row.id),
+            inArray(timeOffAccrualRuns.periodKey, legacyKeys)
+          )
+        )
+        .limit(1);
+      if (already.length > 0) {
+        skippedAlreadyApplied += 1;
+        continue;
+      }
+    }
 
     const rate = parseFloat(row.accrualRate || "0");
     const amount = accrualAmount(rate, row.accrualPeriod);

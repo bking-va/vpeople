@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { jobTitles } from "@/lib/db/schema";
+import { employees, jobTitles } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
+import { eq } from "drizzle-orm";
+import { canWriteSettings } from "@/lib/authz";
 
 export async function GET() {
   try {
@@ -28,7 +30,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.user.role !== "full_admin") {
+    const [actor] = await db
+      .select({ accessLevel: employees.accessLevel })
+      .from(employees)
+      .where(eq(employees.id, session.user.employeeId))
+      .limit(1);
+    if (!canWriteSettings(actor?.accessLevel)) {
       return NextResponse.json(
         { error: "Only full admins can create job titles" },
         { status: 403 }
