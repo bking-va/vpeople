@@ -21,11 +21,11 @@ export function rejectUnsafePersonName(
 const PERSON_NAME_KEYS = ["firstName", "lastName", "middleName", "preferredName"] as const;
 
 export function sanitizePersonNameFields<T extends Record<string, unknown>>(data: T): T {
-  const next = { ...data };
+  const next: Record<string, unknown> = { ...data };
   for (const key of PERSON_NAME_KEYS) {
-    if (!(key in next) || next[key] == null) continue;
-    if (typeof next[key] !== "string") continue;
-    next[key] = rejectUnsafePersonName(next[key] as string) as T[typeof key];
+    const value = next[key];
+    if (typeof value !== "string") continue;
+    next[key] = rejectUnsafePersonName(value);
   }
-  return next;
+  return next as T;
 }
