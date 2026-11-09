@@ -1,0 +1,493 @@
+import { sessionRoleFromAccessLevel } from "@/lib/authz";
+import {
+  LEGACY_SESSION_DISABLED,
+  VENDASTA_CALLBACK_PATH,
+  VENDASTA_ENTRY_PATH,
+  VENDASTA_LEGACY_SESSION_PATH,
+  VENDASTA_LOGOUT_PATH,
+  VENDASTA_OIDC_AUTHORIZATION,
+  VENDASTA_OIDC_ISSUER,
+  VENDASTA_OIDC_SCOPES,
+  VENDASTA_OIDC_TOKEN,
+  VENDASTA_OIDC_USERINFO,
+  VENDASTA_INTERNAL_PARTNER_ID,
+  VENDASTA_OIDC_WELL_KNOWN,
+  VENDASTA_PROVIDER_ID,
+  VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD,
+  decideVendastaEmployeeAccess,
+  isSafeInternalPath,
+  isVendastaOidcConfigured,
+  isVendastaSubject,
+  parseVendastaEntrySearchParams,
+  placeholderEmailForSub,
+  vendastaAuthorizeParams,
+  vendastaLegacySessionResponse,
+  vendastaOidcProvider,
+  vendastaPartnerIdFromEnv,
+  vendastaRegistrationUrls,
+  vendastaSignInAuthorizationParams,
+  trimVendastaCredential,
+  verifiedWorkEmailFromIdToken,
+  type EmployeeIdentityRow,
+} from "@/lib/vendasta-oidc";
+
+const SUB = "U-e7851c53-8a49-4c89-90fd-7a8140888c02";
+
+function employee(
+  overrides: Partial<EmployeeIdentityRow> = {}
+): EmployeeIdentityRow {
+  return {
+    id: 42,
+    email: "amy@vendasta.com",
+    vendastaSub: SUB,
+    userId: "user-1",
+    accessLevel: "employee",
+    employmentStatus: "full_time",
+    ...overrides,
+  };
+}
+
+describe("Vendasta OIDC provider", () => {
+  test("uses dedicated provider id vendasta and official discovery endpoints", () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      env: {},
+    });
+
+    expect(provider.id).toBe(VENDASTA_PROVIDER_ID);
+    expect(provider.id).toBe("vendasta");
+    expect(provider.type).toBe("oidc");
+    expect(provider.issuer).toBe(VENDASTA_OIDC_ISSUER);
+    expect(provider.wellKnown).toBe(VENDASTA_OIDC_WELL_KNOWN);
+    expect(provider.token).toEqual(
+      expect.objectContaining({ url: VENDASTA_OIDC_TOKEN })
+    );
+    expect(provider.userinfo).toEqual(
+      expect.objectContaining({
+        url: VENDASTA_OIDC_USERINFO,
+        request: expect.any(Function),
+      })
+    );
+    expect(provider.authorization).toEqual(
+      expect.objectContaining({
+        url: VENDASTA_OIDC_AUTHORIZATION,
+        params: {
+          scope: VENDASTA_OIDC_SCOPES,
+          response_type: "code",
+        },
+      })
+    );
+    expect(VENDASTA_OIDC_SCOPES).toBe("openid profile");
+    expect(VENDASTA_OIDC_SCOPES.split(" ")).not.toContain("email");
+    expect(provider.checks).toEqual(["pkce", "state", "nonce"]);
+    expect(VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD).toBe("client_secret_post");
+    expect(provider.client).toEqual({
+      token_endpoint_auth_method: "client_secret_post",
+    });
+    expect(provider.client).not.toHaveProperty("id_token_signed_response_alg");
+    expect(provider.idToken).toBe(true);
+    expect(provider.allowDangerousEmailAccountLinking).toBe(false);
+  });
+
+  test("trims client id and secret so whitespace cannot cause invalid_client", () => {
+    const provider = vendastaOidcProvider({
+      clientId: "  client-id\n",
+      clientSecret: "\tclient-secret  ",
+      env: { AUTH_VENDASTA_PARTNER_ID: "vuni" },
+    });
+    expect(provider.clientId).toBe("client-id");
+    expect(provider.clientSecret).toBe("client-secret");
+    expect(trimVendastaCredential("  x\n")).toBe("x");
+    expect(
+      isVendastaOidcConfigured({
+        AUTH_VENDASTA_ID: "  id  ",
+        AUTH_VENDASTA_SECRET: "\nsecret\n",
+      })
+    ).toBe(true);
+    expect(
+      isVendastaOidcConfigured({
+        AUTH_VENDASTA_ID: "id",
+        AUTH_VENDASTA_SECRET: "   ",
+      })
+    ).toBe(false);
+  });
+
+  test("authorize params include partner_id=vuni from env like features", () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      env: { AUTH_VENDASTA_PARTNER_ID: "vuni" },
+    });
+    expect(provider.authorization).toEqual(
+      expect.objectContaining({
+        params: {
+          scope: VENDASTA_OIDC_SCOPES,
+          response_type: "code",
+          partner_id: "vuni",
+        },
+      })
+    );
+  });
+
+  test("userinfo request fetches with Bearer token and returns JSON on 2xx", async () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    });
+    const profile = { sub: SUB, name: "Jane Doe" };
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => profile,
+    });
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      const userinfo = provider.userinfo as {
+        url: string;
+        request: (args: {
+          tokens: { access_token?: string };
+          provider: { userinfo?: { url?: string } };
+        }) => Promise<unknown>;
+      };
+      await expect(
+        userinfo.request({
+          tokens: { access_token: "access-token" },
+          provider: { userinfo: { url: VENDASTA_OIDC_USERINFO } },
+        })
+      ).resolves.toEqual(profile);
+      expect(fetchMock).toHaveBeenCalledWith(VENDASTA_OIDC_USERINFO, {
+        headers: {
+          Authorization: "Bearer access-token",
+          Accept: "application/json",
+        },
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("userinfo request throws on non-2xx instead of returning error JSON", async () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    });
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "invalid_token" }),
+    });
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      const userinfo = provider.userinfo as {
+        request: (args: {
+          tokens: { access_token?: string };
+          provider: { userinfo?: { url?: string } };
+        }) => Promise<unknown>;
+      };
+      await expect(
+        userinfo.request({
+          tokens: { access_token: "bad-token" },
+          provider: { userinfo: { url: VENDASTA_OIDC_USERINFO } },
+        })
+      ).rejects.toThrow("Vendasta userinfo request failed with HTTP 401");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("profile maps stable sub and never stores a real mailbox", async () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    });
+    const user = await Promise.resolve(
+      provider.profile!(
+        {
+          sub: SUB,
+          name: "Jane Doe",
+          email: "jane.personal@gmail.com",
+          email_verified: false,
+          roles: ["partner", "smb"],
+        },
+        {}
+      )
+    );
+
+    expect(user.id).toBe(SUB);
+    expect(user.email).toBe(placeholderEmailForSub(SUB));
+    expect(user.email).toBe(`${SUB.toLowerCase()}@users.invalid`);
+    expect(user.email).not.toContain("gmail.com");
+    expect(user.name).toBe("Jane Doe");
+    expect(user.role).toBe("employee");
+  });
+
+  test("callback path is /api/auth/callback/vendasta", () => {
+    expect(VENDASTA_CALLBACK_PATH).toBe("/api/auth/callback/vendasta");
+    expect(
+      vendastaRegistrationUrls("https://vpeople.example.com").redirectUri
+    ).toBe("https://vpeople.example.com/api/auth/callback/vendasta");
+  });
+});
+
+describe("Vendasta identity mapping", () => {
+  test("accepts Vendasta U- subjects and rejects emails used as sub", () => {
+    expect(isVendastaSubject(SUB)).toBe(true);
+    expect(isVendastaSubject("amy@vendasta.com")).toBe(false);
+    expect(isVendastaSubject("")).toBe(false);
+    expect(isVendastaSubject("U-short")).toBe(false);
+  });
+
+  test("does not treat unverified or personal email as identity", () => {
+    expect(
+      verifiedWorkEmailFromIdToken({
+        email: "amy@vendasta.com",
+        email_verified: false,
+      })
+    ).toBeNull();
+    expect(
+      verifiedWorkEmailFromIdToken({
+        email: "amy@gmail.com",
+        email_verified: true,
+      })
+    ).toBeNull();
+    expect(
+      verifiedWorkEmailFromIdToken({
+        email: "amy@vendasta.com",
+      })
+    ).toBeNull();
+    expect(
+      verifiedWorkEmailFromIdToken({
+        email: "amy@vendasta.com",
+        email_verified: true,
+      })
+    ).toBe("amy@vendasta.com");
+  });
+
+  test("authorizes a pre-bound vendastaSub and ignores IdP roles", () => {
+    const decision = decideVendastaEmployeeAccess(
+      { sub: SUB, roles: ["partner", "smb"] },
+      employee({ accessLevel: "employee" }),
+      null
+    );
+    expect(decision).toEqual({
+      ok: true,
+      employeeId: 42,
+      bindSub: false,
+      sessionRole: "employee",
+    });
+    expect(
+      decideVendastaEmployeeAccess(
+        { sub: SUB, roles: ["partner"] },
+        employee({ accessLevel: "global_view" }),
+        null
+      )
+    ).toMatchObject({ ok: true, sessionRole: "employee" });
+  });
+
+  test("binds a first login only with verified work email matching an existing employee", () => {
+    const decision = decideVendastaEmployeeAccess(
+      {
+        sub: SUB,
+        email: "amy@vendasta.com",
+        email_verified: true,
+        roles: ["partner"],
+      },
+      null,
+      employee({ vendastaSub: null, accessLevel: "manager" })
+    );
+    expect(decision).toEqual({
+      ok: true,
+      employeeId: 42,
+      bindSub: true,
+      sessionRole: "manager",
+    });
+  });
+
+  test("suffix-only or unverified email does not authorize a new employee", () => {
+    const unverified = decideVendastaEmployeeAccess(
+      {
+        sub: SUB,
+        email: "amy@vendasta.com",
+        email_verified: false,
+      },
+      null,
+      employee({ vendastaSub: null })
+    );
+    expect(unverified.ok).toBe(false);
+    if (!unverified.ok) expect(unverified.reason).toBe("no_employee");
+
+    const noRow = decideVendastaEmployeeAccess(
+      {
+        sub: SUB,
+        email: "amy@vendasta.com",
+        email_verified: true,
+      },
+      null,
+      null
+    );
+    expect(noRow.ok).toBe(false);
+  });
+
+  test("does not bind when the work email already belongs to a different sub", () => {
+    const decision = decideVendastaEmployeeAccess(
+      {
+        sub: SUB,
+        email: "amy@vendasta.com",
+        email_verified: true,
+      },
+      null,
+      employee({ vendastaSub: "U-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" })
+    );
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("sub_mismatch");
+  });
+
+  test("terminated employees are denied", () => {
+    const decision = decideVendastaEmployeeAccess(
+      { sub: SUB },
+      employee({ employmentStatus: "terminated", accessLevel: "full_admin" }),
+      null
+    );
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("terminated");
+  });
+
+  test("session role comes from accessLevel, never from claims", () => {
+    expect(sessionRoleFromAccessLevel("employee")).toBe("employee");
+    expect(sessionRoleFromAccessLevel("manager")).toBe("manager");
+    expect(sessionRoleFromAccessLevel("full_admin")).toBe("full_admin");
+    expect(sessionRoleFromAccessLevel("global_view")).toBe("employee");
+    expect(sessionRoleFromAccessLevel("regional_view")).toBe("employee");
+    expect(sessionRoleFromAccessLevel("partner")).toBe("employee");
+  });
+});
+
+describe("Vendasta SSO entry URL", () => {
+  test("GET /api/auth/signin/vendasta is not the registered Entry Url", () => {
+    expect(VENDASTA_ENTRY_PATH).toBe("/auth/vendasta");
+    expect(VENDASTA_ENTRY_PATH).not.toBe("/api/auth/signin/vendasta");
+    expect(VENDASTA_ENTRY_PATH).not.toBe("/api/auth/callback/vendasta");
+  });
+
+  test("parses account_id for the authorization request and keeps nextUrl internal", () => {
+    const parsed = parseVendastaEntrySearchParams(
+      new URLSearchParams({
+        account_id: "AG-123",
+        nextUrl: "/people/1",
+      })
+    );
+    expect(parsed.authorizationParams).toEqual({ account_id: "AG-123" });
+    expect(parsed.callbackUrl).toBe("/people/1");
+  });
+
+  test("drops unsafe nextUrl and malformed account_id", () => {
+    expect(isSafeInternalPath("https://evil.example/phish")).toBe(false);
+    expect(isSafeInternalPath("//evil.example")).toBe(false);
+    expect(isSafeInternalPath("/\\evil.example")).toBe(false);
+    expect(isSafeInternalPath("/people\n/evil")).toBe(false);
+    const parsed = parseVendastaEntrySearchParams(
+      new URLSearchParams({
+        account_id: "AG-123&inject=1",
+        nextUrl: "https://evil.example",
+      })
+    );
+    expect(parsed.authorizationParams).toEqual({});
+    expect(parsed.callbackUrl).toBe("/people");
+  });
+
+  test("registration URLs keep callback distinct from logout and session POST", () => {
+    const urls = vendastaRegistrationUrls("https://vpeople.example.com/");
+    expect(urls.entryUrl).toBe("https://vpeople.example.com/auth/vendasta");
+    expect(urls.redirectUri).toBe(
+      "https://vpeople.example.com/api/auth/callback/vendasta"
+    );
+    expect(urls.logoutUrl).toBe("https://vpeople.example.com/auth/logout");
+    expect(urls.sessionUrl).toBe(
+      `https://vpeople.example.com${VENDASTA_LEGACY_SESSION_PATH}`
+    );
+    expect(VENDASTA_LOGOUT_PATH).toBe("/auth/logout");
+    expect(urls.logoutUrl).not.toBe(urls.redirectUri);
+    expect(urls.sessionUrl).not.toBe(urls.redirectUri);
+    expect(urls.logoutUrl).not.toBe(urls.sessionUrl);
+  });
+
+  test("does not inject partner_id unless AUTH_VENDASTA_PARTNER_ID=vuni", () => {
+    expect(VENDASTA_INTERNAL_PARTNER_ID).toBe("vuni");
+    expect(vendastaPartnerIdFromEnv({})).toBeUndefined();
+    expect(vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "" })).toBeUndefined();
+    expect(
+      vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "AG-123" })
+    ).toBeUndefined();
+    expect(
+      vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "other" })
+    ).toBeUndefined();
+    expect(vendastaAuthorizeParams({})).toEqual({
+      scope: VENDASTA_OIDC_SCOPES,
+      response_type: "code",
+    });
+    expect(
+      vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "VUNI" })
+    ).toBe("vuni");
+    expect(
+      vendastaAuthorizeParams({ AUTH_VENDASTA_PARTNER_ID: "vuni" })
+    ).toEqual({
+      scope: VENDASTA_OIDC_SCOPES,
+      response_type: "code",
+      partner_id: "vuni",
+    });
+  });
+
+  test("query/form partner_id is not a tenant selector; vuni comes from env only", () => {
+    const fromQuery = parseVendastaEntrySearchParams(
+      new URLSearchParams({
+        partner_id: "attacker",
+        account_id: "AG-123",
+      })
+    );
+    expect(fromQuery.authorizationParams).toEqual({ account_id: "AG-123" });
+    expect(
+      vendastaSignInAuthorizationParams(fromQuery.authorizationParams, {})
+    ).toEqual({ account_id: "AG-123" });
+    expect(
+      vendastaSignInAuthorizationParams(
+        { ...fromQuery.authorizationParams, partner_id: "attacker" },
+        { AUTH_VENDASTA_PARTNER_ID: "vuni" }
+      )
+    ).toEqual({ account_id: "AG-123", partner_id: "vuni" });
+  });
+
+  test("credentials are required under dedicated AUTH_VENDASTA_* names", () => {
+    expect(
+      isVendastaOidcConfigured({
+        AUTH_VENDASTA_ID: "id",
+        AUTH_VENDASTA_SECRET: "secret",
+      })
+    ).toBe(true);
+    expect(
+      isVendastaOidcConfigured({
+        AUTH_GOOGLE_ID: "id",
+        AUTH_GOOGLE_SECRET: "secret",
+      })
+    ).toBe(false);
+    expect(isVendastaOidcConfigured({ AUTH_VENDASTA_ID: "id" })).toBe(false);
+  });
+});
+
+describe("legacy Session Url", () => {
+  test("refuses JWTs and does not mint a session", () => {
+    expect(vendastaLegacySessionResponse()).toEqual({
+      status: 410,
+      body: LEGACY_SESSION_DISABLED,
+    });
+    expect(LEGACY_SESSION_DISABLED.entryUrl).toBe("/auth/vendasta");
+    expect(LEGACY_SESSION_DISABLED.error).toBe(
+      "legacy_session_transfer_disabled"
+    );
+  });
+});

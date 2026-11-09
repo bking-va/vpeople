@@ -1,5 +1,5 @@
 {
-  "id": "c21f8ae6-7834-47a0-ac8a-8c920c437af5",
+  "id": "96211d74-076b-4209-8e92-58c3f8d2429e",
   "prevId": "6a3c5aa4-5554-4ac9-9243-97ea226496fd",
   "version": "7",
   "dialect": "postgresql",
@@ -236,91 +236,6 @@
           ]
         }
       },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.announcements": {
-      "name": "announcements",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "published_by_id": {
-          "name": "published_by_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "published_at": {
-          "name": "published_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "announcements_published_by_id_employees_id_fk": {
-          "name": "announcements_published_by_id_employees_id_fk",
-          "tableFrom": "announcements",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "published_by_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -2063,6 +1978,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vendasta_sub": {
+          "name": "vendasta_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "first_name": {
           "name": "first_name",
           "type": "text",
@@ -2256,33 +2177,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "original_hire_date": {
-          "name": "original_hire_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
         "termination_date": {
           "name": "termination_date",
           "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "termination_reason_id": {
-          "name": "termination_reason_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "termination_type": {
-          "name": "termination_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "roe_code": {
-          "name": "roe_code",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2425,19 +2322,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "employees_termination_reason_id_termination_reasons_id_fk": {
-          "name": "employees_termination_reason_id_termination_reasons_id_fk",
-          "tableFrom": "employees",
-          "tableTo": "termination_reasons",
-          "columnsFrom": [
-            "termination_reason_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "employees_job_family_id_job_families_id_fk": {
           "name": "employees_job_family_id_job_families_id_fk",
           "tableFrom": "employees",
@@ -2472,6 +2356,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "employee_number"
+          ]
+        },
+        "employees_vendasta_sub_unique": {
+          "name": "employees_vendasta_sub_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "vendasta_sub"
           ]
         },
         "employees_email_unique": {
@@ -2522,25 +2413,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "change_type": {
-          "name": "change_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'status_change'"
-        },
-        "termination_reason_id": {
-          "name": "termination_reason_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "recorded_by_id": {
-          "name": "recorded_by_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "comment": {
           "name": "comment",
           "type": "text",
@@ -2568,32 +2440,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "employment_status_history_termination_reason_id_termination_reasons_id_fk": {
-          "name": "employment_status_history_termination_reason_id_termination_reasons_id_fk",
-          "tableFrom": "employment_status_history",
-          "tableTo": "termination_reasons",
-          "columnsFrom": [
-            "termination_reason_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "employment_status_history_recorded_by_id_employees_id_fk": {
-          "name": "employment_status_history_recorded_by_id_employees_id_fk",
-          "tableFrom": "employment_status_history",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "recorded_by_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -3409,84 +3255,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.letter_templates": {
-      "name": "letter_templates",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "requires_signature": {
-          "name": "requires_signature",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "letter_templates_slug_unique": {
-          "name": "letter_templates_slug_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.locations": {
       "name": "locations",
       "schema": "",
@@ -4278,84 +4046,6 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.termination_reasons": {
-      "name": "termination_reasons",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "roe_code": {
-          "name": "roe_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "termination_reasons_code_unique": {
-          "name": "termination_reasons_code_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "code"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -5423,8 +5113,7 @@
         "compensation_change",
         "employment_status_change",
         "job_info_change",
-        "information_update",
-        "promotion"
+        "information_update"
       ]
     },
     "public.candidate_source": {
