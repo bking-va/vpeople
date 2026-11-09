@@ -35,6 +35,25 @@ export function legacyBiweeklyPeriodKeys(asOf: Date): string[] {
   return keys;
 }
 
+/** Idempotency key for the prior calendar year's carryover trim. */
+export function carryoverPeriodKey(asOf: Date): string {
+  return `carryover:${asOf.getUTCFullYear() - 1}`;
+}
+
+/** Carryover runs only in January so a mid-year deploy cannot forfeit YTD leave. */
+export function isCarryoverWindow(asOf: Date): boolean {
+  return asOf.getUTCMonth() === 0;
+}
+
+/**
+ * Cap leftover days only. Credits already applied this calendar year stay
+ * on the balance so a January deploy after annual accrual cannot forfeit YTD.
+ */
+export function carryoverCeiling(cap: number, ytdCredited: number): number {
+  const ytd = Number.isFinite(ytdCredited) && ytdCredited > 0 ? ytdCredited : 0;
+  return cap + ytd;
+}
+
 export function accrualAmount(rate: number, period: string | null | undefined): number {
   if (!period || period === "none" || !Number.isFinite(rate) || rate <= 0) {
     return 0;

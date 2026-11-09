@@ -168,6 +168,26 @@ export default async function ReportsPage() {
                 <div className="font-medium">Last Pay Change</div>
                 <div className="text-sm text-muted-foreground">Most recent compensation change per employee</div>
               </Link>
+              <Link href="/reports/standard?type=pay-by-title" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Pay by Title</div>
+                <div className="text-sm text-muted-foreground">Average, min, and max pay grouped by job title</div>
+              </Link>
+              <Link href="/reports/standard?type=pay-by-department" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Pay by Department</div>
+                <div className="text-sm text-muted-foreground">Average, min, and max pay grouped by department</div>
+              </Link>
+              <Link href="/reports/standard?type=pay-by-location" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Pay by Location</div>
+                <div className="text-sm text-muted-foreground">Average, min, and max pay grouped by location</div>
+              </Link>
+              <Link href="/reports/standard?type=salary-history" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Salary History</div>
+                <div className="text-sm text-muted-foreground">Effective-dated compensation changes</div>
+              </Link>
+              <Link href="/reports/standard?type=time-off-schedule" className="block p-3 border rounded-lg hover:bg-accent">
+                <div className="font-medium">Time Off Schedule</div>
+                <div className="text-sm text-muted-foreground">Approved and pending leave this year</div>
+              </Link>
               <Link href="/reports/standard?type=no-raise" className="block p-3 border rounded-lg hover:bg-accent">
                 <div className="font-medium">No Raise in 12+ Months</div>
                 <div className="text-sm text-muted-foreground">Active employees whose last pay change is older than a year</div>
@@ -186,7 +206,7 @@ export default async function ReportsPage() {
               </Link>
               <Link href="/reports/standard?type=employment-status" className="block p-3 border rounded-lg hover:bg-accent">
                 <div className="font-medium">Employment Status History</div>
-                <div className="text-sm text-muted-foreground">Current status, hire, and termination dates</div>
+                <div className="text-sm text-muted-foreground">Effective-dated employment status changes</div>
               </Link>
             </div>
           </CardContent>

@@ -288,6 +288,7 @@ export const employeesRelations = relations(employees, ({ one, many }) => ({
   }),
   employeeTeams: many(employeeTeams),
   jobHistory: many(jobHistory),
+  employmentStatusHistory: many(employmentStatusHistory),
   compensationHistory: many(compensationHistory),
   bonusDetails: many(bonusDetails),
   equityGrants: many(equityGrants),
@@ -327,6 +328,17 @@ export const jobHistory = pgTable("job_history", {
   locationId: integer("location_id").references(() => locations.id),
   managerId: integer("manager_id").references(() => employees.id),
   employmentStatus: employmentStatusEnum("employment_status"),
+  comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const employmentStatusHistory = pgTable("employment_status_history", {
+  id: serial("id").primaryKey(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  effectiveDate: date("effective_date").notNull(),
+  status: employmentStatusEnum("status").notNull(),
   comment: text("comment"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

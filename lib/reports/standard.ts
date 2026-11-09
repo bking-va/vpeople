@@ -8,11 +8,14 @@ import {
   timeOffRequests,
   compensationHistory,
   jobHistory,
+  employmentStatusHistory,
 } from "@/lib/db/schema";
-import { desc, eq, sql, and, gte } from "drizzle-orm";
+import { desc, eq, sql, and, gte, lte, or } from "drizzle-orm";
 import { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 import { takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
+import { auth } from "@/lib/auth";
+import { getUserPermissions } from "@/lib/permissions";
 
 export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 
@@ -241,19 +244,202 @@ export async function getJobHistoryReport() {
     .orderBy(desc(jobHistory.effectiveDate));
 }
 
+async function sessionCanViewCompensation() {
+  const session = await auth();
+  if (!session?.user?.email) return false;
+  const permissions = await getUserPermissions(session.user.email);
+  return permissions.canViewCompensation === true;
+}
+
 export async function getEmploymentStatusHistoryReport() {
   return db
+    .select({
+      id: employmentStatusHistory.id,
+      employeeId: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      employmentStatus: employmentStatusHistory.status,
+      effectiveDate: employmentStatusHistory.effectiveDate,
+      comment: employmentStatusHistory.comment,
+      department: departments.name,
+      location: locations.name,
+    })
+    .from(employmentStatusHistory)
+    .innerJoin(employees, eq(employmentStatusHistory.employeeId, employees.id))
+    .leftJoin(departments, eq(employees.departmentId, departments.id))
+    .leftJoin(locations, eq(employees.locationId, locations.id))
+    .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id));
+}
+
+export async function getSalaryHistoryReport(opts?: { canViewCompensation?: boolean }) {
+  if (opts?.canViewCompensation === false) return [];
+  if (!(await sessionCanViewCompensation())) return [];
+  return db
+    .select({
+      id: compensationHistory.id,
+      employeeId: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      jobTitle: employees.jobTitle,
+      payRate: compensationHistory.payRate,
+      payType: compensationHistory.payType,
+      paySchedule: compensationHistory.paySchedule,
+      currency: compensationHistory.currency,
+      effectiveDate: compensationHistory.effectiveDate,
+      changeReason: compensationHistory.changeReason,
+    })
+    .from(compensationHistory)
+    .innerJoin(employees, eq(compensationHistory.employeeId, employees.id))
+    .orderBy(desc(compensationHistory.effectiveDate), desc(compensationHistory.id));
+}
+
+export async function getTimeOffScheduleReport(year: number) {
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+  return db
+    .select({
+      id: timeOffRequests.id,
+      employeeId: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      policy: timeOffPolicies.name,
+      startDate: timeOffRequests.startDate,
+      endDate: timeOffRequests.endDate,
+      daysRequested: timeOffRequests.daysRequested,
+      status: timeOffRequests.status,
+    })
+    .from(timeOffRequests)
+    .innerJoin(employees, eq(timeOffRequests.employeeId, employees.id))
+    .leftJoin(timeOffPolicies, eq(timeOffRequests.policyId, timeOffPolicies.id))
+    .where(
+      and(
+        or(eq(timeOffRequests.status, "approved"), eq(timeOffRequests.status, "pending")),
+        lte(timeOffRequests.startDate, end),
+        gte(timeOffRequests.endDate, start)
+      )
+    )
+    .orderBy(timeOffRequests.startDate, employees.lastName);
+}
+
+type PayRow = {
+  employeeId: number;
+  firstName: string;
+  lastName: string;
+  jobTitle: string | null;
+  department: string | null;
+  location: string | null;
+  payRate: string | null;
+  payType: string | null;
+  currency: string | null;
+};
+
+type CompensationAccess = { canViewCompensation?: boolean; asOf?: Date };
+
+async function getCurrentPayRows(opts: CompensationAccess = {}): Promise<PayRow[]> {
+  if (opts.canViewCompensation === false) return [];
+  if (!(await sessionCanViewCompensation())) return [];
+  const asOfKey = (opts.asOf ?? new Date()).toISOString().slice(0, 10);
+
+  const history = await db
+    .select({
+      employeeId: compensationHistory.employeeId,
+      payRate: compensationHistory.payRate,
+      payType: compensationHistory.payType,
+      currency: compensationHistory.currency,
+      effectiveDate: compensationHistory.effectiveDate,
+    })
+    .from(compensationHistory)
+    .where(lte(compensationHistory.effectiveDate, asOfKey))
+    .orderBy(desc(compensationHistory.effectiveDate), desc(compensationHistory.id));
+
+  const latest = new Map<number, (typeof history)[number]>();
+  for (const row of history) {
+    if (!latest.has(row.employeeId)) latest.set(row.employeeId, row);
+  }
+
+  const active = await db
     .select({
       id: employees.id,
       firstName: employees.firstName,
       lastName: employees.lastName,
-      employmentStatus: employees.employmentStatus,
-      hireDate: employees.hireDate,
-      terminationDate: employees.terminationDate,
+      jobTitle: employees.jobTitle,
       department: departments.name,
       location: locations.name,
     })
     .from(employees)
     .leftJoin(departments, eq(employees.departmentId, departments.id))
-    .leftJoin(locations, eq(employees.locationId, locations.id));
+    .leftJoin(locations, eq(employees.locationId, locations.id))
+    .where(sql`${employees.employmentStatus} <> 'terminated'`);
+
+  return active.map((emp) => {
+    const pay = latest.get(emp.id);
+    return {
+      employeeId: emp.id,
+      firstName: emp.firstName,
+      lastName: emp.lastName,
+      jobTitle: emp.jobTitle,
+      department: emp.department,
+      location: emp.location,
+      payRate: pay?.payRate ?? null,
+      payType: pay?.payType ?? "salary",
+      currency: pay?.currency ?? "CAD",
+    };
+  });
+}
+
+export type PayGroupRow = {
+  group: string;
+  count: number;
+  avgPay: number;
+  minPay: number;
+  maxPay: number;
+  currency: string;
+  payType: string;
+};
+
+function aggregatePay(rows: PayRow[], groupOf: (row: PayRow) => string | null | undefined): PayGroupRow[] {
+  const groups = new Map<string, { rates: number[]; currency: string; payType: string; label: string }>();
+  for (const row of rows) {
+    const rate = row.payRate != null ? parseFloat(row.payRate) : NaN;
+    if (!Number.isFinite(rate)) continue;
+    const payType = (row.payType || "salary").toLowerCase();
+    const currency = row.currency || "CAD";
+    const base = (groupOf(row) || "Unassigned").trim() || "Unassigned";
+    const key = `${base}\u0000${currency}\u0000${payType}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rates.push(rate);
+    } else {
+      groups.set(key, {
+        rates: [rate],
+        currency,
+        payType,
+        label: `${base} · ${currency} · ${payType}`,
+      });
+    }
+  }
+
+  return Array.from(groups.values())
+    .map((entry) => ({
+      group: entry.label,
+      count: entry.rates.length,
+      avgPay: Number((entry.rates.reduce((sum, n) => sum + n, 0) / entry.rates.length).toFixed(2)),
+      minPay: Math.min(...entry.rates),
+      maxPay: Math.max(...entry.rates),
+      currency: entry.currency,
+      payType: entry.payType,
+    }))
+    .sort((a, b) => b.avgPay - a.avgPay);
+}
+
+export async function getPayByTitleReport(opts: CompensationAccess = {}) {
+  return aggregatePay(await getCurrentPayRows(opts), (row) => row.jobTitle);
+}
+
+export async function getPayByDepartmentReport(opts: CompensationAccess = {}) {
+  return aggregatePay(await getCurrentPayRows(opts), (row) => row.department);
+}
+
+export async function getPayByLocationReport(opts: CompensationAccess = {}) {
+  return aggregatePay(await getCurrentPayRows(opts), (row) => row.location);
 }

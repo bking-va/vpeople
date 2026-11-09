@@ -228,7 +228,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Policy management UI (create, edit policies) ✅ Done (4f22048 - Settings page + CRUD API + integration tests)
 - [ ] Categories
 - [x] Accrual rules that run on schedule ✅ Done (daily Vercel cron `/api/cron/accrue-time-off`; unique `(balanceId, periodKey)` so monthly/annual/biweekly apply once per period; skips terminated; caps at maxBalance)
-- [ ] Carryover rules
+- [x] Carryover rules ✅ Done (year-start forfeit above `maxCarryover` before accrual; idempotent `carryover:YYYY` period key)
 - [ ] Manual balance adjustments with history
 - [ ] Multi-country policies
   - [ ] Canada
@@ -241,7 +241,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Year views
 - [x] Employee request submission with balance check ✅ Done (POST /api/time-off/requests rejects insufficient balance)
 - [x] Manager approve/deny actions (basic)
-- [x] Balance history and audit trail ⚠️ Partial (accrual writes `time_off_balance_adjustments` with `accrual:<periodKey>`; no employee-facing history UI)
+- [x] Balance history and audit trail ✅ Done (accrual, carryover, and used leave write `time_off_balance_adjustments`; profile Time Off tab + `/time-off/balances`)
 - [x] Who's-out calendar view ✅ Done (/time-off/calendar + dashboard widget)
 
 ---
@@ -383,9 +383,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Headcount report ✅ Done (/reports/headcount + CSV export by department/location/status)
 - [x] Turnover report ✅ Done (/reports/turnover + dashboard chart + CSV `type=turnover`)
 - [x] Additions/Terminations report ✅ Done (/reports/standard?type=additions)
-- [ ] Pay by Title
-- [ ] Pay by Department
-- [ ] Pay by Location
+- [x] Pay by Title ✅ Done (`/reports/standard?type=pay-by-title`; `canViewCompensation`)
+- [x] Pay by Department ✅ Done (`/reports/standard?type=pay-by-department`; `canViewCompensation`)
+- [x] Pay by Location ✅ Done (`/reports/standard?type=pay-by-location`; `canViewCompensation`)
 - [x] Audit Trail ✅ Complete (dbed588)
   - [x] Document deletion logged
   - [x] Compensation changes logged  
@@ -399,15 +399,15 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Age profile ✅ Done (/reports/standard?type=age-gender)
 - [x] Gender profile ✅ Done (/reports/standard?type=age-gender)
 - [x] Birthdays report ✅ Done (/reports/standard?type=birthdays)
-- [x] Employment Status History ⚠️ Partial (current status + hire/termination dates, not a full effective-dated status table)
+- [x] Employment Status History ✅ Done (`employment_status_history`; hire/job-update/terminate; Job tab + report)
 - [x] Job History ✅ Done (/reports/standard?type=job-history)
 - [x] Years of Service ✅ Done (/reports/standard?type=years-of-service)
 - [ ] Candidate Sources
 - [ ] Candidate Funnel
 - [x] Last Pay Change ✅ Done (/reports/standard?type=last-pay-change; requires canViewCompensation)
-- [ ] Salary History
+- [x] Salary History ✅ Done (`/reports/standard?type=salary-history`; `canViewCompensation`)
 - [x] Time Off Balances ✅ Done (/reports/standard?type=time-off-balances)
-- [ ] Time Off Schedule
+- [x] Time Off Schedule ✅ Done (`/reports/standard?type=time-off-schedule`; approved + pending overlapping the year)
 - [x] Time Off Used ✅ Done (/reports/standard?type=time-off-used)
 - [ ] Timesheet Hours
 - [ ] Project Hours
@@ -518,7 +518,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ---
 
-**Last Updated:** 2026-11-08  
+**Last Updated:** 2026-11-09  
 **Current Phase:** 
 - ✅ Multi-step approvals complete (time-off, comp changes, job info changes)
 - ✅ Atomic balance deduction using db.batch

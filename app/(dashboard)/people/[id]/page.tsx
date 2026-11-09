@@ -14,6 +14,8 @@ import {
   timeOffBalances,
   timeOffPolicies,
   timeOffRequests,
+  timeOffBalanceAdjustments,
+  employmentStatusHistory,
   emergencyContacts,
   employeeNotes,
   employeeTasks,
@@ -23,7 +25,7 @@ import {
   employeeEducation,
   employeeVisas,
 } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +36,7 @@ import { getUserPermissions } from "@/lib/permissions";
 import {
   canViewImmigrationNumbers,
   canViewPrivateDocuments,
+  canViewTimeOffLedger,
   redactVisaDocumentNumber,
 } from "@/lib/authz";
 import Link from "next/link";
@@ -165,7 +168,6 @@ export default async function EmployeeProfilePage({
     .orderBy(desc(jobHistory.effectiveDate));
 
   const isViewingSelf = session.user.employeeId === employeeId;
-  const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
   const isManager = employee.managerId === session.user.employeeId;
 
   // Get DB-backed permissions
@@ -198,6 +200,23 @@ export default async function EmployeeProfilePage({
       ])
     : [[], [], []];
 
+  let viewerAccessLevel = isViewingSelf ? employee.accessLevel : null;
+  if (!viewerAccessLevel && session.user.employeeId) {
+    const [viewer] = await db
+      .select({ accessLevel: employees.accessLevel })
+      .from(employees)
+      .where(eq(employees.id, session.user.employeeId))
+      .limit(1);
+    viewerAccessLevel = viewer?.accessLevel ?? null;
+  }
+
+  const canViewLedger = canViewTimeOffLedger({
+    isViewingSelf,
+    isManager,
+    canManageUsers: permissions.canManageUsers,
+    accessLevel: viewerAccessLevel,
+  });
+
   const timeOffData = await db
     .select({
       balance: timeOffBalances,
@@ -206,6 +225,22 @@ export default async function EmployeeProfilePage({
     .from(timeOffBalances)
     .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
     .where(eq(timeOffBalances.employeeId, employeeId));
+
+  const balanceIds = timeOffData.map((item) => item.balance.id);
+  const balanceAdjustments =
+    canViewLedger && balanceIds.length
+      ? await db
+          .select({
+            id: timeOffBalanceAdjustments.id,
+            balanceId: timeOffBalanceAdjustments.balanceId,
+            amount: timeOffBalanceAdjustments.amount,
+            reason: timeOffBalanceAdjustments.reason,
+            createdAt: timeOffBalanceAdjustments.createdAt,
+          })
+          .from(timeOffBalanceAdjustments)
+          .where(inArray(timeOffBalanceAdjustments.balanceId, balanceIds))
+          .orderBy(desc(timeOffBalanceAdjustments.createdAt))
+      : [];
 
   const requests = await db
     .select()
@@ -225,10 +260,18 @@ export default async function EmployeeProfilePage({
     .where(eq(employeeTasks.employeeId, employeeId))
     .orderBy(employeeTasks.createdAt);
 
+  const statusHistoryRecords = canViewLedger
+    ? await db
+        .select()
+        .from(employmentStatusHistory)
+        .where(eq(employmentStatusHistory.employeeId, employeeId))
+        .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id))
+    : [];
+
   const canViewDocs = canViewPrivateDocuments({
     isViewingSelf,
     canManageUsers: permissions.canManageUsers,
-    accessLevel: session.user.role === "full_admin" ? "full_admin" : undefined,
+    accessLevel: viewerAccessLevel,
   });
   const employeeDocs = canViewDocs
     ? await db
@@ -510,6 +553,29 @@ export default async function EmployeeProfilePage({
             </Card>
           )}
 
+          {statusHistoryRecords.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Employment Status History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {statusHistoryRecords.map((record) => (
+                    <div key={record.id} className="border-l-2 border-primary pl-4">
+                      <p className="text-sm text-muted-foreground">
+                        {formatDate(record.effectiveDate)}
+                      </p>
+                      <p className="font-medium">{formatEmploymentStatus(record.status)}</p>
+                      {record.comment && (
+                        <p className="text-sm text-muted-foreground">{record.comment}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {jobHistoryRecords.length > 0 && (
             <Card>
               <CardHeader>
@@ -664,6 +730,38 @@ export default async function EmployeeProfilePage({
               </Card>
             ))}
           </div>
+
+          {balanceAdjustments.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Balance History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {balanceAdjustments.map((row) => {
+                    const policyName =
+                      timeOffData.find((item) => item.balance.id === row.balanceId)?.policy?.name ||
+                      "Time off";
+                    const amount = parseFloat(row.amount);
+                    return (
+                      <div key={row.id} className="flex items-center justify-between border-b pb-2 last:border-0">
+                        <div>
+                          <p className="font-medium">{policyName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {row.reason} · {formatDate(row.createdAt)}
+                          </p>
+                        </div>
+                        <span className={amount < 0 ? "text-destructive" : "text-emerald-700"}>
+                          {amount > 0 ? "+" : ""}
+                          {amount.toFixed(1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {requests.length > 0 && (
             <Card>

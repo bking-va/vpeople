@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runTimeOffAccruals } from "@/lib/time-off-accrual";
+import { runTimeOffCarryover } from "@/lib/time-off-carryover";
 import { isCronAuthorized } from "@/lib/authz";
 
 export const runtime = "nodejs";
@@ -12,8 +13,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await runTimeOffAccruals(new Date());
-    return NextResponse.json({ success: true, ...result });
+    const asOf = new Date();
+    const carryover = await runTimeOffCarryover(asOf, { authorization: authHeader });
+    const accrual = await runTimeOffAccruals(asOf);
+    return NextResponse.json({ success: true, carryover, accrual });
   } catch (error: any) {
     console.error("Accrual failed:", error);
     return NextResponse.json(

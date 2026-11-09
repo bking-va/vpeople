@@ -55,6 +55,21 @@ export function canViewPrivateDocuments(opts: {
   return opts.isViewingSelf || opts.canManageUsers || isFullAdmin(opts.accessLevel);
 }
 
+/** Accrual/usage ledger: self, their manager, HR, or full_admin — not coworkers or viewing roles. */
+export function canViewTimeOffLedger(opts: {
+  isViewingSelf: boolean;
+  isManager: boolean;
+  canManageUsers: boolean;
+  accessLevel: AccessLevel;
+}) {
+  return (
+    opts.isViewingSelf ||
+    opts.isManager ||
+    opts.canManageUsers ||
+    isFullAdmin(opts.accessLevel)
+  );
+}
+
 export function canViewOfferSalary(opts: {
   canViewCompensation: boolean;
   accessLevel: AccessLevel;

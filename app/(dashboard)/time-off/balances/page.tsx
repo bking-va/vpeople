@@ -1,17 +1,37 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { employees, timeOffBalances, timeOffPolicies, timeOffRequests } from "@/lib/db/schema";
-import { eq, gte, and } from "drizzle-orm";
+import { employees, timeOffBalances, timeOffPolicies, timeOffRequests, timeOffBalanceAdjustments } from "@/lib/db/schema";
+import { eq, gte, desc } from "drizzle-orm";
+import { formatDate } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { getUserPermissions } from "@/lib/permissions";
+import { canViewTimeOffLedger } from "@/lib/authz";
 
 export default async function TimeOffBalancesPage() {
   const session = await auth();
   if (!session?.user || (session.user.role !== "admin" && session.user.role !== "full_admin")) {
     redirect("/time-off");
   }
+
+  const permissions = session.user.email
+    ? await getUserPermissions(session.user.email)
+    : null;
+  const [viewer] = session.user.employeeId
+    ? await db
+        .select({ accessLevel: employees.accessLevel })
+        .from(employees)
+        .where(eq(employees.id, session.user.employeeId))
+        .limit(1)
+    : [null];
+  const canViewHistory = canViewTimeOffLedger({
+    isViewingSelf: false,
+    isManager: false,
+    canManageUsers: Boolean(permissions?.canManageUsers),
+    accessLevel: viewer?.accessLevel,
+  });
 
   const allBalances = await db
     .select({
@@ -57,6 +77,25 @@ export default async function TimeOffBalancesPage() {
 
   // Enhance balances with available, pending, and scheduled
   // Note: stored balance already reflects approved deductions, so available = stored balance
+  const recentAdjustments = canViewHistory
+    ? await db
+        .select({
+          id: timeOffBalanceAdjustments.id,
+          amount: timeOffBalanceAdjustments.amount,
+          reason: timeOffBalanceAdjustments.reason,
+          createdAt: timeOffBalanceAdjustments.createdAt,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+          policyName: timeOffPolicies.name,
+        })
+        .from(timeOffBalanceAdjustments)
+        .innerJoin(timeOffBalances, eq(timeOffBalanceAdjustments.balanceId, timeOffBalances.id))
+        .innerJoin(employees, eq(timeOffBalances.employeeId, employees.id))
+        .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
+        .orderBy(desc(timeOffBalanceAdjustments.createdAt))
+        .limit(50)
+    : [];
+
   const balancesWithDetails = allBalances.map(item => {
     const key = `${item.balance.employeeId}-${item.balance.policyId}`;
     const totalBalance = parseFloat(item.balance.balance);
@@ -124,6 +163,44 @@ export default async function TimeOffBalancesPage() {
           </div>
         </CardContent>
       </Card>
+
+      {canViewHistory && (
+      <Card>
+        <CardHeader>
+          <CardTitle>Balance History</CardTitle>
+          <CardDescription>
+            Accruals, carryover forfeits, and time off used
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {recentAdjustments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No balance adjustments yet</p>
+          ) : (
+            <div className="space-y-1">
+              {recentAdjustments.map((row) => {
+                const amount = parseFloat(row.amount);
+                return (
+                  <div key={row.id} className="flex items-center justify-between p-3 border-b last:border-0">
+                    <div>
+                      <div className="font-medium">
+                        {row.firstName} {row.lastName} · {row.policyName || "Time off"}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {row.reason} · {formatDate(row.createdAt)}
+                      </div>
+                    </div>
+                    <span className={amount < 0 ? "text-destructive" : "text-emerald-700"}>
+                      {amount > 0 ? "+" : ""}
+                      {amount.toFixed(1)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      )}
     </div>
   );
 }

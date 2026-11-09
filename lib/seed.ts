@@ -92,6 +92,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE employee_notes CASCADE`);
     await db.execute(sql`TRUNCATE TABLE emergency_contacts CASCADE`);
     await db.execute(sql`TRUNCATE TABLE job_history CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE employment_status_history CASCADE`);
     await db.execute(sql`TRUNCATE TABLE compensation_history CASCADE`);
     await db.execute(sql`TRUNCATE TABLE bonus_details CASCADE`);
     await db.execute(sql`TRUNCATE TABLE equity_grants CASCADE`);
@@ -1151,6 +1152,16 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   });
 
   await db.insert(schema.compensationHistory).values(compensationData);
+
+  console.log("Recording employment status history...");
+  await db.insert(schema.employmentStatusHistory).values(
+    allEmployees.map((emp) => ({
+      employeeId: emp.id,
+      effectiveDate: emp.hireDate || "2020-01-15",
+      status: emp.employmentStatus,
+      comment: "Hire",
+    }))
+  );
 
   console.log("Creating seats...");
 
