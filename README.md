@@ -346,8 +346,11 @@ The following features are stubbed or partially implemented for future developme
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `AUTH_SECRET` | Yes (prod) | NextAuth secret key |
-| `AUTH_GOOGLE_ID` | Yes (prod) | Google OAuth client ID |
-| `AUTH_GOOGLE_SECRET` | Yes (prod) | Google OAuth client secret |
+| `AUTH_VENDASTA_ID` | Yes (SSO) | Dedicated Vendasta OIDC client ID |
+| `AUTH_VENDASTA_SECRET` | Yes (SSO) | Dedicated Vendasta OIDC client secret |
+| `AUTH_VENDASTA_PARTNER_ID` | No | Set to `vuni` only if IAM requires a partner namespace on authorize. Not `account_id`. Leave unset otherwise. |
+| `AUTH_GOOGLE_ID` | No | Leftover Google provider; not the vPeople SSO path |
+| `AUTH_GOOGLE_SECRET` | No | Leftover Google provider; not the vPeople SSO path |
 | `AUTH_URL` | Yes (prod) | Public app URL |
 | `ENABLE_DEV_AUTH` | No | Set to `true` to enable dev login bypass |
 | `BAMBOO_API_KEYS` | Yes | Comma-separated list of valid API keys |

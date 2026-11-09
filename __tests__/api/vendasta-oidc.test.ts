@@ -10,6 +10,7 @@ import {
   VENDASTA_OIDC_SCOPES,
   VENDASTA_OIDC_TOKEN,
   VENDASTA_OIDC_USERINFO,
+  VENDASTA_INTERNAL_PARTNER_ID,
   VENDASTA_OIDC_WELL_KNOWN,
   VENDASTA_PROVIDER_ID,
   decideVendastaEmployeeAccess,
@@ -18,9 +19,12 @@ import {
   isVendastaSubject,
   parseVendastaEntrySearchParams,
   placeholderEmailForSub,
+  vendastaAuthorizeParams,
   vendastaLegacySessionResponse,
   vendastaOidcProvider,
+  vendastaPartnerIdFromEnv,
   vendastaRegistrationUrls,
+  vendastaSignInAuthorizationParams,
   verifiedWorkEmailFromIdToken,
   type EmployeeIdentityRow,
 } from "@/lib/vendasta-oidc";
@@ -46,6 +50,7 @@ describe("Vendasta OIDC provider", () => {
     const provider = vendastaOidcProvider({
       clientId: "client-id",
       clientSecret: "client-secret",
+      env: {},
     });
 
     expect(provider.id).toBe(VENDASTA_PROVIDER_ID);
@@ -58,10 +63,10 @@ describe("Vendasta OIDC provider", () => {
     expect(provider.authorization).toEqual(
       expect.objectContaining({
         url: VENDASTA_OIDC_AUTHORIZATION,
-        params: expect.objectContaining({
+        params: {
           scope: VENDASTA_OIDC_SCOPES,
           response_type: "code",
-        }),
+        },
       })
     );
     expect(VENDASTA_OIDC_SCOPES).toBe("openid profile");
@@ -291,6 +296,51 @@ describe("Vendasta SSO entry URL", () => {
     expect(urls.logoutUrl).not.toBe(urls.redirectUri);
     expect(urls.sessionUrl).not.toBe(urls.redirectUri);
     expect(urls.logoutUrl).not.toBe(urls.sessionUrl);
+  });
+
+  test("does not inject partner_id unless AUTH_VENDASTA_PARTNER_ID=vuni", () => {
+    expect(VENDASTA_INTERNAL_PARTNER_ID).toBe("vuni");
+    expect(vendastaPartnerIdFromEnv({})).toBeUndefined();
+    expect(vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "" })).toBeUndefined();
+    expect(
+      vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "AG-123" })
+    ).toBeUndefined();
+    expect(
+      vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "other" })
+    ).toBeUndefined();
+    expect(vendastaAuthorizeParams({})).toEqual({
+      scope: VENDASTA_OIDC_SCOPES,
+      response_type: "code",
+    });
+    expect(
+      vendastaPartnerIdFromEnv({ AUTH_VENDASTA_PARTNER_ID: "VUNI" })
+    ).toBe("vuni");
+    expect(
+      vendastaAuthorizeParams({ AUTH_VENDASTA_PARTNER_ID: "vuni" })
+    ).toEqual({
+      scope: VENDASTA_OIDC_SCOPES,
+      response_type: "code",
+      partner_id: "vuni",
+    });
+  });
+
+  test("query/form partner_id is not a tenant selector; vuni comes from env only", () => {
+    const fromQuery = parseVendastaEntrySearchParams(
+      new URLSearchParams({
+        partner_id: "attacker",
+        account_id: "AG-123",
+      })
+    );
+    expect(fromQuery.authorizationParams).toEqual({ account_id: "AG-123" });
+    expect(
+      vendastaSignInAuthorizationParams(fromQuery.authorizationParams, {})
+    ).toEqual({ account_id: "AG-123" });
+    expect(
+      vendastaSignInAuthorizationParams(
+        { ...fromQuery.authorizationParams, partner_id: "attacker" },
+        { AUTH_VENDASTA_PARTNER_ID: "vuni" }
+      )
+    ).toEqual({ account_id: "AG-123", partner_id: "vuni" });
   });
 
   test("credentials are required under dedicated AUTH_VENDASTA_* names", () => {

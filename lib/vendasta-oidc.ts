@@ -25,6 +25,13 @@ export const VENDASTA_CALLBACK_PATH = "/api/auth/callback/vendasta";
 export const VENDASTA_LOGOUT_PATH = "/auth/logout";
 export const VENDASTA_LEGACY_SESSION_PATH = "/api/auth/vendasta/legacy-session";
 
+/**
+ * Vendasta internal partner namespace (pid), not an AG/account_id and not a
+ * user-selected tenant. Injected on authorize only when AUTH_VENDASTA_PARTNER_ID
+ * is set to this value. Leave the env unset unless IAM requires it.
+ */
+export const VENDASTA_INTERNAL_PARTNER_ID = "vuni";
+
 export const LEGACY_SESSION_DISABLED = {
   error: "legacy_session_transfer_disabled",
   message:
@@ -75,6 +82,32 @@ export function isVendastaOidcConfigured(
   env: Record<string, string | undefined> = process.env
 ): boolean {
   return Boolean(env.AUTH_VENDASTA_ID?.trim() && env.AUTH_VENDASTA_SECRET?.trim());
+}
+
+/**
+ * Server-side partner namespace only. Query/form `partner_id` is ignored.
+ * Returns `vuni` when AUTH_VENDASTA_PARTNER_ID=vuni; otherwise undefined.
+ */
+export function vendastaPartnerIdFromEnv(
+  env: Record<string, string | undefined> = process.env
+): string | undefined {
+  const raw = env.AUTH_VENDASTA_PARTNER_ID?.trim().toLowerCase();
+  if (raw === VENDASTA_INTERNAL_PARTNER_ID) {
+    return VENDASTA_INTERNAL_PARTNER_ID;
+  }
+  return undefined;
+}
+
+export function vendastaAuthorizeParams(
+  env: Record<string, string | undefined> = process.env
+): Record<string, string> {
+  const params: Record<string, string> = {
+    scope: VENDASTA_OIDC_SCOPES,
+    response_type: "code",
+  };
+  const partnerId = vendastaPartnerIdFromEnv(env);
+  if (partnerId) params.partner_id = partnerId;
+  return params;
 }
 
 export function isVendastaSubject(sub: unknown): sub is string {
@@ -187,6 +220,18 @@ export function parseVendastaEntrySearchParams(searchParams: URLSearchParams): {
   };
 }
 
+/** Merge IAM-injected account_id (if any) with server-side partner_id (if configured). */
+export function vendastaSignInAuthorizationParams(
+  entryParams: Record<string, string>,
+  env: Record<string, string | undefined> = process.env
+): Record<string, string> {
+  const authorizationParams = { ...entryParams };
+  delete authorizationParams.partner_id;
+  const partnerId = vendastaPartnerIdFromEnv(env);
+  if (partnerId) authorizationParams.partner_id = partnerId;
+  return authorizationParams;
+}
+
 export function vendastaRegistrationUrls(appOrigin: string): {
   entryUrl: string;
   redirectUri: string;
@@ -205,6 +250,7 @@ export function vendastaRegistrationUrls(appOrigin: string): {
 export function vendastaOidcProvider(options: {
   clientId: string;
   clientSecret: string;
+  env?: Record<string, string | undefined>;
 }): OIDCConfig<VendastaIdTokenClaims> {
   return {
     id: VENDASTA_PROVIDER_ID,
@@ -216,10 +262,7 @@ export function vendastaOidcProvider(options: {
     clientSecret: options.clientSecret,
     authorization: {
       url: VENDASTA_OIDC_AUTHORIZATION,
-      params: {
-        scope: VENDASTA_OIDC_SCOPES,
-        response_type: "code",
-      },
+      params: vendastaAuthorizeParams(options.env),
     },
     token: VENDASTA_OIDC_TOKEN,
     userinfo: VENDASTA_OIDC_USERINFO,

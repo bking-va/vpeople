@@ -5,6 +5,7 @@ import { signIn } from "@/lib/auth";
 import {
   isVendastaOidcConfigured,
   parseVendastaEntrySearchParams,
+  vendastaSignInAuthorizationParams,
   VENDASTA_PROVIDER_ID,
 } from "@/lib/vendasta-oidc";
 
@@ -23,6 +24,6 @@ export async function startVendastaSignIn(formData?: FormData) {
   await signIn(
     VENDASTA_PROVIDER_ID,
     { redirectTo: parsed.callbackUrl },
-    parsed.authorizationParams
+    vendastaSignInAuthorizationParams(parsed.authorizationParams)
   );
 }
