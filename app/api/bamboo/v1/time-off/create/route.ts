@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
 import { calendarDaysInclusive } from "@/lib/calendar-days";
 import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
+import { attachConfiguredTimeOffApproval } from "@/lib/time-off-workflow";
 
 export async function POST(request: NextRequest) {
   const auth = await authenticateApiKey(request);
@@ -92,6 +93,16 @@ export async function POST(request: NextRequest) {
         reviewedAt: null,
       })
       .returning();
+
+    try {
+      await attachConfiguredTimeOffApproval({
+        timeOffRequestId: timeOffRequest.id,
+        requesterId: targetEmployeeId,
+      });
+    } catch (error) {
+      await db.delete(timeOffRequests).where(eq(timeOffRequests.id, timeOffRequest.id));
+      throw error;
+    }
 
     return NextResponse.json({
       id: timeOffRequest.id.toString(),

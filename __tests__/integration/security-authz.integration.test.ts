@@ -26,13 +26,21 @@ import {
   employeeVisas,
   approvalRequests,
   approvalRequestSteps,
+  approvalWorkflows,
+  approvalWorkflowSteps,
+  auditLogs,
 } from "@/lib/db/schema";
 import { getApprovalRequestForEntity } from "@/lib/approvals";
+import { approveTimeOffRequest } from "@/app/actions/time-off";
 import { redactVisaDocumentNumber } from "@/lib/authz";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 jest.mock("@/lib/auth", () => ({
   auth: jest.fn(),
+}));
+
+jest.mock("next/cache", () => ({
+  revalidatePath: jest.fn(),
 }));
 
 import { auth } from "@/lib/auth";
@@ -69,6 +77,7 @@ const ids: {
   completions: number[];
   documents: number[];
   visas: number[];
+  workflows: number[];
 } = {
   employees: [],
   policies: [],
@@ -84,6 +93,7 @@ const ids: {
   completions: [],
   documents: [],
   visas: [],
+  workflows: [],
 };
 
 function basicAuth(apiKey: string) {
@@ -393,6 +403,12 @@ describe("Security authz integration (Real Postgres)", () => {
         }
         for (const id of ids.requests) await db.delete(timeOffRequests).where(eq(timeOffRequests.id, id));
       }
+      if (ids.workflows.length) {
+        for (const id of ids.workflows) {
+          await db.delete(approvalWorkflowSteps).where(eq(approvalWorkflowSteps.workflowId, id));
+          await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, id));
+        }
+      }
       if (ids.balances.length) {
         for (const id of ids.balances) await db.delete(timeOffBalances).where(eq(timeOffBalances.id, id));
       }
@@ -404,6 +420,7 @@ describe("Security authz integration (Real Postgres)", () => {
       }
       await db.delete(rateLimits).where(eq(rateLimits.identifier, `sec-rate-${runId}`));
       if (ids.employees.length) {
+        await db.delete(auditLogs).where(inArray(auditLogs.employeeId, ids.employees));
         for (const id of ids.employees) await db.delete(employees).where(eq(employees.id, id));
       }
     } catch (error) {
@@ -424,6 +441,102 @@ describe("Security authz integration (Real Postgres)", () => {
   test("approval progress payload does not include SIN", async () => {
     const data = await getApprovalRequestForEntity("time_off_request", -1);
     expect(data).toBeNull();
+  });
+
+  test("self-service API leave requires manager then admin; legacy cannot skip", async () => {
+    const [workflow] = await db
+      .insert(approvalWorkflows)
+      .values({
+        name: `Sec Time Off ${runId}`,
+        type: "time_off",
+        enabled: true,
+        requiresManagerApproval: true,
+        requiresAdminApproval: true,
+      })
+      .returning();
+
+    await db.insert(approvalWorkflowSteps).values([
+      { workflowId: workflow.id, stepOrder: 1, approverRole: "manager", requiredCount: 1 },
+      { workflowId: workflow.id, stepOrder: 2, approverRole: "full_admin", requiredCount: 1 },
+    ]);
+    ids.workflows.push(workflow.id);
+
+    const previouslyEnabled = await db
+      .select({ id: approvalWorkflows.id })
+      .from(approvalWorkflows)
+      .where(
+        and(
+          eq(approvalWorkflows.type, "time_off"),
+          eq(approvalWorkflows.enabled, true)
+        )
+      );
+    const others = previouslyEnabled.filter((row) => row.id !== workflow.id).map((row) => row.id);
+    if (others.length) {
+      await db
+        .update(approvalWorkflows)
+        .set({ enabled: false })
+        .where(inArray(approvalWorkflows.id, others));
+    }
+
+    try {
+      const req = new NextRequest("http://localhost/api/bamboo/v1/time-off/create", {
+        method: "POST",
+        headers: {
+          authorization: basicAuth(employeeKey),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          employeeId: employee.id,
+          policyId: policy.id,
+          start: "2026-09-14",
+          end: "2026-09-15",
+        }),
+      });
+      const res = await createTimeOffApi(req);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const requestId = parseInt(body.id, 10);
+      ids.requests.push(requestId);
+
+      const approval = await getApprovalRequestForEntity("time_off_request", requestId);
+      expect(approval).not.toBeNull();
+      expect(approval!.steps.length).toBe(2);
+      expect(approval!.request.status).toBe("pending");
+
+      session({ email: admin.email, employeeId: admin.id, role: "admin" });
+      const early = await approveTimeOffRequest(requestId);
+      expect(early.success).toBe(false);
+      const [stillPending] = await db
+        .select({ status: timeOffRequests.status })
+        .from(timeOffRequests)
+        .where(eq(timeOffRequests.id, requestId));
+      expect(stillPending.status).toBe("pending");
+
+      session({ email: manager.email, employeeId: manager.id, role: "manager" });
+      const managerStep = await approveTimeOffRequest(requestId);
+      expect(managerStep.success).toBe(true);
+      const [afterManager] = await db
+        .select({ status: timeOffRequests.status })
+        .from(timeOffRequests)
+        .where(eq(timeOffRequests.id, requestId));
+      expect(afterManager.status).toBe("pending");
+
+      session({ email: admin.email, employeeId: admin.id, role: "admin" });
+      const adminStep = await approveTimeOffRequest(requestId);
+      expect(adminStep.success).toBe(true);
+      const [done] = await db
+        .select({ status: timeOffRequests.status })
+        .from(timeOffRequests)
+        .where(eq(timeOffRequests.id, requestId));
+      expect(done.status).toBe("approved");
+    } finally {
+      if (others.length) {
+        await db
+          .update(approvalWorkflows)
+          .set({ enabled: true })
+          .where(inArray(approvalWorkflows.id, others));
+      }
+    }
   });
 
   test("manager API key cannot forge approved leave for an unrelated employee", async () => {

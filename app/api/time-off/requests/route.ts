@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { employees, timeOffRequests, timeOffBalances, approvalWorkflows } from "@/lib/db/schema";
+import { employees, timeOffRequests, timeOffBalances } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { createApprovalRequest } from "@/lib/approvals";
 import { calendarDaysInclusive } from "@/lib/calendar-days";
+import { attachConfiguredTimeOffApproval } from "@/lib/time-off-workflow";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -67,25 +67,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find enabled workflow for time off
-    const [workflow] = await db
-      .select()
-      .from(approvalWorkflows)
-      .where(
-        and(
-          eq(approvalWorkflows.type, "time_off"),
-          eq(approvalWorkflows.enabled, true)
-        )
-      )
-      .limit(1);
-
-    // Create request
     const [timeOffRequest] = await db
       .insert(timeOffRequests)
       .values({
         employeeId: employee.id,
         policyId,
-        workflowId: workflow?.id || null,
         startDate,
         endDate,
         daysRequested: days.toString(),
@@ -96,20 +82,14 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    // Create approval request if workflow exists
-    if (workflow) {
-      try {
-        await createApprovalRequest({
-          workflowId: workflow.id,
-          entityType: "time_off_request",
-          entityId: timeOffRequest.id,
-          requesterId: employee.id,
-        });
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error("Failed to create approval request:", errorMessage);
-        // Continue - the time off request is created even if approval request fails
-      }
+    try {
+      await attachConfiguredTimeOffApproval({
+        timeOffRequestId: timeOffRequest.id,
+        requesterId: employee.id,
+      });
+    } catch (error) {
+      await db.delete(timeOffRequests).where(eq(timeOffRequests.id, timeOffRequest.id));
+      throw error;
     }
 
     return NextResponse.json(timeOffRequest);
