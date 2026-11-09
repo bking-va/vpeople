@@ -146,6 +146,19 @@ export function clampCandidateRating(value: unknown): number | null {
   return Math.min(5, Math.max(1, Math.round(n)));
 }
 
+/**
+ * App session.role from vPeople accessLevel only.
+ * Viewing roles stay "employee" so they cannot pass session.role admin write
+ * gates. Never derive this from IdP claims, roles[], or user input.
+ */
+export function sessionRoleFromAccessLevel(
+  accessLevel: AccessLevel
+): "employee" | "manager" | "admin" | "full_admin" {
+  if (accessLevel === "manager") return "manager";
+  if (accessLevel === "full_admin") return "full_admin";
+  return "employee";
+}
+
 export function isDevLoginEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.ENABLE_DEV_AUTH !== "true") return false;
   const isProd = env.NODE_ENV === "production" || env.VERCEL_ENV === "production";

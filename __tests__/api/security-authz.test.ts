@@ -13,6 +13,7 @@ import {
   isDevAdminImpersonationEnabled,
   isDevLoginEnabled,
   devLoginSessionRole,
+  sessionRoleFromAccessLevel,
   isViewingAccessLevel,
   redactVisaDocumentNumber,
 } from "@/lib/authz";
@@ -218,6 +219,9 @@ describe("cron and dev login fail-closed", () => {
     expect(devLoginSessionRole("global_view", devEnv)).toBe("employee");
     expect(devLoginSessionRole("regional_view", devEnv)).toBe("employee");
     expect(devLoginSessionRole("manager", devEnv)).toBe("manager");
+    expect(sessionRoleFromAccessLevel("full_admin")).toBe("full_admin");
+    expect(sessionRoleFromAccessLevel("global_view")).toBe("employee");
+    expect(sessionRoleFromAccessLevel("partner")).toBe("employee");
     expect(
       devLoginSessionRole("full_admin", {
         ...devEnv,

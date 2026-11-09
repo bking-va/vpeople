@@ -24,8 +24,10 @@ export default async function AuthErrorPage({
           </CardTitle>
           <CardDescription>
             {error === "AccessDenied"
-              ? "You must use a @vendasta.com email address to sign in."
-              : "There was a problem signing you in. Please try again."}
+              ? "This Vendasta identity is not authorized for vPeople."
+              : error === "Configuration"
+                ? "Vendasta SSO is not configured in this environment."
+                : "There was a problem signing you in. Please try again."}
           </CardDescription>
         </CardHeader>
         <CardContent>

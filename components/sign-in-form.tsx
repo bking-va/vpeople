@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
+import { startVendastaSignIn } from "@/app/actions/vendasta-sso";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,7 +12,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export function SignInForm({ enableDevAuth }: { enableDevAuth: boolean }) {
+export function SignInForm({
+  enableDevAuth,
+  vendastaConfigured,
+}: {
+  enableDevAuth: boolean;
+  vendastaConfigured: boolean;
+}) {
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -29,16 +36,6 @@ export function SignInForm({ enableDevAuth }: { enableDevAuth: boolean }) {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    try {
-      await signIn("google", { callbackUrl: "/people" });
-    } catch (error) {
-      console.error("Sign in error:", error);
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <Card className="w-full max-w-md">
@@ -49,14 +46,17 @@ export function SignInForm({ enableDevAuth }: { enableDevAuth: boolean }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button
-            type="button"
-            className="w-full"
-            onClick={handleGoogleLogin}
-            disabled={isLoading}
-          >
-            Sign in with Google
-          </Button>
+          {vendastaConfigured ? (
+            <form action={startVendastaSignIn}>
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                Sign in with Vendasta
+              </Button>
+            </form>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Vendasta SSO is not configured in this environment.
+            </p>
+          )}
 
           {enableDevAuth && (
             <div className="space-y-2">
