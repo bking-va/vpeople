@@ -122,7 +122,7 @@ export default async function StandardReportsPage({
                 {row.firstName} {row.lastName} · {row.policy}
               </span>
               <span>
-                {row.daysRequested} days ({row.startDate})
+                {row.daysUsed} days ({row.startDate})
               </span>
             </div>
           ))}
@@ -181,7 +181,7 @@ export default async function StandardReportsPage({
           <CardContent className="space-y-2">
             {data.byGender.map((row) => (
               <div key={row.gender} className="flex justify-between text-sm">
-                <span className="capitalize">{row.gender}</span>
+                <span>{row.gender}</span>
                 <span>{row.count}</span>
               </div>
             ))}

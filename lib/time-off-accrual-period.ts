@@ -11,7 +11,10 @@ export function accrualPeriodKey(period: string | null | undefined, asOf: Date):
     return `${year}`;
   }
   if (period === "biweekly") {
-    return `${year}-W${isoWeek(asOf).toString().padStart(2, "0")}`;
+    // Fortnight key (ISO weeks 1-2 → F01) so a daily cron does not credit
+    // the same biweekly rate once per ISO week.
+    const fortnight = Math.ceil(isoWeek(asOf) / 2);
+    return `${year}-F${fortnight.toString().padStart(2, "0")}`;
   }
   return `${year}-${month}`;
 }

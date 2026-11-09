@@ -708,7 +708,11 @@ export async function getApprovalRequestForEntity(
   const steps = await db
     .select({
       step: approvalRequestSteps,
-      approver: employees,
+      approver: {
+        id: employees.id,
+        firstName: employees.firstName,
+        lastName: employees.lastName,
+      },
     })
     .from(approvalRequestSteps)
     .leftJoin(

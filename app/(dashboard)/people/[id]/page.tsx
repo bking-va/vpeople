@@ -31,6 +31,11 @@ import { formatDate, formatCurrency, calculateTenure } from "@/lib/utils";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getUserPermissions } from "@/lib/permissions";
+import {
+  canViewImmigrationNumbers,
+  canViewPrivateDocuments,
+  redactVisaDocumentNumber,
+} from "@/lib/authz";
 import Link from "next/link";
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
@@ -212,11 +217,18 @@ export default async function EmployeeProfilePage({
     .where(eq(employeeTasks.employeeId, employeeId))
     .orderBy(employeeTasks.createdAt);
 
-  const employeeDocs = await db
-    .select()
-    .from(documents)
-    .where(eq(documents.employeeId, employeeId))
-    .orderBy(desc(documents.createdAt));
+  const canViewDocs = canViewPrivateDocuments({
+    isViewingSelf,
+    canManageUsers: permissions.canManageUsers,
+    accessLevel: session.user.role === "full_admin" ? "full_admin" : undefined,
+  });
+  const employeeDocs = canViewDocs
+    ? await db
+        .select()
+        .from(documents)
+        .where(eq(documents.employeeId, employeeId))
+        .orderBy(desc(documents.createdAt))
+    : [];
 
   const educationRows = await db
     .select()
@@ -224,11 +236,17 @@ export default async function EmployeeProfilePage({
     .where(eq(employeeEducation.employeeId, employeeId))
     .orderBy(desc(employeeEducation.endDate));
 
-  const visaRows = await db
-    .select()
-    .from(employeeVisas)
-    .where(eq(employeeVisas.employeeId, employeeId))
-    .orderBy(desc(employeeVisas.expiryDate));
+  const canSeeVisaNumbers = canViewImmigrationNumbers({
+    isViewingSelf,
+    canViewSensitivePersonalInfo,
+  });
+  const visaRows = (
+    await db
+      .select()
+      .from(employeeVisas)
+      .where(eq(employeeVisas.employeeId, employeeId))
+      .orderBy(desc(employeeVisas.expiryDate))
+  ).map((row) => redactVisaDocumentNumber(row, canSeeVisaNumbers));
 
   const employeeTeamsList = await db
     .select({ team: teams })
@@ -404,7 +422,9 @@ export default async function EmployeeProfilePage({
                   <div key={row.id} className="border rounded-lg p-3 text-sm grid md:grid-cols-2 gap-2">
                     <InfoField label="Type" value={row.visaType} />
                     <InfoField label="Country" value={row.country} />
-                    <InfoField label="Document #" value={row.documentNumber} />
+                    {canSeeVisaNumbers && (
+                      <InfoField label="Document #" value={row.documentNumber} />
+                    )}
                     <InfoField label="Status" value={row.status} />
                     <InfoField label="Issued" value={formatDate(row.issuedDate)} />
                     <InfoField label="Expires" value={formatDate(row.expiryDate)} />

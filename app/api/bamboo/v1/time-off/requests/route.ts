@@ -3,10 +3,9 @@ import { db } from "@/lib/db";
 import { timeOffRequests, employees, timeOffPolicies } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
+import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
-  // BambooHR-compatible time-off requests endpoint
-  
   const auth = await authenticateApiKey(request);
   if (!auth) {
     return NextResponse.json(
@@ -14,13 +13,25 @@ export async function GET(request: NextRequest) {
       { status: 401 }
     );
   }
-  
+
   try {
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const status = searchParams.get("status");
 
-    let query = db
+    const allowedIds = await allowedTimeOffEmployeeIds(auth);
+
+    if (employeeId) {
+      const requestedId = parseInt(employeeId, 10);
+      if (Number.isNaN(requestedId) || (allowedIds !== "all" && !allowedIds.has(requestedId))) {
+        return NextResponse.json(
+          { error: "Forbidden", message: "Cannot view this employee's time-off history" },
+          { status: 403 }
+        );
+      }
+    }
+
+    const requests = await db
       .select({
         id: timeOffRequests.id,
         employeeId: timeOffRequests.employeeId,
@@ -43,12 +54,12 @@ export async function GET(request: NextRequest) {
       .leftJoin(employees, eq(timeOffRequests.employeeId, employees.id))
       .leftJoin(timeOffPolicies, eq(timeOffRequests.policyId, timeOffPolicies.id));
 
-    const requests = await query;
-
-    // Filter in memory (for simplicity)
     let filtered = requests;
+    if (allowedIds !== "all") {
+      filtered = filtered.filter((r) => allowedIds.has(r.employeeId));
+    }
     if (employeeId) {
-      filtered = filtered.filter((r) => r.employeeId === parseInt(employeeId));
+      filtered = filtered.filter((r) => r.employeeId === parseInt(employeeId, 10));
     }
     if (status) {
       filtered = filtered.filter((r) => r.status === status);
@@ -80,4 +91,28 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function allowedTimeOffEmployeeIds(auth: {
+  employeeId: number;
+  accessLevel: string;
+  permissions: { canManageUsers: boolean };
+}): Promise<Set<number> | "all"> {
+  if (
+    isFullAdmin(auth.accessLevel) ||
+    auth.permissions.canManageUsers ||
+    isViewingAccessLevel(auth.accessLevel)
+  ) {
+    return "all";
+  }
+
+  const allowed = new Set<number>([auth.employeeId]);
+  if (isManagerAccessLevel(auth.accessLevel)) {
+    const reports = await db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(eq(employees.managerId, auth.employeeId));
+    for (const report of reports) allowed.add(report.id);
+  }
+  return allowed;
 }

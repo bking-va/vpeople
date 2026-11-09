@@ -28,9 +28,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.user.role !== "full_admin" && session.user.role !== "admin") {
+    if (session.user.role !== "full_admin") {
       return NextResponse.json(
-        { error: "Only admins can create job titles" },
+        { error: "Only full admins can create job titles" },
         { status: 403 }
       );
     }

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { rateLimits } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 export interface RateLimitConfig {
   maxAttempts: number;
@@ -14,7 +14,9 @@ export interface RateLimitResult {
 }
 
 /**
- * DB-backed rate limiter for serverless environments
+ * Atomic DB-backed rate limiter. Uses a unique (identifier, endpoint) key and
+ * a single INSERT ... ON CONFLICT increment so concurrent requests cannot
+ * both observe attempts < max.
  */
 export async function checkRateLimit(
   identifier: string,
@@ -22,93 +24,57 @@ export async function checkRateLimit(
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
   const now = new Date();
-  const windowStart = new Date(now.getTime() - config.windowMs);
+  const windowStartCutoff = new Date(now.getTime() - config.windowMs);
 
   try {
-    // Find or create rate limit record
-    const [existing] = await db
-      .select()
-      .from(rateLimits)
-      .where(
-        and(
-          eq(rateLimits.identifier, identifier),
-          eq(rateLimits.endpoint, endpoint)
-        )
-      )
-      .limit(1);
+    const rows = await db.execute<{ attempts: number; window_start: Date }>(sql`
+      INSERT INTO rate_limits (identifier, endpoint, attempts, window_start, created_at, updated_at)
+      VALUES (${identifier}, ${endpoint}, 1, ${now}, ${now}, ${now})
+      ON CONFLICT (identifier, endpoint)
+      DO UPDATE SET
+        attempts = CASE
+          WHEN rate_limits.window_start < ${windowStartCutoff} THEN 1
+          ELSE rate_limits.attempts + 1
+        END,
+        window_start = CASE
+          WHEN rate_limits.window_start < ${windowStartCutoff} THEN ${now}
+          ELSE rate_limits.window_start
+        END,
+        updated_at = ${now}
+      RETURNING attempts, window_start
+    `);
 
-    if (!existing) {
-      // First request - create record
-      await db.insert(rateLimits).values({
-        identifier,
-        endpoint,
-        attempts: 1,
-        windowStart: now,
-      });
+    const row = Array.isArray(rows)
+      ? rows[0]
+      : (rows as { rows?: Array<{ attempts: number; window_start: Date }> }).rows?.[0];
 
-      return {
-        success: true,
-        remaining: config.maxAttempts - 1,
-        reset: new Date(now.getTime() + config.windowMs),
-      };
+    if (!row) {
+      return { success: false, remaining: 0, reset: new Date(now.getTime() + config.windowMs) };
     }
 
-    // Check if window has expired
-    if (existing.windowStart < windowStart) {
-      // Reset window
-      await db
-        .update(rateLimits)
-        .set({
-          attempts: 1,
-          windowStart: now,
-          updatedAt: now,
-        })
-        .where(eq(rateLimits.id, existing.id));
+    const attempts = Number(row.attempts);
+    const windowStart = new Date(row.window_start);
+    const reset = new Date(windowStart.getTime() + config.windowMs);
 
-      return {
-        success: true,
-        remaining: config.maxAttempts - 1,
-        reset: new Date(now.getTime() + config.windowMs),
-      };
+    if (attempts > config.maxAttempts) {
+      return { success: false, remaining: 0, reset };
     }
-
-    // Within window - check limit
-    if (existing.attempts >= config.maxAttempts) {
-      return {
-        success: false,
-        remaining: 0,
-        reset: new Date(existing.windowStart.getTime() + config.windowMs),
-      };
-    }
-
-    // Increment attempts
-    await db
-      .update(rateLimits)
-      .set({
-        attempts: sql`${rateLimits.attempts} + 1`,
-        updatedAt: now,
-      })
-      .where(eq(rateLimits.id, existing.id));
 
     return {
       success: true,
-      remaining: config.maxAttempts - (existing.attempts + 1),
-      reset: new Date(existing.windowStart.getTime() + config.windowMs),
+      remaining: Math.max(0, config.maxAttempts - attempts),
+      reset,
     };
   } catch (error) {
     console.error("Rate limit check error:", error);
-    // Fail open in case of DB errors
     return {
-      success: true,
-      remaining: config.maxAttempts,
+      success: false,
+      remaining: 0,
       reset: new Date(now.getTime() + config.windowMs),
     };
   }
 }
 
-/**
- * Clean up old rate limit records
- */
 export async function cleanupRateLimits(olderThanMs: number = 86400000) {
   const cutoff = new Date(Date.now() - olderThanMs);
   await db

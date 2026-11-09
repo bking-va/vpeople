@@ -9,6 +9,8 @@ import { documents, employees } from "@/lib/db/schema";
 import { eq, and, count, desc, sql } from "drizzle-orm";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
+import { getUserPermissions } from "@/lib/permissions";
+import { canViewPrivateDocuments } from "@/lib/authz";
 
 export default async function FilesPage() {
   const session = await auth();
@@ -17,7 +19,7 @@ export default async function FilesPage() {
   }
 
   const [employee] = await db
-    .select({ id: employees.id })
+    .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)
     .where(eq(employees.email, session.user.email))
     .limit(1);
@@ -26,17 +28,28 @@ export default async function FilesPage() {
     redirect("/auth/signin");
   }
 
-  const isAdmin = session.user.role === "admin" || session.user.role === "full_admin";
+  const permissions = await getUserPermissions(session.user.email);
+  const canViewAllDocs = canViewPrivateDocuments({
+    isViewingSelf: false,
+    canManageUsers: permissions.canManageUsers,
+    accessLevel: employee.accessLevel,
+  });
+  const isAdmin = canViewAllDocs;
+  const scopedEmployee = canViewAllDocs ? undefined : eq(documents.employeeId, employee.id);
 
-  // Get document counts
   const [totalDocsResult] = await db
     .select({ count: count() })
-    .from(documents);
+    .from(documents)
+    .where(scopedEmployee ?? sql`true`);
 
   const [pendingSignaturesResult] = await db
     .select({ count: count() })
     .from(documents)
-    .where(eq(documents.status, "pending_signature"));
+    .where(
+      canViewAllDocs
+        ? eq(documents.status, "pending_signature")
+        : and(eq(documents.status, "pending_signature"), eq(documents.employeeId, employee.id))
+    );
 
   const [myDocsResult] = await db
     .select({ count: count() })
@@ -53,10 +66,10 @@ export default async function FilesPage() {
       employeeId: documents.employeeId,
     })
     .from(documents)
+    .where(scopedEmployee ?? sql`true`)
     .orderBy(desc(documents.createdAt))
     .limit(10);
 
-  // Get pending signature documents for current user or managed employees
   const pendingSignatureDocs = await db
     .select({
       id: documents.id,
@@ -67,7 +80,7 @@ export default async function FilesPage() {
     })
     .from(documents)
     .where(
-      isAdmin 
+      canViewAllDocs
         ? eq(documents.status, "pending_signature")
         : and(
             eq(documents.status, "pending_signature"),
@@ -77,13 +90,13 @@ export default async function FilesPage() {
     .orderBy(desc(documents.createdAt))
     .limit(10);
 
-  // Get category counts
   const categoryCounts = await db
     .select({
       category: documents.category,
       count: sql<number>`count(*)::int`,
     })
     .from(documents)
+    .where(scopedEmployee ?? sql`true`)
     .groupBy(documents.category);
 
   const categoryMap = new Map(categoryCounts.map(c => [c.category, c.count]));

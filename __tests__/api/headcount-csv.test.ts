@@ -16,11 +16,22 @@ describe("headcountToCsv", () => {
       ],
     });
 
-    expect(csv).toContain("Category,Name,Count");
-    expect(csv).toContain('Department,"Engineering",2');
-    expect(csv).toContain('Department,"No Department",1');
-    expect(csv).toContain('Location,"Saskatoon HQ",3');
-    expect(csv).toContain('Status,"full_time",3');
-    expect(csv).toContain("Total,Active,3");
+    expect(csv).toContain('"Category","Name","Count"');
+    expect(csv).toContain('"Department","Engineering","2"');
+    expect(csv).toContain('"Department","No Department","1"');
+    expect(csv).toContain('"Location","Saskatoon HQ","3"');
+    expect(csv).toContain('"Status","full_time","3"');
+    expect(csv).toContain('"Total","Active","3"');
+  });
+
+  test("neutralizes formula prefixes in department names", () => {
+    const csv = headcountToCsv({
+      totalActive: 1,
+      terminated: 0,
+      byDepartment: [{ departmentId: 1, department: "=CMD()", count: 1 }],
+      byLocation: [],
+      byStatus: [],
+    });
+    expect(csv).toContain('"\'=CMD()"');
   });
 });

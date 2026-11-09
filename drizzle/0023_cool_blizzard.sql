@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS "rate_limits_identifier_endpoint_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "rate_limits_identifier_endpoint_uidx" ON "rate_limits" USING btree ("identifier","endpoint");

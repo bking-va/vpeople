@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { candidateNotes, employees } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { candidateNotes } from "@/lib/db/schema";
+import { hiringAccessForCandidate } from "@/lib/hiring-access";
 
 export async function POST(
   request: NextRequest,
@@ -18,18 +18,17 @@ export async function POST(
     const { id: idStr } = await params;
     const candidateId = parseInt(idStr);
 
-    const [employee] = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(eq(employees.email, session.user.email!))
-      .limit(1);
-
-    if (!employee) {
+    const access = await hiringAccessForCandidate(session.user.email!, candidateId);
+    if (access.notFound) {
+      return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
+    }
+    if (!access.allowed || !access.employee) {
       return NextResponse.json(
-        { error: "Employee record not found" },
-        { status: 404 }
+        { error: "Forbidden", message: "Hiring team or admin access required" },
+        { status: 403 }
       );
     }
+    const employee = access.employee;
 
     const [note] = await db
       .insert(candidateNotes)

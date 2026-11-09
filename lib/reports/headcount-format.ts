@@ -1,3 +1,5 @@
+import { csvRow } from "@/lib/csv";
+
 export type HeadcountReport = {
   totalActive: number;
   terminated: number;
@@ -7,20 +9,16 @@ export type HeadcountReport = {
 };
 
 export function headcountToCsv(report: HeadcountReport): string {
-  const lines = ["Category,Name,Count"];
+  const lines = [csvRow(["Category", "Name", "Count"])];
   for (const row of report.byDepartment) {
-    lines.push(
-      `Department,"${(row.department || "No Department").replace(/"/g, '""')}",${row.count}`
-    );
+    lines.push(csvRow(["Department", row.department || "No Department", row.count]));
   }
   for (const row of report.byLocation) {
-    lines.push(
-      `Location,"${(row.location || "No Location").replace(/"/g, '""')}",${row.count}`
-    );
+    lines.push(csvRow(["Location", row.location || "No Location", row.count]));
   }
   for (const row of report.byStatus) {
-    lines.push(`Status,"${row.employmentStatus}",${row.count}`);
+    lines.push(csvRow(["Status", row.employmentStatus, row.count]));
   }
-  lines.push(`Total,Active,${report.totalActive}`);
+  lines.push(csvRow(["Total", "Active", report.totalActive]));
   return lines.join("\n") + "\n";
 }

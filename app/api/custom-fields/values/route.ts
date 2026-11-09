@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { customFieldValues, customFields, employees } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserPermissions } from "@/lib/permissions";
+import { canViewCustomFieldValue } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -49,24 +50,15 @@ export async function GET(request: NextRequest) {
       .leftJoin(customFields, eq(customFieldValues.customFieldId, customFields.id))
       .where(eq(customFieldValues.entityId, targetEmployeeId));
 
-    // Filter values based on visibility and user permissions
     const visibleValues = valuesWithFields.filter(({ field }) => {
       if (!field) return false;
-
-      // Default to "everyone" if visibility is missing (backwards compatibility)
-      const visibility = field.visibility || "everyone";
-
-      switch (visibility) {
-        case "everyone":
-          return true;
-        case "manager_hr":
-          return isViewingSelf || isManager || isHROrAdmin;
-        case "hr_only":
-          return isViewingSelf || isHROrAdmin;
-        default:
-          // Unknown visibility, default to everyone for safety
-          return true;
-      }
+      return canViewCustomFieldValue({
+        field,
+        isViewingSelf,
+        isManager,
+        isHROrAdmin,
+        canViewCompensation: permissions.canViewCompensation,
+      });
     });
 
     // Return only the value objects
@@ -96,11 +88,24 @@ export async function POST(request: NextRequest) {
     // Check permissions
     const permissions = await getUserPermissions(session.user.email);
     
-    // User can edit their own profile or must have admin access
     const canEdit =
       entityId === session.user.employeeId || permissions.canManageUsers;
 
     if (!canEdit) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 }
+      );
+    }
+
+    const [field] = await db
+      .select()
+      .from(customFields)
+      .where(eq(customFields.id, customFieldId))
+      .limit(1);
+
+    const section = (field?.section || field?.entityType || "").toLowerCase();
+    if (section === "compensation" && !permissions.canEditCompensation) {
       return NextResponse.json(
         { error: "Insufficient permissions" },
         { status: 403 }

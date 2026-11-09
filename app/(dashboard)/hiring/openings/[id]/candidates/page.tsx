@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Star, Mail, Phone, FileText, Plus } from "lucide-react";
 import Link from "next/link";
+import { clampCandidateRating } from "@/lib/authz";
 
 export default async function CandidatesListPage({
   params,
@@ -99,9 +100,9 @@ export default async function CandidatesListPage({
                       <Badge variant={stageBadgeVariant(candidate.stage)}>
                         {stageLabels[candidate.stage as keyof typeof stageLabels]}
                       </Badge>
-                      {candidate.rating && (
+                      {clampCandidateRating(candidate.rating) && (
                         <div className="flex items-center gap-1">
-                          {Array.from({ length: candidate.rating }).map((_, i) => (
+                          {Array.from({ length: clampCandidateRating(candidate.rating) as number }).map((_, i) => (
                             <Star
                               key={i}
                               className="h-4 w-4 fill-yellow-400 text-yellow-400"

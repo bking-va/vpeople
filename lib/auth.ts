@@ -5,6 +5,7 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "./db";
 import { users, employees } from "./db/schema";
 import { eq } from "drizzle-orm";
+import { isDevLoginEnabled } from "./authz";
 
 declare module "next-auth" {
   interface Session {
@@ -24,7 +25,7 @@ declare module "next-auth" {
   }
 }
 
-const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
+const ENABLE_DEV_AUTH = isDevLoginEnabled();
 
 const authConfig = {
   trustHost: true,

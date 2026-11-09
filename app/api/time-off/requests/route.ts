@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { employees, timeOffRequests, timeOffBalances, approvalWorkflows } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { createApprovalRequest } from "@/lib/approvals";
+import { calendarDaysInclusive } from "@/lib/calendar-days";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -48,11 +49,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate days
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    let days: number;
+    try {
+      days = calendarDaysInclusive(String(startDate), String(endDate));
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid start or end date" },
+        { status: 400 }
+      );
+    }
 
     const currentBalance = parseFloat(balance.balance || "0");
     if (days > currentBalance) {

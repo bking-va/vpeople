@@ -24,6 +24,8 @@ import Link from "next/link";
 import { CandidateStageSelector } from "@/components/candidate-stage-selector";
 import { CandidateRating } from "@/components/candidate-rating";
 import { CandidateNoteForm } from "@/components/candidate-note-form";
+import { hiringAccessForCandidate } from "@/lib/hiring-access";
+import { clampCandidateRating } from "@/lib/authz";
 
 export default async function CandidateDetailPage({
   params,
@@ -31,7 +33,7 @@ export default async function CandidateDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
     redirect("/auth/signin");
   }
 
@@ -76,10 +78,20 @@ export default async function CandidateDetailPage({
     .where(eq(candidateNotes.candidateId, candidateId))
     .orderBy(desc(candidateNotes.createdAt));
 
-  const [offer] = await db
+  const hiringAccess = await hiringAccessForCandidate(
+    session.user.email,
+    candidateId
+  );
+
+  const [offerRow] = await db
     .select()
     .from(offerLetters)
     .where(eq(offerLetters.candidateId, candidateId));
+  const offer = offerRow
+    ? hiringAccess.canViewSalary
+      ? offerRow
+      : { ...offerRow, salary: null }
+    : null;
 
   const stageLabels = {
     new: "New",
@@ -108,7 +120,7 @@ export default async function CandidateDetailPage({
           </p>
         </div>
         <div className="flex gap-2">
-          {(session.user.role === "admin" || session.user.role === "full_admin") && (
+          {hiringAccess.allowed && (
             <Button asChild>
               <Link href={`/hiring/candidates/${candidate.id}/offer`}>
                 {offer ? "Edit Offer" : "Create Offer"}
@@ -196,10 +208,14 @@ export default async function CandidateDetailPage({
               <CardTitle>Stage</CardTitle>
             </CardHeader>
             <CardContent>
-              <CandidateStageSelector
-                candidateId={candidate.id}
-                currentStage={candidate.stage}
-              />
+              {hiringAccess.allowed ? (
+                <CandidateStageSelector
+                  candidateId={candidate.id}
+                  currentStage={candidate.stage}
+                />
+              ) : (
+                <p className="capitalize">{candidate.stage?.replace("_", " ")}</p>
+              )}
             </CardContent>
           </Card>
 
@@ -208,10 +224,14 @@ export default async function CandidateDetailPage({
               <CardTitle>Rating</CardTitle>
             </CardHeader>
             <CardContent>
-              <CandidateRating
-                candidateId={candidate.id}
-                currentRating={candidate.rating}
-              />
+              {hiringAccess.allowed ? (
+                <CandidateRating
+                  candidateId={candidate.id}
+                  currentRating={clampCandidateRating(candidate.rating)}
+                />
+              ) : (
+                <p>{clampCandidateRating(candidate.rating) ?? "Unrated"}</p>
+              )}
             </CardContent>
           </Card>
 
@@ -255,7 +275,7 @@ export default async function CandidateDetailPage({
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <CandidateNoteForm candidateId={candidate.id} />
+          {hiringAccess.allowed && <CandidateNoteForm candidateId={candidate.id} />}
 
           <div className="space-y-4">
             {notes.length > 0 ? (

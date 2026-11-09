@@ -4,7 +4,7 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Public routes that don't require authentication
-  const publicRoutes = ["/auth/signin", "/auth/error"];
+  const publicRoutes = ["/auth/signin", "/auth/error", "/careers"];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
   const isAuthApiRoute = pathname.startsWith("/api/auth/");
   const isApiRoute = pathname.startsWith("/api/");

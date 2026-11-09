@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, departments, locations, jobLevels } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
+import { csvRow } from "@/lib/csv";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
           ? `${emp.managerFirstName} ${emp.managerLastName}`
           : "";
 
-      return [
+      return csvRow([
         emp.employeeNumber || "",
         emp.firstName,
         emp.lastName,
@@ -69,13 +70,10 @@ export async function GET(request: NextRequest) {
         emp.level || "",
         emp.hireDate || "",
         managerName,
-      ].map((field) => `"${String(field).replace(/"/g, '""')}"`);
+      ]);
     });
 
-    const csv = [
-      headers.map((h) => `"${h}"`).join(","),
-      ...rows.map((r) => r.join(",")),
-    ].join("\n");
+    const csv = [csvRow(headers), ...rows].join("\n");
 
     return new NextResponse(csv, {
       headers: {

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { timeOffRequests, timeOffBalances } from "@/lib/db/schema";
+import { employees, timeOffRequests, timeOffBalances } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
+import { calendarDaysInclusive } from "@/lib/calendar-days";
+import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
 
 export async function POST(request: NextRequest) {
   const auth = await authenticateApiKey(request);
@@ -13,10 +15,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check permissions
-  if (!auth.permissions.canApproveTimeOff) {
+  if (isViewingAccessLevel(auth.accessLevel)) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Insufficient permissions to create time-off requests" },
+      { error: "Forbidden", message: "Viewing roles cannot create time-off requests" },
       { status: 403 }
     );
   }
@@ -24,7 +25,6 @@ export async function POST(request: NextRequest) {
   try {
     const data = await request.json();
 
-    // Required fields
     if (!data.employeeId || !data.policyId || !data.start || !data.end) {
       return NextResponse.json(
         { error: "Missing required fields: employeeId, policyId, start, end" },
@@ -32,19 +32,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate days
-    const start = new Date(data.start);
-    const end = new Date(data.end);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    const targetEmployeeId = parseInt(data.employeeId, 10);
+    if (Number.isNaN(targetEmployeeId)) {
+      return NextResponse.json({ error: "Invalid employeeId" }, { status: 400 });
+    }
 
-    // Check balance
+    const canCreateForTarget = await canCreateTimeOffFor(auth, targetEmployeeId);
+    if (!canCreateForTarget) {
+      return NextResponse.json(
+        { error: "Forbidden", message: "Cannot create time-off for this employee" },
+        { status: 403 }
+      );
+    }
+
+    let days: number;
+    try {
+      days = calendarDaysInclusive(String(data.start), String(data.end));
+    } catch {
+      return NextResponse.json({ error: "Invalid start or end date" }, { status: 400 });
+    }
+
     const [balance] = await db
       .select()
       .from(timeOffBalances)
       .where(
         and(
-          eq(timeOffBalances.employeeId, data.employeeId),
+          eq(timeOffBalances.employeeId, targetEmployeeId),
           eq(timeOffBalances.policyId, data.policyId)
         )
       )
@@ -65,19 +78,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create request
     const [timeOffRequest] = await db
       .insert(timeOffRequests)
       .values({
-        employeeId: data.employeeId,
+        employeeId: targetEmployeeId,
         policyId: data.policyId,
         startDate: data.start,
         endDate: data.end,
         daysRequested: days.toString(),
         notes: data.notes || null,
-        status: data.status || "pending",
-        reviewedBy: data.reviewedBy || null,
-        reviewedAt: data.reviewedAt ? new Date(data.reviewedAt) : null,
+        status: "pending",
+        reviewedBy: null,
+        reviewedAt: null,
       })
       .returning();
 
@@ -97,4 +109,25 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function canCreateTimeOffFor(
+  auth: {
+    employeeId: number;
+    accessLevel: string;
+    permissions: { canManageUsers: boolean };
+  },
+  targetEmployeeId: number
+) {
+  if (targetEmployeeId === auth.employeeId) return true;
+  if (isFullAdmin(auth.accessLevel) || auth.permissions.canManageUsers) return true;
+  if (!isManagerAccessLevel(auth.accessLevel)) return false;
+
+  const [target] = await db
+    .select({ managerId: employees.managerId })
+    .from(employees)
+    .where(eq(employees.id, targetEmployeeId))
+    .limit(1);
+
+  return target?.managerId === auth.employeeId;
 }
