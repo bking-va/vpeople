@@ -13,6 +13,16 @@ import {
   timeOffAccrualRuns,
   timeOffBalanceAdjustments,
 } from "@/lib/db/schema";
+
+jest.mock("@/lib/auth", () => ({
+  auth: jest.fn(),
+}));
+jest.mock("@/lib/permissions", () => ({
+  getUserPermissions: jest.fn(),
+}));
+
+import { auth } from "@/lib/auth";
+import { getUserPermissions } from "@/lib/permissions";
 import { runTimeOffCarryover } from "@/lib/time-off-carryover";
 import { runTimeOffAccruals } from "@/lib/time-off-accrual";
 import { recordEmploymentStatusChange } from "@/lib/employment-status";
@@ -24,6 +34,20 @@ import {
   getTimeOffScheduleReport,
   getEmploymentStatusHistoryReport,
 } from "@/lib/reports/standard";
+
+const mockedAuth = auth as jest.MockedFunction<typeof auth>;
+const mockedPermissions = getUserPermissions as jest.MockedFunction<typeof getUserPermissions>;
+const cronSecret = process.env.CRON_SECRET || "parity-cron-secret";
+process.env.CRON_SECRET = cronSecret;
+const cronAuth = { authorization: `Bearer ${cronSecret}` };
+
+function grantCompensation(allowed: boolean) {
+  mockedAuth.mockResolvedValue({
+    user: { email: "parity.hr@test.com", role: "admin" },
+    expires: new Date(Date.now() + 3600_000).toISOString(),
+  } as any);
+  mockedPermissions.mockResolvedValue({ canViewCompensation: allowed } as any);
+}
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool, {
@@ -116,7 +140,7 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
     ids.balances.push(balance.id);
 
     const asOf = new Date("2029-01-02T12:00:00Z");
-    const first = await runTimeOffCarryover(asOf);
+    const first = await runTimeOffCarryover(asOf, cronAuth);
     expect(first.balancesProcessed).toBeGreaterThanOrEqual(1);
 
     const [afterCarry] = await db
@@ -125,7 +149,7 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
       .where(eq(timeOffBalances.id, balance.id));
     expect(parseFloat(afterCarry.balance)).toBeCloseTo(5, 2);
 
-    const second = await runTimeOffCarryover(asOf);
+    const second = await runTimeOffCarryover(asOf, cronAuth);
     expect(second.skippedAlreadyApplied).toBeGreaterThanOrEqual(1);
 
     const [still] = await db
@@ -181,7 +205,7 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
       .returning();
     ids.balances.push(balance.id);
 
-    await runTimeOffCarryover(new Date("2029-01-02T12:00:00Z"));
+    await runTimeOffCarryover(new Date("2029-01-02T12:00:00Z"), cronAuth);
     const [after] = await db
       .select()
       .from(timeOffBalances)
@@ -228,7 +252,7 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
       createdAt: new Date("2029-01-01T00:05:00Z"),
     });
 
-    await runTimeOffCarryover(new Date("2029-01-15T12:00:00Z"));
+    await runTimeOffCarryover(new Date("2029-01-15T12:00:00Z"), cronAuth);
     const [after] = await db
       .select()
       .from(timeOffBalances)
@@ -268,8 +292,47 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
       .returning();
     ids.balances.push(balance.id);
 
-    const result = await runTimeOffCarryover(new Date("2029-11-15T12:00:00Z"));
+    const result = await runTimeOffCarryover(new Date("2029-11-15T12:00:00Z"), cronAuth);
     expect(result.balancesProcessed).toBe(0);
+    const [after] = await db
+      .select()
+      .from(timeOffBalances)
+      .where(eq(timeOffBalances.id, balance.id));
+    expect(parseFloat(after.balance)).toBeCloseTo(20, 2);
+  });
+
+  test("carryover without cron authorization does not forfeit leave", async () => {
+    const [policy] = await db
+      .insert(timeOffPolicies)
+      .values({
+        name: `Parity Unauth ${runId}`,
+        policyType: "vacation",
+        accrualRate: "10",
+        accrualPeriod: "annual",
+        maxCarryover: "5",
+      })
+      .returning();
+    ids.policies.push(policy.id);
+    const [emp] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `PAR_NOAUTH_${runId}`,
+        firstName: "No",
+        lastName: "Auth",
+        email: `no.auth.${runId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+      })
+      .returning();
+    ids.employees.push(emp.id);
+    const [balance] = await db
+      .insert(timeOffBalances)
+      .values({ employeeId: emp.id, policyId: policy.id, balance: "20.00" })
+      .returning();
+    ids.balances.push(balance.id);
+
+    const result = await runTimeOffCarryover(new Date("2029-01-02T12:00:00Z"));
+    expect(result.skipped).toBe("unauthorized");
     const [after] = await db
       .select()
       .from(timeOffBalances)
@@ -355,11 +418,13 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
       .returning();
     ids.compensation.push(c1.id, c2.id, future.id);
 
-    const denied = await getPayByTitleReport({ canViewCompensation: false });
+    grantCompensation(false);
+    const denied = await getPayByTitleReport();
     expect(denied).toEqual([]);
-    expect(await getSalaryHistoryReport({ canViewCompensation: false })).toEqual([]);
+    expect(await getSalaryHistoryReport()).toEqual([]);
 
-    const byTitle = await getPayByTitleReport({ canViewCompensation: true });
+    grantCompensation(true);
+    const byTitle = await getPayByTitleReport();
     const titleRow = byTitle.find((row) => row.group.startsWith(title));
     expect(titleRow).toBeDefined();
     expect(titleRow!.count).toBe(2);
@@ -369,13 +434,13 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
     expect(titleRow!.currency).toBe("CAD");
     expect(titleRow!.payType).toBe("salary");
 
-    const byDept = await getPayByDepartmentReport({ canViewCompensation: true });
+    const byDept = await getPayByDepartmentReport();
     expect(byDept.find((row) => row.group.startsWith(dept.name))?.avgPay).toBeCloseTo(150000, 2);
 
-    const byLoc = await getPayByLocationReport({ canViewCompensation: true });
+    const byLoc = await getPayByLocationReport();
     expect(byLoc.find((row) => row.group.startsWith(loc.name))?.avgPay).toBeCloseTo(150000, 2);
 
-    const history = await getSalaryHistoryReport({ canViewCompensation: true });
+    const history = await getSalaryHistoryReport();
     expect(
       history.some((row) => row.id === c2.id && parseFloat(row.payRate || "0") === 200000)
     ).toBe(true);

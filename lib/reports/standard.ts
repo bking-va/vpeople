@@ -14,6 +14,8 @@ import { desc, eq, sql, and, gte, lte, or } from "drizzle-orm";
 import { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 import { takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
+import { auth } from "@/lib/auth";
+import { getUserPermissions } from "@/lib/permissions";
 
 export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 
@@ -242,6 +244,13 @@ export async function getJobHistoryReport() {
     .orderBy(desc(jobHistory.effectiveDate));
 }
 
+async function sessionCanViewCompensation() {
+  const session = await auth();
+  if (!session?.user?.email) return false;
+  const permissions = await getUserPermissions(session.user.email);
+  return permissions.canViewCompensation === true;
+}
+
 export async function getEmploymentStatusHistoryReport() {
   return db
     .select({
@@ -262,8 +271,9 @@ export async function getEmploymentStatusHistoryReport() {
     .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id));
 }
 
-export async function getSalaryHistoryReport(opts: { canViewCompensation: boolean }) {
-  if (!opts.canViewCompensation) return [];
+export async function getSalaryHistoryReport(opts?: { canViewCompensation?: boolean }) {
+  if (opts?.canViewCompensation === false) return [];
+  if (!(await sessionCanViewCompensation())) return [];
   return db
     .select({
       id: compensationHistory.id,
@@ -323,10 +333,11 @@ type PayRow = {
   currency: string | null;
 };
 
-type CompensationAccess = { canViewCompensation: boolean; asOf?: Date };
+type CompensationAccess = { canViewCompensation?: boolean; asOf?: Date };
 
-async function getCurrentPayRows(opts: CompensationAccess): Promise<PayRow[]> {
-  if (!opts.canViewCompensation) return [];
+async function getCurrentPayRows(opts: CompensationAccess = {}): Promise<PayRow[]> {
+  if (opts.canViewCompensation === false) return [];
+  if (!(await sessionCanViewCompensation())) return [];
   const asOfKey = (opts.asOf ?? new Date()).toISOString().slice(0, 10);
 
   const history = await db
@@ -421,14 +432,14 @@ function aggregatePay(rows: PayRow[], groupOf: (row: PayRow) => string | null | 
     .sort((a, b) => b.avgPay - a.avgPay);
 }
 
-export async function getPayByTitleReport(opts: CompensationAccess) {
+export async function getPayByTitleReport(opts: CompensationAccess = {}) {
   return aggregatePay(await getCurrentPayRows(opts), (row) => row.jobTitle);
 }
 
-export async function getPayByDepartmentReport(opts: CompensationAccess) {
+export async function getPayByDepartmentReport(opts: CompensationAccess = {}) {
   return aggregatePay(await getCurrentPayRows(opts), (row) => row.department);
 }
 
-export async function getPayByLocationReport(opts: CompensationAccess) {
+export async function getPayByLocationReport(opts: CompensationAccess = {}) {
   return aggregatePay(await getCurrentPayRows(opts), (row) => row.location);
 }

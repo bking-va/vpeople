@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const asOf = new Date();
-    const carryover = await runTimeOffCarryover(asOf);
+    const carryover = await runTimeOffCarryover(asOf, { authorization: authHeader });
     const accrual = await runTimeOffAccruals(asOf);
     return NextResponse.json({ success: true, carryover, accrual });
   } catch (error: any) {

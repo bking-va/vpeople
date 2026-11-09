@@ -12,6 +12,7 @@ import {
   carryoverPeriodKey,
   isCarryoverWindow,
 } from "@/lib/time-off-accrual-period";
+import { isCronAuthorized } from "@/lib/authz";
 
 /**
  * In January, forfeit unused days above maxCarryover for the year that just
@@ -21,8 +22,21 @@ import {
  * January runs raise the cap by this year's already-applied accrual credits so
  * a deploy after the annual credit cannot forfeit YTD leave.
  */
-export async function runTimeOffCarryover(asOf: Date = new Date()) {
+export async function runTimeOffCarryover(
+  asOf: Date = new Date(),
+  opts?: { authorization?: string | null }
+) {
   const periodKey = carryoverPeriodKey(asOf);
+  if (!isCronAuthorized(opts?.authorization ?? null)) {
+    return {
+      balancesProcessed: 0,
+      skippedAlreadyApplied: 0,
+      totalForfeited: 0,
+      periodKey,
+      skipped: "unauthorized" as const,
+      asOf: asOf.toISOString(),
+    };
+  }
   if (!isCarryoverWindow(asOf)) {
     return {
       balancesProcessed: 0,
