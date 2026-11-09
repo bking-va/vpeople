@@ -19,12 +19,31 @@ import { recordTimeOffUsageAdjustment } from "@/lib/time-off-adjustments";
 
 export { isApproverBlockedFromActing } from "@/lib/approval-errors";
 
+export type ApprovalEntityType =
+  | "time_off_request"
+  | "timesheet"
+  | "compensation_change"
+  | "job_info_change"
+  | "employment_status_change"
+  | "promotion";
+
 export interface CreateApprovalRequestParams {
   workflowId: number;
-  entityType: "time_off_request" | "timesheet" | "compensation_change" | "job_info_change";
+  entityType: ApprovalEntityType;
   entityId: number;
   requesterId: number;
   metadata?: any;
+}
+
+const AFFECTED_EMPLOYEE_ENTITY_TYPES: ApprovalEntityType[] = [
+  "compensation_change",
+  "job_info_change",
+  "employment_status_change",
+  "promotion",
+];
+
+function isAffectedEmployeeEntityType(entityType: string): boolean {
+  return AFFECTED_EMPLOYEE_ENTITY_TYPES.includes(entityType as ApprovalEntityType);
 }
 
 export async function createApprovalRequest(params: CreateApprovalRequestParams) {
@@ -68,9 +87,9 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
     throw new Error("Requester not found");
   }
 
-  // For compensation_change and job_info_change, fetch the affected employee
+  // For employee-affecting changes, fetch the affected employee
   let affectedEmployee = requester;
-  if (entityType === "compensation_change" || entityType === "job_info_change") {
+  if (isAffectedEmployeeEntityType(entityType)) {
     const [affected] = await db
       .select(employeeManagerFields)
       .from(employees)
@@ -243,11 +262,8 @@ export async function approveStep(
   }
 
   // Check for self-approval: approver cannot approve their own request
-  // For compensation_change and job_info_change, the affected employee is in entityId
-  if (
-    request.entityType === "compensation_change" ||
-    request.entityType === "job_info_change"
-  ) {
+  // For employee-affecting changes, the affected employee is in entityId
+  if (isAffectedEmployeeEntityType(request.entityType)) {
     if (request.entityId === approverId) {
       throw new Error("You cannot approve your own compensation or job information changes");
     }
@@ -470,7 +486,9 @@ export async function approveStep(
               employeeId: metadata.employeeId,
               effectiveDate: metadata.effectiveDate,
               status: nextStatus,
+              changeType: "status_change",
               comment: metadata.changeReason || "Job info update",
+              recordedById: approverId,
             });
           }
 
@@ -486,6 +504,103 @@ export async function approveStep(
               divisionId: metadata.divisionId,
               locationId: metadata.locationId,
               managerId: metadata.managerId,
+              effectiveDate: metadata.effectiveDate,
+              changeReason: metadata.changeReason,
+              approvalRequestId: updatedRequest.id,
+              approvedBy: approverId,
+            },
+            tx,
+          });
+        }
+      } else if (updatedRequest.entityType === "employment_status_change") {
+        const metadata = updatedRequest.metadata as any;
+        if (metadata?.status) {
+          await tx
+            .update(employees)
+            .set({
+              employmentStatus: metadata.status,
+              updatedAt: new Date(),
+            })
+            .where(eq(employees.id, metadata.employeeId));
+
+          await tx.insert(employmentStatusHistory).values({
+            employeeId: metadata.employeeId,
+            effectiveDate: metadata.effectiveDate,
+            status: metadata.status,
+            changeType: "status_change",
+            comment: metadata.changeReason || "Employment status change",
+            recordedById: approverId,
+          });
+
+          await createAuditLog({
+            employeeId: approverId,
+            action: "employment_status_updated",
+            entityType: "employee",
+            entityId: metadata.employeeId.toString(),
+            changes: {
+              employeeId: metadata.employeeId,
+              status: metadata.status,
+              effectiveDate: metadata.effectiveDate,
+              changeReason: metadata.changeReason,
+              approvalRequestId: updatedRequest.id,
+              approvedBy: approverId,
+            },
+            tx,
+          });
+        }
+      } else if (updatedRequest.entityType === "promotion") {
+        const metadata = updatedRequest.metadata as any;
+        if (metadata) {
+          const [previous] = await tx
+            .select({ employmentStatus: employees.employmentStatus })
+            .from(employees)
+            .where(eq(employees.id, metadata.employeeId))
+            .limit(1);
+          const nextStatus = metadata.employmentStatus || previous?.employmentStatus || "full_time";
+
+          const employeeUpdates: Record<string, unknown> = { updatedAt: new Date() };
+          if (metadata.jobTitle !== undefined) employeeUpdates.jobTitle = metadata.jobTitle;
+          if (metadata.departmentId !== undefined) employeeUpdates.departmentId = metadata.departmentId;
+          if (metadata.jobLevelId !== undefined) employeeUpdates.jobLevelId = metadata.jobLevelId;
+          if (metadata.jobFamilyId !== undefined) employeeUpdates.jobFamilyId = metadata.jobFamilyId;
+          if (metadata.managerId !== undefined) employeeUpdates.managerId = metadata.managerId;
+
+          await tx
+            .update(employees)
+            .set(employeeUpdates)
+            .where(eq(employees.id, metadata.employeeId));
+
+          await tx.insert(jobHistory).values({
+            employeeId: metadata.employeeId,
+            effectiveDate: metadata.effectiveDate,
+            jobTitle: metadata.jobTitle || null,
+            departmentId: metadata.departmentId || null,
+            divisionId: metadata.divisionId || null,
+            locationId: metadata.locationId || null,
+            managerId: metadata.managerId || null,
+            employmentStatus: nextStatus,
+            comment: metadata.changeReason || "Promotion",
+          });
+
+          await tx.insert(employmentStatusHistory).values({
+            employeeId: metadata.employeeId,
+            effectiveDate: metadata.effectiveDate,
+            status: nextStatus,
+            changeType: "promotion",
+            comment: metadata.changeReason || "Promotion",
+            recordedById: approverId,
+          });
+
+          await createAuditLog({
+            employeeId: approverId,
+            action: "employee_promoted",
+            entityType: "employee",
+            entityId: metadata.employeeId.toString(),
+            changes: {
+              employeeId: metadata.employeeId,
+              jobTitle: metadata.jobTitle,
+              departmentId: metadata.departmentId,
+              jobLevelId: metadata.jobLevelId,
               effectiveDate: metadata.effectiveDate,
               changeReason: metadata.changeReason,
               approvalRequestId: updatedRequest.id,

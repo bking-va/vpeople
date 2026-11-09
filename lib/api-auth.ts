@@ -143,6 +143,13 @@ export function filterEmployeeFields(
     delete filtered.nationalId;
   }
 
+  if (!opts?.isSelf && !permissions.canViewSensitivePersonalInfo) {
+    delete filtered.roeCode;
+    delete filtered.terminationType;
+    delete filtered.terminationReasonId;
+    delete filtered.terminationReason;
+  }
+
   // Remove bank info if not permitted
   if (!permissions.canViewBankInfo) {
     delete filtered.bankName;

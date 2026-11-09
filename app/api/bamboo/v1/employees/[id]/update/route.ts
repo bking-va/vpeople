@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
+import { sanitizePersonNameFields, UNSAFE_PERSON_NAME_MESSAGE } from "@/lib/person-name";
 
 export async function POST(
   request: NextRequest,
@@ -27,7 +28,7 @@ export async function POST(
   try {
     const { id } = await params;
     const employeeId = parseInt(id);
-    const data = await request.json();
+    const data = sanitizePersonNameFields(await request.json());
 
     // Build update object (only allow specific fields)
     const updateData: any = { updatedAt: new Date() };
@@ -66,6 +67,9 @@ export async function POST(
       jobTitle: updated.jobTitle,
     });
   } catch (error: any) {
+    if (error?.message === UNSAFE_PERSON_NAME_MESSAGE) {
+      return NextResponse.json({ error: UNSAFE_PERSON_NAME_MESSAGE }, { status: 400 });
+    }
     console.error("Failed to update employee:", error);
     return NextResponse.json(
       { error: "Failed to update employee", message: error.message },

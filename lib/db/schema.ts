@@ -236,7 +236,13 @@ export const employees = pgTable("employees", {
   locationId: integer("location_id").references(() => locations.id),
   managerId: integer("manager_id"),
   hireDate: date("hire_date"),
+  originalHireDate: date("original_hire_date"),
   terminationDate: date("termination_date"),
+  terminationReasonId: integer("termination_reason_id").references(
+    () => terminationReasons.id
+  ),
+  terminationType: text("termination_type"),
+  roeCode: text("roe_code"),
   employmentStatus: employmentStatusEnum("employment_status")
     .default("full_time")
     .notNull(),
@@ -340,8 +346,25 @@ export const employmentStatusHistory = pgTable("employment_status_history", {
     .references(() => employees.id, { onDelete: "cascade" }),
   effectiveDate: date("effective_date").notNull(),
   status: employmentStatusEnum("status").notNull(),
+  changeType: text("change_type").default("status_change").notNull(),
+  terminationReasonId: integer("termination_reason_id").references(
+    () => terminationReasons.id
+  ),
+  recordedById: integer("recorded_by_id").references(() => employees.id),
   comment: text("comment"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const terminationReasons = pgTable("termination_reasons", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  roeCode: text("roe_code").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const compensationHistory = pgTable("compensation_history", {
@@ -706,6 +729,7 @@ export const approvalWorkflowTypeEnum = pgEnum("approval_workflow_type", [
   "employment_status_change",
   "job_info_change",
   "information_update",
+  "promotion",
 ]);
 
 export const approvalWorkflows = pgTable("approval_workflows", {
@@ -1101,6 +1125,30 @@ export const savedReports = pgTable("saved_reports", {
 });
 
 export const scheduleTypeEnum = pgEnum("schedule_type", ["daily", "weekly", "monthly"]);
+
+export const announcements = pgTable("announcements", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  publishedById: integer("published_by_id").references(() => employees.id),
+  publishedAt: timestamp("published_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const letterTemplates = pgTable("letter_templates", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  subject: text("subject"),
+  body: text("body").notNull(),
+  requiresSignature: boolean("requires_signature").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 export const scheduledReports = pgTable("scheduled_reports", {
   id: serial("id").primaryKey(),

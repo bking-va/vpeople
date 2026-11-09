@@ -3,6 +3,7 @@ import {
   canViewImmigrationNumbers,
   canViewPersonalEmail,
   canViewPrivateDocuments,
+  canViewTerminationDetails,
   canViewTimeOffLedger,
   canWriteSettings,
   isVendastaWorkEmail,
@@ -15,6 +16,7 @@ import {
   devLoginSessionRole,
   sessionRoleFromAccessLevel,
   isViewingAccessLevel,
+  redactTerminationDetails,
   redactVisaDocumentNumber,
 } from "@/lib/authz";
 import { calendarDaysInclusive, takenDaysInYear } from "@/lib/calendar-days";
@@ -41,6 +43,50 @@ describe("field-level authz helpers", () => {
     expect(
       redactVisaDocumentNumber({ documentNumber: "H1B-SECRET" }, true).documentNumber
     ).toBe("H1B-SECRET");
+  });
+
+  test("ROE and termination details are limited to self or sensitive-HR", () => {
+    expect(
+      canViewTerminationDetails({
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewTerminationDetails({
+        isViewingSelf: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(true);
+    expect(
+      canViewTerminationDetails({
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
+
+    const terminateRow = {
+      roeCode: "M",
+      terminationType: "involuntary",
+      terminationReasonId: 7,
+      terminationReason: "Dismissal",
+      terminationTypeId: "termination",
+      changeType: "terminate",
+      comment: "Dismissal",
+    };
+    expect(redactTerminationDetails(terminateRow, false)).toEqual({
+      ...terminateRow,
+      roeCode: null,
+      terminationType: null,
+      terminationReasonId: null,
+      terminationReason: null,
+      terminationTypeId: null,
+      comment: null,
+    });
+    expect(redactTerminationDetails(terminateRow, true)).toEqual(terminateRow);
+
+    const hireRow = { changeType: "hire", comment: "Hire" };
+    expect(redactTerminationDetails(hireRow, false).comment).toBe("Hire");
   });
 
   test("compensation custom fields are hidden from coworkers without permission", () => {

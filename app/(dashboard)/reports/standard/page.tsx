@@ -253,7 +253,10 @@ export default async function StandardReportsPage({
     );
   } else if (type === "employment-status") {
     title = "Employment Status History";
-    const rows = await getEmploymentStatusHistoryReport();
+    const rows = await getEmploymentStatusHistoryReport({
+      viewerId: session.user.employeeId ?? undefined,
+      canViewSensitivePersonalInfo: Boolean(permissions?.canViewSensitivePersonalInfo),
+    });
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">

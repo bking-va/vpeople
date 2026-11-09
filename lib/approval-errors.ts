@@ -13,7 +13,12 @@ export function isApproverBlockedFromActing(opts: {
 }): boolean {
   const { entityType, entityId, requesterId, viewerId, isFinalStep } = opts;
 
-  if (entityType === "compensation_change" || entityType === "job_info_change") {
+  if (
+    entityType === "compensation_change" ||
+    entityType === "job_info_change" ||
+    entityType === "employment_status_change" ||
+    entityType === "promotion"
+  ) {
     if (entityId === viewerId) return true;
   } else if (requesterId === viewerId) {
     return true;

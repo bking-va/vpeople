@@ -2,6 +2,9 @@ import { db } from "./db";
 import * as schema from "./db/schema";
 import { sql, eq, inArray, and } from "drizzle-orm";
 import { runMigrations } from "./migrate";
+import { DEFAULT_TERMINATION_REASONS } from "./roe";
+import { SEEDED_LETTER_TEMPLATES } from "./letter-merge";
+import { terminateEmployee, rehireEmployee } from "./lifecycle";
 
 const VENDASTA_DOMAIN = "vendasta.com";
 
@@ -130,8 +133,11 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE audit_logs CASCADE`);
     await db.execute(sql`TRUNCATE TABLE rate_limits CASCADE`);
     await db.execute(sql`TRUNCATE TABLE webhooks CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE announcements CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE letter_templates CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE termination_reasons CASCADE`);
 
-    console.log("✅ Database reset complete (55 tables truncated)");
+    console.log("✅ Database reset complete (tables truncated)");
   }
 
   console.log("Creating locations...");
@@ -399,13 +405,30 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       requiresAdminApproval: true,
       description: "Requires manager and admin approval for job information changes",
     },
+    {
+      name: "Employment Status Change Approval",
+      type: "employment_status_change" as const,
+      enabled: true,
+      requiresManagerApproval: true,
+      requiresAdminApproval: true,
+      description: "Requires manager and admin approval for employment status changes",
+    },
+    {
+      name: "Promotion Approval",
+      type: "promotion" as const,
+      enabled: true,
+      requiresManagerApproval: true,
+      requiresAdminApproval: true,
+      description: "Requires manager and admin approval for promotions",
+    },
   ];
 
-  const insertedWorkflows = await db
-    .insert(schema.approvalWorkflows)
-    .values(workflowValues)
-    .onConflictDoNothing()
-    .returning();
+  const existingWorkflows = await db.select().from(schema.approvalWorkflows);
+  const existingWorkflowTypes = new Set(existingWorkflows.map((row) => row.type));
+  const missingWorkflows = workflowValues.filter((row) => !existingWorkflowTypes.has(row.type));
+  if (missingWorkflows.length > 0) {
+    await db.insert(schema.approvalWorkflows).values(missingWorkflows);
+  }
 
   console.log("Creating workflow steps...");
 
@@ -495,6 +518,25 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       .insert(schema.approvalWorkflowSteps)
       .values(jobStepValues)
       .onConflictDoNothing();
+  }
+
+  const extraWorkflowTypes = ["employment_status_change", "promotion"] as const;
+  for (const type of extraWorkflowTypes) {
+    const [workflow] = await db
+      .select()
+      .from(schema.approvalWorkflows)
+      .where(eq(schema.approvalWorkflows.type, type))
+      .limit(1);
+    if (!workflow) continue;
+    const existingSteps = await db
+      .select()
+      .from(schema.approvalWorkflowSteps)
+      .where(eq(schema.approvalWorkflowSteps.workflowId, workflow.id));
+    if (existingSteps.length > 0) continue;
+    await db.insert(schema.approvalWorkflowSteps).values([
+      { workflowId: workflow.id, stepOrder: 1, approverRole: "manager", requiredCount: 1 },
+      { workflowId: workflow.id, stepOrder: 2, approverRole: "full_admin", requiredCount: 1 },
+    ]);
   }
 
   console.log("Creating teams...");
@@ -1154,14 +1196,22 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   await db.insert(schema.compensationHistory).values(compensationData);
 
   console.log("Recording employment status history...");
-  await db.insert(schema.employmentStatusHistory).values(
-    allEmployees.map((emp) => ({
-      employeeId: emp.id,
-      effectiveDate: emp.hireDate || "2020-01-15",
-      status: emp.employmentStatus,
-      comment: "Hire",
-    }))
-  );
+  const existingStatusHistory = await db.$count(schema.employmentStatusHistory);
+  if (existingStatusHistory === 0) {
+    await db.insert(schema.employmentStatusHistory).values(
+      allEmployees.map((emp) => ({
+        employeeId: emp.id,
+        effectiveDate: emp.hireDate || "2020-01-15",
+        status: emp.employmentStatus,
+        changeType: "hire",
+        comment: "Hire",
+      }))
+    );
+  }
+
+  await db
+    .update(schema.employees)
+    .set({ originalHireDate: sql`COALESCE(${schema.employees.originalHireDate}, ${schema.employees.hireDate})` });
 
   console.log("Creating seats...");
 
@@ -1980,6 +2030,100 @@ export async function runSeed(options: { reset?: boolean } = {}) {
       }))
     )
     .onConflictDoNothing();
+
+  console.log("Creating termination reasons...");
+  await db
+    .insert(schema.terminationReasons)
+    .values([...DEFAULT_TERMINATION_REASONS])
+    .onConflictDoNothing();
+
+  console.log("Creating letter templates...");
+  await db
+    .insert(schema.letterTemplates)
+    .values([...SEEDED_LETTER_TEMPLATES])
+    .onConflictDoNothing();
+
+  const existingAnnouncements = await db.$count(schema.announcements);
+  if (existingAnnouncements === 0) {
+    console.log("Creating announcements...");
+    await db.insert(schema.announcements).values([
+      {
+        title: "Welcome to vPeople",
+        body: "Vendasta's HRIS is live. Check your time-off balances, Who's Out, and celebrations calendars from Home.",
+        publishedById: ceo.id,
+        isActive: true,
+      },
+      {
+        title: "Q4 compensation cycle",
+        body: "Merit and promotion recommendations are due through the approvals inbox. Self-approval is blocked.",
+        publishedById: ceo.id,
+        isActive: true,
+      },
+    ]);
+  }
+
+  const [resignation] = await db
+    .select()
+    .from(schema.terminationReasons)
+    .where(eq(schema.terminationReasons.code, "resignation"))
+    .limit(1);
+
+  const ics = allEmployees
+    .filter((emp) => emp.accessLevel === "employee" && emp.id !== ceo.id)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const terminatedDemo = ics[ics.length - 1];
+  const rehireDemo = ics[ics.length - 2];
+
+  const existingTerminatedDemo = await db
+    .select({ id: schema.employmentStatusHistory.id })
+    .from(schema.employmentStatusHistory)
+    .where(eq(schema.employmentStatusHistory.changeType, "terminate"))
+    .limit(1);
+  const existingRehireDemo = await db
+    .select({ id: schema.employmentStatusHistory.id })
+    .from(schema.employmentStatusHistory)
+    .where(eq(schema.employmentStatusHistory.changeType, "rehire"))
+    .limit(1);
+
+  if (resignation && terminatedDemo && existingTerminatedDemo.length === 0) {
+    console.log("Creating terminated demo employee...");
+    await terminateEmployee({
+      employeeId: terminatedDemo.id,
+      actorId: ceo.id,
+      terminationDate: "2026-03-31",
+      terminationType: "voluntary",
+      terminationReasonId: resignation.id,
+      notes: "Demo termination for ROE and offboarding",
+    });
+  }
+
+  if (resignation && rehireDemo && existingRehireDemo.length === 0) {
+    const [current] = await db
+      .select()
+      .from(schema.employees)
+      .where(eq(schema.employees.id, rehireDemo.id))
+      .limit(1);
+    if (current) {
+      console.log("Creating rehired demo employee...");
+      if (current.employmentStatus !== "terminated") {
+        await terminateEmployee({
+          employeeId: rehireDemo.id,
+          actorId: ceo.id,
+          terminationDate: "2024-06-30",
+          terminationType: "voluntary",
+          terminationReasonId: resignation.id,
+          notes: "Demo prior termination before rehire",
+        });
+      }
+      await rehireEmployee({
+        employeeId: rehireDemo.id,
+        actorId: ceo.id,
+        hireDate: "2025-09-02",
+        employmentStatus: "full_time",
+        notes: "Demo rehire preserving prior history",
+      });
+    }
+  }
 
   console.log("✅ Seeding completed!");
   console.log(

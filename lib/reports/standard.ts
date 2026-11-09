@@ -16,6 +16,7 @@ import { takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getUserPermissions } from "@/lib/permissions";
+import { canViewTerminationDetails, redactTerminationDetails } from "@/lib/authz";
 
 export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 
@@ -251,8 +252,11 @@ async function sessionCanViewCompensation() {
   return permissions.canViewCompensation === true;
 }
 
-export async function getEmploymentStatusHistoryReport() {
-  return db
+export async function getEmploymentStatusHistoryReport(opts?: {
+  viewerId?: number;
+  canViewSensitivePersonalInfo?: boolean;
+}) {
+  const rows = await db
     .select({
       id: employmentStatusHistory.id,
       employeeId: employees.id,
@@ -260,6 +264,7 @@ export async function getEmploymentStatusHistoryReport() {
       lastName: employees.lastName,
       employmentStatus: employmentStatusHistory.status,
       effectiveDate: employmentStatusHistory.effectiveDate,
+      changeType: employmentStatusHistory.changeType,
       comment: employmentStatusHistory.comment,
       department: departments.name,
       location: locations.name,
@@ -269,6 +274,18 @@ export async function getEmploymentStatusHistoryReport() {
     .leftJoin(departments, eq(employees.departmentId, departments.id))
     .leftJoin(locations, eq(employees.locationId, locations.id))
     .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id));
+
+  if (opts?.canViewSensitivePersonalInfo) return rows;
+
+  return rows.map((row) =>
+    redactTerminationDetails(
+      row,
+      canViewTerminationDetails({
+        isViewingSelf: opts?.viewerId != null && row.employeeId === opts.viewerId,
+        canViewSensitivePersonalInfo: Boolean(opts?.canViewSensitivePersonalInfo),
+      })
+    )
+  );
 }
 
 export async function getSalaryHistoryReport(opts?: { canViewCompensation?: boolean }) {

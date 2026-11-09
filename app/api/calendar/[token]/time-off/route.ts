@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, timeOffRequests, timeOffPolicies } from "@/lib/db/schema";
 import { eq, and, gte } from "drizzle-orm";
+import { escapeIcalText } from "@/lib/ical";
 
 export async function GET(
   request: NextRequest,
@@ -68,8 +69,8 @@ export async function GET(
         `UID:timeoff-${item.request.id}@vpeople.vendasta.com`,
         `DTSTART;VALUE=DATE:${startDate}`,
         `DTEND;VALUE=DATE:${endDateNextStr}`,
-        `SUMMARY:${empName} - ${policyName}`,
-        `DESCRIPTION:${item.request.daysRequested} days`,
+        `SUMMARY:${escapeIcalText(`${empName} - ${policyName}`)}`,
+        `DESCRIPTION:${escapeIcalText(`${item.request.daysRequested} days`)}`,
         "STATUS:CONFIRMED",
         "TRANSP:TRANSPARENT",
         "END:VEVENT",
@@ -82,7 +83,7 @@ export async function GET(
       "PRODID:-//vPeople//Time Off Calendar//EN",
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
-      "X-WR-CALNAME:vPeople - Who's Out",
+      `X-WR-CALNAME:${escapeIcalText("vPeople - Who's Out")}`,
       "X-WR-TIMEZONE:UTC",
       ...icalEvents,
       "END:VCALENDAR",

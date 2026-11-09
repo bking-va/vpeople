@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { employees, employeeTasks, taskTemplates, auditLogs } from "@/lib/db/schema";
 import { recordEmploymentStatusChange } from "@/lib/employment-status";
 import { eq, sql } from "drizzle-orm";
+import { sanitizePersonNameFields, UNSAFE_PERSON_NAME_MESSAGE } from "@/lib/person-name";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const data = await request.json();
+    const data = sanitizePersonNameFields(await request.json());
 
     // Generate employee number
     const lastEmployee = await db
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
         lastName: data.lastName,
         email: data.email,
         hireDate: data.hireDate,
+        originalHireDate: data.hireDate,
         employmentStatus: data.employmentStatus || "full_time",
         jobTitle: data.jobTitle,
         departmentId: data.departmentId ? parseInt(data.departmentId, 10) : null,
@@ -73,6 +75,8 @@ export async function POST(request: NextRequest) {
       status: newEmployee.employmentStatus,
       effectiveDate: newEmployee.hireDate || new Date().toISOString().split("T")[0],
       comment: "Hire",
+      changeType: "hire",
+      recordedById: currentEmployee.id,
     });
 
     // Create onboarding tasks from templates
@@ -138,6 +142,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage === UNSAFE_PERSON_NAME_MESSAGE) {
+      return NextResponse.json({ error: UNSAFE_PERSON_NAME_MESSAGE }, { status: 400 });
+    }
     console.error("Failed to create employee:", errorMessage);
     return NextResponse.json(
       { error: "Failed to create employee", message: errorMessage },

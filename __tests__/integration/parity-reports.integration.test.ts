@@ -522,5 +522,31 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
       true
     );
     expect(mine.some((row) => row.comment === "Hire")).toBe(true);
+
+    await recordEmploymentStatusChange({
+      employeeId: emp.id,
+      status: "terminated",
+      effectiveDate: "2026-03-01",
+      comment: "Dismissal",
+      changeType: "terminate",
+    });
+
+    const isTerminate = (row: { employeeId: number; changeType: string | null }) =>
+      row.employeeId === emp.id && row.changeType === "terminate";
+    const hrRows = await getEmploymentStatusHistoryReport({
+      viewerId: emp.id,
+      canViewSensitivePersonalInfo: true,
+    });
+    const coworkerRows = await getEmploymentStatusHistoryReport({
+      viewerId: 0,
+      canViewSensitivePersonalInfo: false,
+    });
+    const selfRows = await getEmploymentStatusHistoryReport({
+      viewerId: emp.id,
+      canViewSensitivePersonalInfo: false,
+    });
+    expect(hrRows.find(isTerminate)?.comment).toBe("Dismissal");
+    expect(coworkerRows.find(isTerminate)?.comment).toBeNull();
+    expect(selfRows.find(isTerminate)?.comment).toBe("Dismissal");
   });
 });

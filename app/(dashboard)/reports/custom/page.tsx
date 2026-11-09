@@ -53,6 +53,10 @@ export default function CustomReportPage() {
     "department",
   ]);
   const [groupBy, setGroupBy] = useState("none");
+  const [employmentStatus, setEmploymentStatus] = useState("all");
+  const [search, setSearch] = useState("");
+  const [hireDateFrom, setHireDateFrom] = useState("");
+  const [hireDateTo, setHireDateTo] = useState("");
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -74,6 +78,10 @@ export default function CustomReportPage() {
       const params = new URLSearchParams({
         fields: selectedFields.join(","),
         groupBy,
+        employmentStatus,
+        search,
+        hireDateFrom,
+        hireDateTo,
       });
       const response = await fetch(`/api/reports/preview?${params}`);
       const data = await response.json();
@@ -90,6 +98,10 @@ export default function CustomReportPage() {
       type: "custom",
       fields: selectedFields.join(","),
       groupBy,
+      employmentStatus,
+      search,
+      hireDateFrom,
+      hireDateTo,
     });
     window.location.href = `/api/reports/export?${params}`;
   };
@@ -186,6 +198,41 @@ export default function CustomReportPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Employment status</Label>
+                <Select value={employmentStatus} onValueChange={setEmploymentStatus}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="full_time">Full-time</SelectItem>
+                    <SelectItem value="part_time">Part-time</SelectItem>
+                    <SelectItem value="contractor">Contractor</SelectItem>
+                    <SelectItem value="on_leave">On leave</SelectItem>
+                    <SelectItem value="terminated">Terminated</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Search</Label>
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Name, email, title, number"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Hire date from</Label>
+                <Input type="date" value={hireDateFrom} onChange={(e) => setHireDateFrom(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Hire date to</Label>
+                <Input type="date" value={hireDateTo} onChange={(e) => setHireDateTo(e.target.value)} />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label>Group By</Label>
               <Select value={groupBy} onValueChange={setGroupBy}>

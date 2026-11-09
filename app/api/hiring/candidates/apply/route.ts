@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { candidates, jobOpenings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { sanitizePersonNameFields, UNSAFE_PERSON_NAME_MESSAGE } from "@/lib/person-name";
 
 export async function POST(request: NextRequest) {
   // Public endpoint - strict security controls
@@ -83,13 +84,22 @@ export async function POST(request: NextRequest) {
     }
 
     const sanitize = (str: string) => str.trim().slice(0, 255);
+    let names: { firstName: string; lastName: string };
+    try {
+      names = sanitizePersonNameFields({
+        firstName: sanitize(data.firstName),
+        lastName: sanitize(data.lastName),
+      });
+    } catch {
+      return NextResponse.json({ error: UNSAFE_PERSON_NAME_MESSAGE }, { status: 400 });
+    }
 
     await db
       .insert(candidates)
       .values({
         jobOpeningId: parseInt(data.jobOpeningId),
-        firstName: sanitize(data.firstName),
-        lastName: sanitize(data.lastName),
+        firstName: names.firstName,
+        lastName: names.lastName,
         email: sanitize(data.email),
         phone: data.phone ? sanitize(data.phone) : null,
         source: "direct",

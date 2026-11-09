@@ -36,7 +36,9 @@ import { getUserPermissions } from "@/lib/permissions";
 import {
   canViewImmigrationNumbers,
   canViewPrivateDocuments,
+  canViewTerminationDetails,
   canViewTimeOffLedger,
+  redactTerminationDetails,
   redactVisaDocumentNumber,
   visibleProfileEmail,
 } from "@/lib/authz";
@@ -45,6 +47,9 @@ import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 import { CompensationEditForm } from "@/components/compensation-edit-form";
 import { JobInfoEditForm } from "@/components/job-info-edit-form";
+import { EmploymentStatusForm } from "@/components/employment-status-form";
+import { PromotionForm } from "@/components/promotion-form";
+import { Button } from "@/components/ui/button";
 
 export default async function EmployeeProfilePage({
   params,
@@ -88,6 +93,7 @@ export default async function EmployeeProfilePage({
       locationId: employees.locationId,
       managerId: employees.managerId,
       hireDate: employees.hireDate,
+      originalHireDate: employees.originalHireDate,
       employmentStatus: employees.employmentStatus,
       terminationDate: employees.terminationDate,
       jobFamilyId: employees.jobFamilyId,
@@ -178,6 +184,10 @@ export default async function EmployeeProfilePage({
   const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
   const canEditCompensation = permissions.canEditCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
+  const canViewTermDetails = canViewTerminationDetails({
+    isViewingSelf,
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  });
   const canEditEmployee = isViewingSelf || permissions.canManageUsers;
   const displayEmail = visibleProfileEmail(employee.email, {
     isViewingSelf,
@@ -200,6 +210,18 @@ export default async function EmployeeProfilePage({
         .limit(1)
         .then((rows) => rows[0] || { sin: null, ssn: null })
     : { sin: null, ssn: null };
+
+  const terminationDetails = canViewTermDetails
+    ? await db
+        .select({
+          roeCode: employees.roeCode,
+          terminationType: employees.terminationType,
+        })
+        .from(employees)
+        .where(eq(employees.id, employeeId))
+        .limit(1)
+        .then((rows) => rows[0] || { roeCode: null, terminationType: null })
+    : { roeCode: null, terminationType: null };
 
   const [compHistory, bonuses, equity] = canViewCompensation
     ? await Promise.all([
@@ -270,11 +292,19 @@ export default async function EmployeeProfilePage({
     .orderBy(employeeTasks.createdAt);
 
   const statusHistoryRecords = canViewLedger
-    ? await db
-        .select()
-        .from(employmentStatusHistory)
-        .where(eq(employmentStatusHistory.employeeId, employeeId))
-        .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id))
+    ? (
+        await db
+          .select({
+            id: employmentStatusHistory.id,
+            effectiveDate: employmentStatusHistory.effectiveDate,
+            status: employmentStatusHistory.status,
+            changeType: employmentStatusHistory.changeType,
+            comment: employmentStatusHistory.comment,
+          })
+          .from(employmentStatusHistory)
+          .where(eq(employmentStatusHistory.employeeId, employeeId))
+          .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id))
+      ).map((record) => redactTerminationDetails(record, canViewTermDetails))
     : [];
 
   const canViewDocs = canViewPrivateDocuments({
@@ -342,7 +372,19 @@ export default async function EmployeeProfilePage({
           <h1 className="text-3xl font-bold">{displayName}</h1>
           <p className="text-muted-foreground">{employee.jobTitle}</p>
         </div>
-        <Badge>{formatEmploymentStatus(employee.employmentStatus)}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge>{formatEmploymentStatus(employee.employmentStatus)}</Badge>
+          {permissions.canManageUsers && employee.employmentStatus !== "terminated" && (
+            <Link href={`/people/${employee.id}/terminate`}>
+              <Button variant="destructive" size="sm">Terminate</Button>
+            </Link>
+          )}
+          {permissions.canManageUsers && employee.employmentStatus === "terminated" && (
+            <Link href={`/people/${employee.id}/rehire`}>
+              <Button size="sm">Rehire</Button>
+            </Link>
+          )}
+        </div>
       </div>
 
       <Card>
@@ -540,11 +582,20 @@ export default async function EmployeeProfilePage({
               <InfoField label="Job Level" value={level[0]?.code} />
               <InfoField label="Employment Status" value={formatEmploymentStatus(employee.employmentStatus)} />
               <InfoField label="Hire Date" value={formatDate(employee.hireDate)} />
+              {employee.originalHireDate && employee.originalHireDate !== employee.hireDate && (
+                <InfoField label="Original Hire Date" value={formatDate(employee.originalHireDate)} />
+              )}
               {employee.terminationDate && (
                 <InfoField
                   label="Termination Date"
                   value={formatDate(employee.terminationDate)}
                 />
+              )}
+              {canViewTermDetails && terminationDetails.roeCode && (
+                <InfoField label="Canadian ROE code" value={terminationDetails.roeCode} />
+              )}
+              {canViewTermDetails && terminationDetails.terminationType && (
+                <InfoField label="Termination type" value={terminationDetails.terminationType} />
               )}
             </CardContent>
           </Card>
@@ -579,6 +630,11 @@ export default async function EmployeeProfilePage({
                         {formatDate(record.effectiveDate)}
                       </p>
                       <p className="font-medium">{formatEmploymentStatus(record.status)}</p>
+                      {record.changeType && (
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {record.changeType.replace("_", " ")}
+                        </p>
+                      )}
                       {record.comment && (
                         <p className="text-sm text-muted-foreground">{record.comment}</p>
                       )}
@@ -637,6 +693,20 @@ export default async function EmployeeProfilePage({
                 jobLevelId: employee.jobLevelId || undefined,
               }}
             />
+          )}
+          {permissions.canManageUsers && (
+            <>
+              <EmploymentStatusForm
+                employeeId={employee.id}
+                currentStatus={employee.employmentStatus}
+              />
+              {employee.employmentStatus !== "terminated" && (
+                <PromotionForm
+                  employeeId={employee.id}
+                  currentTitle={employee.jobTitle}
+                />
+              )}
+            </>
           )}
         </TabsContent>
 

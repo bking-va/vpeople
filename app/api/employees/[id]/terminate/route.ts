@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { employees, employeeTasks, taskTemplates, auditLogs } from "@/lib/db/schema";
-import { recordEmploymentStatusChange } from "@/lib/employment-status";
+import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { publicEmployeeDto, terminateEmployee } from "@/lib/lifecycle";
 
 export async function POST(
   request: NextRequest,
@@ -17,15 +17,13 @@ export async function POST(
   try {
     const resolvedParams = await params;
     const targetEmployeeId = parseInt(resolvedParams.id, 10);
-
-    // Verify the user has permission
     const currentEmployeeId = session.user.employeeId;
     if (!currentEmployeeId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const [currentEmployee] = await db
-      .select()
+      .select({ id: employees.id, accessLevel: employees.accessLevel })
       .from(employees)
       .where(eq(employees.id, currentEmployeeId))
       .limit(1);
@@ -37,105 +35,32 @@ export async function POST(
       );
     }
 
-    // Fetch the employee to terminate
-    const [employee] = await db
-      .select()
-      .from(employees)
-      .where(eq(employees.id, targetEmployeeId))
-      .limit(1);
-
-    if (!employee) {
-      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
-    }
-
-    if (employee.employmentStatus === "terminated") {
-      return NextResponse.json(
-        { error: "Employee already terminated" },
-        { status: 400 }
-      );
-    }
-
     const data = await request.json();
-    const { terminationDate, terminationType, terminationReason, notes } = data;
-
-    // Update employee status
-    const [updatedEmployee] = await db
-      .update(employees)
-      .set({
-        employmentStatus: "terminated",
-        terminationDate,
-        updatedAt: new Date(),
-      })
-      .where(eq(employees.id, targetEmployeeId))
-      .returning();
-
-    await recordEmploymentStatusChange({
-      employeeId: targetEmployeeId,
-      status: "terminated",
-      effectiveDate: terminationDate,
-      comment: terminationReason || terminationType || "Termination",
-    });
-
-    // Create offboarding tasks from templates
-    const templates = await db
-      .select()
-      .from(taskTemplates)
-      .where(eq(taskTemplates.taskType, "offboarding"));
-
-    if (templates.length > 0) {
-      const termDate = new Date(terminationDate);
-      const tasksToCreate = templates.map((template) => {
-        let dueDate: Date | undefined;
-        if (template.dueDaysFromStart) {
-          // For offboarding, use dueDaysFromStart as days relative to termination
-          dueDate = new Date(termDate);
-          dueDate.setDate(dueDate.getDate() + template.dueDaysFromStart);
-        }
-
-        return {
-          employeeId: targetEmployeeId,
-          templateId: template.id,
-          taskType: "offboarding",
-          title: template.name,
-          description: template.description,
-          assignedToId: template.assignedToRole === "manager" && employee.managerId
-            ? employee.managerId
-            : currentEmployee.id,
-          dueDate: dueDate ? dueDate.toISOString().split("T")[0] : null,
-          status: "pending" as const,
-        };
-      });
-
-      await db.insert(employeeTasks).values(tasksToCreate);
+    const { terminationDate, terminationType, terminationReasonId, notes } = data;
+    if (!terminationDate) {
+      return NextResponse.json({ error: "Termination date is required" }, { status: 400 });
+    }
+    if (!terminationReasonId) {
+      return NextResponse.json({ error: "Termination reason is required" }, { status: 400 });
     }
 
-    // Audit log
-    await db.insert(auditLogs).values({
-      employeeId: session.user.employeeId,
-      action: "employee_terminated",
-      entityType: "employee",
-      entityId: String(targetEmployeeId),
-      changes: {
-        terminationDate,
-        terminationType,
-        terminationReason,
-        notes,
-        previousStatus: employee.employmentStatus,
-        newStatus: "terminated",
-      },
+    const result = await terminateEmployee({
+      employeeId: targetEmployeeId,
+      actorId: currentEmployee.id,
+      terminationDate,
+      terminationType,
+      terminationReasonId: terminationReasonId ? Number(terminationReasonId) : null,
+      notes,
     });
 
-    // Return minimal DTO without sensitive data
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+
     return NextResponse.json({
-      employee: {
-        id: updatedEmployee.id,
-        employeeNumber: updatedEmployee.employeeNumber,
-        firstName: updatedEmployee.firstName,
-        lastName: updatedEmployee.lastName,
-        email: updatedEmployee.email,
-        employmentStatus: updatedEmployee.employmentStatus,
-        terminationDate: updatedEmployee.terminationDate,
-      },
+      employee: publicEmployeeDto(result.employee),
+      roeCode: result.roeCode,
+      terminationReason: result.reasonName,
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);

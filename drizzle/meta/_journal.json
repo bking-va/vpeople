@@ -183,6 +183,13 @@
       "when": 1794188378592,
       "tag": "0025_amused_tiger_shark",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794219029756,
+      "tag": "0026_open_hercules",
+      "breakpoints": true
     }
   ]
 }
