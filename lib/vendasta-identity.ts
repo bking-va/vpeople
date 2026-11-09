@@ -40,18 +40,17 @@ export async function findEmployeeByVerifiedWorkEmail(
   return row ?? null;
 }
 
-export async function authorizeVendastaSignIn(
+export async function resolveVendastaEmployee(
   profile: VendastaIdTokenClaims | undefined
-): Promise<boolean> {
-  const decision = await decideFromProfile(profile);
-  return decision.ok;
+) {
+  return decideFromProfile(profile);
 }
 
 export async function linkVendastaEmployee(
   userId: string,
   profile: VendastaIdTokenClaims | undefined
 ): Promise<void> {
-  const decision = await decideFromProfile(profile);
+  const decision = await resolveVendastaEmployee(profile);
   if (!decision.ok || !isVendastaSubject(profile?.sub)) return;
 
   const sub = profile.sub.trim();

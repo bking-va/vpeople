@@ -11,8 +11,8 @@ import {
   sessionRoleFromAccessLevel,
 } from "./authz";
 import {
-  authorizeVendastaSignIn,
   linkVendastaEmployee,
+  resolveVendastaEmployee,
 } from "./vendasta-identity";
 import {
   VENDASTA_PROVIDER_ID,
@@ -135,7 +135,7 @@ const authConfig = {
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      allowDangerousEmailAccountLinking: true,
+      allowDangerousEmailAccountLinking: false,
     }),
   ],
   session: {
@@ -150,13 +150,12 @@ const authConfig = {
       profile?: VendastaIdTokenClaims;
     }) {
       if (account?.provider === VENDASTA_PROVIDER_ID) {
-        return authorizeVendastaSignIn(profile);
+        const decision = await resolveVendastaEmployee(profile);
+        return decision.ok;
       }
+      // Vendasta OIDC is the SSO path. Do not authorize Google by email suffix.
       if (account?.provider === "google") {
-        const email = profile?.email;
-        if (typeof email !== "string" || !email.endsWith("@vendasta.com")) {
-          return false;
-        }
+        return false;
       }
       return true;
     },
@@ -193,19 +192,7 @@ const authConfig = {
         if (user.employeeId !== undefined) {
           token.employeeId = user.employeeId;
         } else {
-          const [employee] = await db
-            .select({
-              id: employees.id,
-              accessLevel: employees.accessLevel,
-            })
-            .from(employees)
-            .where(eq(employees.email, user.email))
-            .limit(1);
-
-          token.employeeId = employee?.id || null;
-          if (employee) {
-            token.role = sessionRoleFromAccessLevel(employee.accessLevel);
-          }
+          token.employeeId = null;
         }
       }
       return token;

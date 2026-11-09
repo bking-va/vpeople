@@ -153,10 +153,20 @@ export function decideVendastaEmployeeAccess(
 }
 
 export function isSafeInternalPath(value: string): boolean {
-  if (!value.startsWith("/")) return false;
-  if (value.startsWith("//") || value.startsWith("/\\")) return false;
-  if (value.includes("\\") || value.includes("://")) return false;
-  return true;
+  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) {
+    return false;
+  }
+  if (/[\s\\]/.test(value) || value.includes("://")) return false;
+  try {
+    const resolved = new URL(value, "https://vpeople.invalid");
+    return (
+      resolved.origin === "https://vpeople.invalid" &&
+      !resolved.username &&
+      !resolved.password
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function parseVendastaEntrySearchParams(searchParams: URLSearchParams): {

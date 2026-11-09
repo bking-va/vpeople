@@ -239,6 +239,7 @@ describe("Vendasta SSO entry URL", () => {
   test("GET /api/auth/signin/vendasta is not the registered Entry Url", () => {
     expect(VENDASTA_ENTRY_PATH).toBe("/auth/vendasta");
     expect(VENDASTA_ENTRY_PATH).not.toBe("/api/auth/signin/vendasta");
+    expect(VENDASTA_ENTRY_PATH).not.toBe("/api/auth/callback/vendasta");
   });
 
   test("parses account_id for the authorization request and keeps nextUrl internal", () => {
@@ -255,6 +256,8 @@ describe("Vendasta SSO entry URL", () => {
   test("drops unsafe nextUrl and malformed account_id", () => {
     expect(isSafeInternalPath("https://evil.example/phish")).toBe(false);
     expect(isSafeInternalPath("//evil.example")).toBe(false);
+    expect(isSafeInternalPath("/\\evil.example")).toBe(false);
+    expect(isSafeInternalPath("/people\n/evil")).toBe(false);
     const parsed = parseVendastaEntrySearchParams(
       new URLSearchParams({
         account_id: "AG-123&inject=1",
