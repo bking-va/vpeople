@@ -93,6 +93,9 @@ describe("Employee API DTO Security", () => {
     expect(expectedDTO).not.toHaveProperty("addressStreet1");
     expect(expectedDTO).not.toHaveProperty("createdAt");
     expect(expectedDTO).not.toHaveProperty("updatedAt");
+    expect(expectedDTO).not.toHaveProperty("roeCode");
+    expect(expectedDTO).not.toHaveProperty("terminationType");
+    expect(expectedDTO).not.toHaveProperty("terminationReasonId");
 
     // Verify only safe fields are included
     expect(expectedDTO).toHaveProperty("id");
@@ -113,6 +116,9 @@ describe("Employee API DTO Security", () => {
       "passwordHash",
       "accessToken",
       "refreshToken",
+      "roeCode",
+      "terminationType",
+      "terminationReasonId",
     ];
 
     const minimalDTOFields = [

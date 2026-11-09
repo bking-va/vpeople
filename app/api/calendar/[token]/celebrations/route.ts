@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
+import { escapeIcalText } from "@/lib/ical";
 
 function icalDate(month: number, day: number, year: number) {
   return `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
@@ -63,7 +64,7 @@ export async function GET(
             `UID:birthday-${person.id}-${next.getFullYear()}@vpeople.vendasta.com`,
             `DTSTART;VALUE=DATE:${start}`,
             `DTEND;VALUE=DATE:${end}`,
-            `SUMMARY:${name} — Birthday`,
+            `SUMMARY:${escapeIcalText(`${name} — Birthday`)}`,
             "TRANSP:TRANSPARENT",
             "END:VEVENT",
           ].join("\r\n")
@@ -83,7 +84,7 @@ export async function GET(
             `UID:anniversary-${person.id}-${next.getFullYear()}@vpeople.vendasta.com`,
             `DTSTART;VALUE=DATE:${start}`,
             `DTEND;VALUE=DATE:${end}`,
-            `SUMMARY:${name} — ${years} year anniversary`,
+            `SUMMARY:${escapeIcalText(`${name} — ${years} year anniversary`)}`,
             "TRANSP:TRANSPARENT",
             "END:VEVENT",
           ].join("\r\n")
@@ -97,7 +98,7 @@ export async function GET(
       "PRODID:-//vPeople//Celebrations Calendar//EN",
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
-      "X-WR-CALNAME:vPeople - Birthdays and Anniversaries",
+      `X-WR-CALNAME:${escapeIcalText("vPeople - Birthdays and Anniversaries")}`,
       "X-WR-TIMEZONE:UTC",
       ...events,
       "END:VCALENDAR",

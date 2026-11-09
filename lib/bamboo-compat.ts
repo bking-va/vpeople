@@ -27,6 +27,7 @@ import {
 import { getWhosOut } from "@/lib/whos-out";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { CANADIAN_ROE_CODES } from "@/lib/roe";
+import { canViewTerminationDetails, redactTerminationDetails } from "@/lib/authz";
 
 function viewerFromAuth(auth: ApiKeyAuth): EmployeeScopeViewer {
   return {
@@ -210,17 +211,32 @@ export async function bambooEmploymentStatusTable(request: NextRequest, employee
   });
 
   return NextResponse.json(
-    filtered.map((row) => ({
-      id: String(row.id),
-      employeeId: String(row.employeeId),
-      date: row.date,
-      employmentStatus: formatEmploymentStatus(row.employmentStatus),
-      comment: row.comment || "",
-      terminationReasonId: row.terminationReasonId ? String(row.terminationReasonId) : null,
-      terminationTypeId: row.changeType === "terminate" ? "termination" : null,
-      terminationRehireId: row.changeType === "rehire" ? "eligible" : null,
-      terminationRegrettableId: null,
-    }))
+    filtered.map((row) => {
+      const allowed = canViewTerminationDetails({
+        isViewingSelf: row.employeeId === gate.auth.employeeId,
+        canViewSensitivePersonalInfo: gate.auth.permissions.canViewSensitivePersonalInfo,
+      });
+      const safe = redactTerminationDetails(
+        {
+          comment: row.comment || "",
+          changeType: row.changeType,
+          terminationReasonId: row.terminationReasonId ? String(row.terminationReasonId) : null,
+          terminationTypeId: row.changeType === "terminate" ? "termination" : null,
+        },
+        allowed
+      );
+      return {
+        id: String(row.id),
+        employeeId: String(row.employeeId),
+        date: row.date,
+        employmentStatus: formatEmploymentStatus(row.employmentStatus),
+        comment: safe.comment || "",
+        terminationReasonId: safe.terminationReasonId,
+        terminationTypeId: safe.terminationTypeId,
+        terminationRehireId: row.changeType === "rehire" ? "eligible" : null,
+        terminationRegrettableId: null,
+      };
+    })
   );
 }
 
@@ -334,7 +350,7 @@ export async function bambooMetaLists(request: NextRequest) {
     })),
   });
 
-  return NextResponse.json([
+  const lists = [
     list(6, "department", "Department", deptRows),
     list(8, "location", "Location", locRows),
     list(
@@ -350,22 +366,29 @@ export async function bambooMetaLists(request: NextRequest) {
       { id: 4, name: "On Leave" },
       { id: 5, name: "Terminated" },
     ]),
-    list(
-      20,
-      "terminationReason",
-      "Termination Reason",
-      reasonRows.map((r) => ({ id: r.id, name: r.name, createdAt: r.createdAt }))
-    ),
-    list(
-      21,
-      "roeCode",
-      "Canadian ROE Code",
-      CANADIAN_ROE_CODES.map((row, index) => ({
-        id: index + 1,
-        name: `${row.code} — ${row.label}`,
-      }))
-    ),
-  ]);
+  ];
+
+  if (gate.auth.permissions.canViewSensitivePersonalInfo) {
+    lists.push(
+      list(
+        20,
+        "terminationReason",
+        "Termination Reason",
+        reasonRows.map((r) => ({ id: r.id, name: r.name, createdAt: r.createdAt }))
+      ),
+      list(
+        21,
+        "roeCode",
+        "Canadian ROE Code",
+        CANADIAN_ROE_CODES.map((row, index) => ({
+          id: index + 1,
+          name: `${row.code} — ${row.label}`,
+        }))
+      )
+    );
+  }
+
+  return NextResponse.json(lists);
 }
 
 export async function bambooEmployeesChanged(request: NextRequest) {

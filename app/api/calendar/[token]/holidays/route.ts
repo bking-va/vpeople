@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, holidays } from "@/lib/db/schema";
 import { eq, gte } from "drizzle-orm";
+import { escapeIcalText } from "@/lib/ical";
 
 export async function GET(
   request: NextRequest,
@@ -46,7 +47,7 @@ export async function GET(
         `UID:holiday-${holiday.id}@vpeople.vendasta.com`,
         `DTSTART;VALUE=DATE:${dateStr}`,
         `DTEND;VALUE=DATE:${endDateStr}`,
-        `SUMMARY:${holiday.name} (${holiday.country})`,
+        `SUMMARY:${escapeIcalText(`${holiday.name} (${holiday.country})`)}`,
         "STATUS:CONFIRMED",
         "TRANSP:TRANSPARENT",
         "END:VEVENT",
@@ -59,7 +60,7 @@ export async function GET(
       "PRODID:-//vPeople//Holidays Calendar//EN",
       "CALSCALE:GREGORIAN",
       "METHOD:PUBLISH",
-      "X-WR-CALNAME:vPeople - Holidays",
+      `X-WR-CALNAME:${escapeIcalText("vPeople - Holidays")}`,
       "X-WR-TIMEZONE:UTC",
       ...icalEvents,
       "END:VCALENDAR",

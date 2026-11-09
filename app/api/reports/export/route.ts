@@ -153,7 +153,13 @@ export async function GET(request: NextRequest) {
 
     if (reportType === "employment-status") {
       const allowed = await scopedEmployeeIds(viewer);
-      const rows = filterRowsByEmployeeScope(await getEmploymentStatusHistoryReport(), allowed);
+      const rows = filterRowsByEmployeeScope(
+        await getEmploymentStatusHistoryReport({
+          viewerId: viewer.employeeId,
+          canViewSensitivePersonalInfo: Boolean(viewer.canViewSensitivePersonalInfo),
+        }),
+        allowed
+      );
       let csvData =
         csvRow(["Employee", "Status", "Effective Date", "Comment", "Department", "Location"]) +
         "\n";

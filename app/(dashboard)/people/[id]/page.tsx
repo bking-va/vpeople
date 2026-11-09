@@ -36,7 +36,9 @@ import { getUserPermissions } from "@/lib/permissions";
 import {
   canViewImmigrationNumbers,
   canViewPrivateDocuments,
+  canViewTerminationDetails,
   canViewTimeOffLedger,
+  redactTerminationDetails,
   redactVisaDocumentNumber,
   visibleProfileEmail,
 } from "@/lib/authz";
@@ -94,8 +96,6 @@ export default async function EmployeeProfilePage({
       originalHireDate: employees.originalHireDate,
       employmentStatus: employees.employmentStatus,
       terminationDate: employees.terminationDate,
-      terminationType: employees.terminationType,
-      roeCode: employees.roeCode,
       jobFamilyId: employees.jobFamilyId,
       jobLevelId: employees.jobLevelId,
       accessLevel: employees.accessLevel,
@@ -184,6 +184,10 @@ export default async function EmployeeProfilePage({
   const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
   const canEditCompensation = permissions.canEditCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
+  const canViewTermDetails = canViewTerminationDetails({
+    isViewingSelf,
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  });
   const canEditEmployee = isViewingSelf || permissions.canManageUsers;
   const displayEmail = visibleProfileEmail(employee.email, {
     isViewingSelf,
@@ -206,6 +210,18 @@ export default async function EmployeeProfilePage({
         .limit(1)
         .then((rows) => rows[0] || { sin: null, ssn: null })
     : { sin: null, ssn: null };
+
+  const terminationDetails = canViewTermDetails
+    ? await db
+        .select({
+          roeCode: employees.roeCode,
+          terminationType: employees.terminationType,
+        })
+        .from(employees)
+        .where(eq(employees.id, employeeId))
+        .limit(1)
+        .then((rows) => rows[0] || { roeCode: null, terminationType: null })
+    : { roeCode: null, terminationType: null };
 
   const [compHistory, bonuses, equity] = canViewCompensation
     ? await Promise.all([
@@ -276,11 +292,19 @@ export default async function EmployeeProfilePage({
     .orderBy(employeeTasks.createdAt);
 
   const statusHistoryRecords = canViewLedger
-    ? await db
-        .select()
-        .from(employmentStatusHistory)
-        .where(eq(employmentStatusHistory.employeeId, employeeId))
-        .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id))
+    ? (
+        await db
+          .select({
+            id: employmentStatusHistory.id,
+            effectiveDate: employmentStatusHistory.effectiveDate,
+            status: employmentStatusHistory.status,
+            changeType: employmentStatusHistory.changeType,
+            comment: employmentStatusHistory.comment,
+          })
+          .from(employmentStatusHistory)
+          .where(eq(employmentStatusHistory.employeeId, employeeId))
+          .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id))
+      ).map((record) => redactTerminationDetails(record, canViewTermDetails))
     : [];
 
   const canViewDocs = canViewPrivateDocuments({
@@ -567,11 +591,11 @@ export default async function EmployeeProfilePage({
                   value={formatDate(employee.terminationDate)}
                 />
               )}
-              {employee.roeCode && (
-                <InfoField label="Canadian ROE code" value={employee.roeCode} />
+              {canViewTermDetails && terminationDetails.roeCode && (
+                <InfoField label="Canadian ROE code" value={terminationDetails.roeCode} />
               )}
-              {employee.terminationType && (
-                <InfoField label="Termination type" value={employee.terminationType} />
+              {canViewTermDetails && terminationDetails.terminationType && (
+                <InfoField label="Termination type" value={terminationDetails.terminationType} />
               )}
             </CardContent>
           </Card>

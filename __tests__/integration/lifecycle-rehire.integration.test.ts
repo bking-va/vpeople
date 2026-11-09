@@ -12,7 +12,7 @@ import {
   taskTemplates,
   employeeTasks,
 } from "@/lib/db/schema";
-import { terminateEmployee, rehireEmployee } from "@/lib/lifecycle";
+import { publicEmployeeDto, terminateEmployee, rehireEmployee } from "@/lib/lifecycle";
 import { DEFAULT_TERMINATION_REASONS } from "@/lib/roe";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -101,6 +101,11 @@ describe("Employee lifecycle (Real Postgres)", () => {
     expect(term.roeCode).toBe("E");
     expect(term.employee.employmentStatus).toBe("terminated");
     expect(term.employee.terminationDate).toBe("2024-12-31");
+
+    const dto = publicEmployeeDto(term.employee);
+    expect(dto).not.toHaveProperty("roeCode");
+    expect(dto).not.toHaveProperty("terminationType");
+    expect(dto).not.toHaveProperty("terminationReasonId");
 
     const historyAfterTerm = await db
       .select()

@@ -8,6 +8,7 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { createApprovalRequest } from "@/lib/approvals";
+import { sanitizePersonNameFields, UNSAFE_PERSON_NAME_MESSAGE } from "@/lib/person-name";
 
 export async function updateEmployeeProfile(
   employeeId: number,
@@ -55,10 +56,17 @@ export async function updateEmployeeProfile(
     return { success: false, error: "Employee not found" };
   }
 
+  let safeData = data;
+  try {
+    safeData = sanitizePersonNameFields(data as Record<string, unknown>) as typeof data;
+  } catch {
+    return { success: false, error: UNSAFE_PERSON_NAME_MESSAGE };
+  }
+
   await db
     .update(employees)
     .set({
-      ...data,
+      ...safeData,
       updatedAt: new Date(),
     })
     .where(eq(employees.id, employeeId));
@@ -71,7 +79,7 @@ export async function updateEmployeeProfile(
     changes: {
       employeeId,
       before: existingEmployee,
-      after: data,
+      after: safeData,
     },
   });
 

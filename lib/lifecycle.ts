@@ -220,8 +220,6 @@ export function publicEmployeeDto(employee: {
   hireDate: string | null;
   originalHireDate?: string | null;
   terminationDate: string | null;
-  terminationType?: string | null;
-  roeCode?: string | null;
   jobTitle?: string | null;
 }) {
   return {
@@ -234,8 +232,6 @@ export function publicEmployeeDto(employee: {
     hireDate: employee.hireDate,
     originalHireDate: employee.originalHireDate ?? null,
     terminationDate: employee.terminationDate,
-    terminationType: employee.terminationType ?? null,
-    roeCode: employee.roeCode ?? null,
     jobTitle: employee.jobTitle ?? null,
   };
 }

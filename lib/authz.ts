@@ -47,6 +47,47 @@ export function canViewImmigrationNumbers(opts: {
   return opts.isViewingSelf || opts.canViewSensitivePersonalInfo;
 }
 
+/** ROE codes, termination reasons, and termination type: self or sensitive-HR only. */
+export function canViewTerminationDetails(opts: {
+  isViewingSelf: boolean;
+  canViewSensitivePersonalInfo: boolean;
+}) {
+  return opts.isViewingSelf || opts.canViewSensitivePersonalInfo === true;
+}
+
+export function redactTerminationDetails<
+  T extends {
+    roeCode?: string | null;
+    terminationType?: string | null;
+    terminationReasonId?: number | string | null;
+    terminationReason?: string | null;
+    terminationTypeId?: string | null;
+    comment?: string | null;
+    changeType?: string | null;
+  },
+>(row: T, allowed: boolean): T {
+  if (allowed) return row;
+  return {
+    ...row,
+    ...(Object.prototype.hasOwnProperty.call(row, "roeCode") ? { roeCode: null } : {}),
+    ...(Object.prototype.hasOwnProperty.call(row, "terminationType")
+      ? { terminationType: null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(row, "terminationReasonId")
+      ? { terminationReasonId: null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(row, "terminationReason")
+      ? { terminationReason: null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(row, "terminationTypeId")
+      ? { terminationTypeId: null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(row, "comment") && row.changeType === "terminate"
+      ? { comment: null }
+      : {}),
+  } as T;
+}
+
 export const VENDASTA_WORK_EMAIL_DOMAIN = "vendasta.com";
 
 /** Work emails @vendasta.com are directory-visible. Any other address is personal. */

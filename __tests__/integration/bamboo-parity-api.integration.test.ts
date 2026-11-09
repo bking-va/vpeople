@@ -15,7 +15,9 @@ import {
   jobOpenings,
   candidates,
   accessLevels,
+  terminationReasons,
 } from "@/lib/db/schema";
+import { DEFAULT_TERMINATION_REASONS } from "@/lib/roe";
 import { GET as whosOut } from "@/app/api/bamboo/v1/time_off/whos_out/route";
 import { GET as jobInfo } from "@/app/api/bamboo/v1/tables/jobInfo/route";
 import { GET as compensation } from "@/app/api/bamboo/v1/tables/compensation/route";
@@ -38,10 +40,14 @@ describe("Bamboo parity API (Real Postgres)", () => {
   const runId = Date.now();
   const adminKey = `bamboo-parity-admin-${runId}`;
   const empKey = `bamboo-parity-emp-${runId}`;
+  const mgrKey = `bamboo-parity-mgr-${runId}`;
   let admin: { id: number };
+  let manager: { id: number };
   let employee: { id: number };
+  let departed: { id: number };
   let openingId: number;
   let candidateId: number;
+  let resignationId: number;
 
   beforeAll(async () => {
     await db
@@ -62,6 +68,32 @@ describe("Bamboo parity API (Real Postgres)", () => {
       })
       .onConflictDoNothing();
 
+    await db
+      .insert(accessLevels)
+      .values({
+        name: `Bamboo Manager ${runId}`,
+        code: "manager",
+        canViewCompensation: false,
+        canEditCompensation: false,
+        canViewSensitivePersonalInfo: false,
+        canEditSensitivePersonalInfo: false,
+        canViewBankInfo: false,
+        canEditBankInfo: false,
+        canManageUsers: false,
+        canManageSettings: false,
+        canApproveTimeOff: true,
+        canApproveCompensationChanges: false,
+      })
+      .onConflictDoNothing();
+
+    await db.insert(terminationReasons).values([...DEFAULT_TERMINATION_REASONS]).onConflictDoNothing();
+    const [resignation] = await db
+      .select()
+      .from(terminationReasons)
+      .where(eq(terminationReasons.code, "resignation"))
+      .limit(1);
+    resignationId = resignation.id;
+
     const [adm] = await db
       .insert(employees)
       .values({
@@ -78,6 +110,22 @@ describe("Bamboo parity API (Real Postgres)", () => {
       .returning();
     admin = adm;
 
+    const [mgr] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `BP_MGR_${runId}`,
+        firstName: "Bamboo",
+        lastName: "Manager",
+        email: `bp.mgr.${runId}@vendasta.com`,
+        hireDate: "2018-01-01",
+        employmentStatus: "full_time",
+        accessLevel: "manager",
+        apiKeyHash: crypto.createHash("sha256").update(mgrKey).digest("hex"),
+        apiKeyCreatedAt: new Date(),
+      })
+      .returning();
+    manager = mgr;
+
     const [emp] = await db
       .insert(employees)
       .values({
@@ -89,11 +137,32 @@ describe("Bamboo parity API (Real Postgres)", () => {
         employmentStatus: "full_time",
         accessLevel: "employee",
         jobTitle: "Designer",
+        managerId: manager.id,
         apiKeyHash: crypto.createHash("sha256").update(empKey).digest("hex"),
         apiKeyCreatedAt: new Date(),
       })
       .returning();
     employee = emp;
+
+    const [term] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `BP_TERM_${runId}`,
+        firstName: "Bamboo",
+        lastName: "Departed",
+        email: `bp.term.${runId}@gmail.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "terminated",
+        terminationDate: "2024-06-01",
+        terminationType: "voluntary",
+        terminationReasonId: resignationId,
+        roeCode: "E",
+        accessLevel: "employee",
+        managerId: manager.id,
+        jobTitle: "Designer",
+      })
+      .returning();
+    departed = term;
 
     await db.insert(jobHistory).values({
       employeeId: employee.id,
@@ -116,6 +185,14 @@ describe("Bamboo parity API (Real Postgres)", () => {
       status: "full_time",
       changeType: "hire",
       comment: "Hire",
+    });
+    await db.insert(employmentStatusHistory).values({
+      employeeId: departed.id,
+      effectiveDate: "2024-06-01",
+      status: "terminated",
+      changeType: "terminate",
+      comment: "Resignation",
+      terminationReasonId: resignationId,
     });
     await db.insert(documents).values({
       employeeId: employee.id,
@@ -156,7 +233,10 @@ describe("Bamboo parity API (Real Postgres)", () => {
       await db.delete(jobHistory).where(eq(jobHistory.employeeId, employee.id));
       await db.delete(compensationHistory).where(eq(compensationHistory.employeeId, employee.id));
       await db.delete(employmentStatusHistory).where(eq(employmentStatusHistory.employeeId, employee.id));
+      await db.delete(employmentStatusHistory).where(eq(employmentStatusHistory.employeeId, departed.id));
       await db.delete(employees).where(eq(employees.id, employee.id));
+      await db.delete(employees).where(eq(employees.id, departed.id));
+      await db.delete(employees).where(eq(employees.id, manager.id));
       await db.delete(employees).where(eq(employees.id, admin.id));
     } finally {
       await pool.end();
@@ -205,6 +285,16 @@ describe("Bamboo parity API (Real Postgres)", () => {
     expect(listsRes.status).toBe(200);
     const lists = await listsRes.json();
     expect(lists.some((l: { alias: string }) => l.alias === "employmentStatus")).toBe(true);
+    expect(lists.some((l: { alias: string }) => l.alias === "terminationReason")).toBe(true);
+    expect(lists.some((l: { alias: string }) => l.alias === "roeCode")).toBe(true);
+
+    const departedStatus = statuses.find(
+      (row: { employeeId: string; comment?: string }) => row.employeeId === String(departed.id)
+    );
+    expect(departedStatus).toBeDefined();
+    expect(departedStatus.terminationReasonId).toBe(String(resignationId));
+    expect(departedStatus.comment).toBe("Resignation");
+    expect(departedStatus.terminationTypeId).toBe("termination");
 
     const changedRes = await changed(
       new NextRequest("http://localhost/api/bamboo/v1/employees/changed?since=2000-01-01T00:00:00Z", {
@@ -248,5 +338,39 @@ describe("Bamboo parity API (Real Postgres)", () => {
       (await atsJobs(new NextRequest("http://localhost/api/bamboo/v1/applicant_tracking/jobs", { headers })))
         .status
     ).toBe(403);
+  });
+
+  test("managers without sensitive-HR cannot read ROE or termination reasons", async () => {
+    const mgrHeaders = authHeader(mgrKey);
+    const empHeaders = authHeader(empKey);
+
+    const listsRes = await metaLists(
+      new NextRequest("http://localhost/api/bamboo/v1/meta/lists", { headers: empHeaders })
+    );
+    expect(listsRes.status).toBe(200);
+    const lists = await listsRes.json();
+    expect(lists.some((l: { alias: string }) => l.alias === "terminationReason")).toBe(false);
+    expect(lists.some((l: { alias: string }) => l.alias === "roeCode")).toBe(false);
+
+    const statusRes = await employmentStatus(
+      new NextRequest("http://localhost/api/bamboo/v1/tables/employmentStatus", { headers: mgrHeaders })
+    );
+    expect(statusRes.status).toBe(200);
+    const statuses = await statusRes.json();
+    const departedStatus = statuses.find(
+      (row: { employeeId: string }) => row.employeeId === String(departed.id)
+    );
+    expect(departedStatus).toBeDefined();
+    expect(departedStatus.terminationReasonId).toBeNull();
+    expect(departedStatus.terminationTypeId).toBeNull();
+    expect(departedStatus.comment).toBe("");
+
+    const empStatusRes = await employmentStatus(
+      new NextRequest("http://localhost/api/bamboo/v1/tables/employmentStatus", { headers: empHeaders })
+    );
+    const empStatuses = await empStatusRes.json();
+    expect(
+      empStatuses.some((row: { employeeId: string }) => row.employeeId === String(departed.id))
+    ).toBe(false);
   });
 });
