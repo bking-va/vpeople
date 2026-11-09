@@ -32,7 +32,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] New team members widget ✅ Done
 - [x] People without raise in 12+ months ✅ Done (dashboard widget + `/reports/standard?type=no-raise`; pay amounts hidden without canViewCompensation)
 - [x] Onboarding overdue/scheduled ✅ Done (dashboard overdue/scheduled counts; `/onboarding` already listed tasks)
-- [ ] Announcements - Missing
+- [x] Announcements ✅ Done (home widget + `/api/announcements`; demo seed)
 
 ---
 
@@ -110,9 +110,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Column chooser UI ✅ Complete (ColumnChooserDialog wired into /people/directory with localStorage persistence)
 - [x] New Employee wizard ✅ Done (/people/new - see section 9)
 - [x] Terminate employee flow ✅ Done (/people/[id]/terminate - see section 9)
-  - [ ] Termination reasons - Missing
-  - [ ] Canadian ROE code mapping - Missing
-- [ ] Rehire flow - Missing
+  - [x] Termination reasons ✅ Done (settings list + required on terminate)
+  - [x] Canadian ROE code mapping ✅ Done (reason.roeCode stored on the employee)
+- [x] Rehire flow ✅ Done (/people/[id]/rehire; new hire date; original hire date and history preserved)
 
 ---
 
@@ -127,7 +127,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Job Profiles (family/level)
 - [ ] Employment Statuses
 - [ ] Comp Change Reasons
-- [ ] Termination Reasons
+- [x] Termination Reasons ✅ Done (/settings/termination-reasons, mapped to ROE codes)
 - [ ] Degrees
 - [ ] Emergency Relationships
 - [ ] Nationalities
@@ -186,9 +186,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Information Updates (by location) - Missing
 - [x] Time Off (reports-to) ✅ Done (workflow-driven when enabled, balance deducted atomically)
 - [x] Compensation changes with approval ✅ Done (routes through workflow, commits to compensationHistory on final approval)
-- [ ] Employment Status changes with approval - Missing
+- [x] Employment Status changes with approval ✅ Done (employment_status_change workflow; Job tab form; SoD/self-approval blocked)
 - [x] Job Info changes with approval ✅ Done (routes through workflow, updates employee record and jobHistory on final approval)
-- [ ] Promotion workflow - Missing
+- [x] Promotion workflow ✅ Done (promotion workflow + Job tab form; writes job + status history)
 - [x] Enable/disable per workflow ✅ Done
 - [ ] Configurable requester and approver paths - Partial (approver role-based)
 
@@ -217,7 +217,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Token regeneration ✅ Done (dbed588 - POST /api/calendar/generate-token)
   - [x] Subscribe URLs display ✅ Done (dbed588 - shown on /time-off page)
   - [x] Vercel Authentication caveat documented ✅ Done (alert in CalendarFeeds)
-  - [ ] Birthdays calendar - Missing
+  - [x] Birthdays calendar ✅ Done (GET /api/calendar/[token]/celebrations — birthdays and anniversaries)
 - [x] Outbound webhooks ✅ Done
 
 ---
@@ -329,13 +329,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 - [x] Company file categories ✅ Done (documents.category enum)
 - [x] Employee folders ✅ Done (documents linked to employeeId)
-- [x] Signature templates with merge fields ⚠️ Partial (documents.status enum includes pending_signature and signed; sign endpoint exists)
-  - [ ] Offer letter - Template missing
-  - [ ] Merit/increase letter - Template missing
-  - [ ] Promotion letter - Template missing
-  - [ ] Title change letter - Template missing
-  - [ ] Commission letter - Template missing
-  - [ ] Termination letter - Template missing
+  - [x] Signature templates with merge fields ✅ Done (`{{mergeField}}` helpers + seeded templates at /settings/letter-templates)
+  - [x] Offer letter ✅ Done
+  - [x] Merit/increase letter ✅ Done
+  - [x] Promotion letter ✅ Done
+  - [x] Title change letter ✅ Done
+  - [x] Commission letter ✅ Done
+  - [x] Termination letter ✅ Done
   - [ ] India-specific letters - Template missing
 - [x] Pending Signatures view ✅ Done (ProfileDocuments + home to-do widget for pending_signature)
 - [x] Signed documents archive ✅ Done (ProfileDocuments component shows signed docs)
@@ -415,13 +415,13 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ### Custom Report Builder
 - [x] Field selection ✅ Done (/reports/custom page with multi-select)
-- [x] Filters ⚠️ Partial (filter UI exists; backend filtering not fully implemented)
+- [x] Filters ✅ Done (status, search, hire-date range applied in `/api/reports/preview` and export)
 - [x] Group-by ✅ Done (grouping selector and preview)
 - [x] Save reports ✅ Done (Save Report button + dialog, saved_reports table + API)
 - [x] Scheduled reports ✅ Done (scheduled_reports table + API; schedules stored, no external delivery)
 - [ ] Share reports - Missing
 - [x] Export CSV ✅ Done (preview endpoint returns CSV)
-- [ ] Access level enforcement - Missing
+- [x] Access level enforcement ✅ Done (same profile rules: managers see self+reports; personal emails hidden unless self/HR; @vendasta.com visible)
 
 ---
 
@@ -448,16 +448,16 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] `/api/gateway/v1/[company]/reports/custom` ✅ Done
   - [x] `/api/bamboo/v1/time_off/requests` ✅ Done
   - [x] `/api/bamboo/v1/time_off/create` ✅ Done
-  - [ ] `/time_off/whos_out` - Missing
-  - [ ] `/tables/jobInfo` - Missing
-  - [ ] `/tables/compensation` - Missing
-  - [ ] `/tables/employmentStatus` - Missing
-  - [ ] `/files` - Missing
-  - [ ] `/meta/fields` - Missing
-  - [ ] `/meta/lists` - Missing
-  - [ ] `/employees/changed` - Missing
-  - [ ] `/applicant_tracking/applications` - Missing
-  - [ ] `/applicant_tracking/jobs` - Missing
+  - [x] `/time_off/whos_out` ✅ Done (`/api/bamboo/v1/time_off/whos_out`)
+  - [x] `/tables/jobInfo` ✅ Done
+  - [x] `/tables/compensation` ✅ Done (403 without canViewCompensation)
+  - [x] `/tables/employmentStatus` ✅ Done
+  - [x] `/files` ✅ Done
+  - [x] `/meta/fields` ✅ Done
+  - [x] `/meta/lists` ✅ Done
+  - [x] `/employees/changed` ✅ Done
+  - [x] `/applicant_tracking/applications` ✅ Done
+  - [x] `/applicant_tracking/jobs` ✅ Done
   - [x] Webhook endpoints ✅ Done (/api/webhooks CRUD + delivery with HMAC + retry logic)
 - [x] API key management ✅ Done
   - [x] Per-integration keys ✅ Done (generate/revoke UI at /settings/api-keys)
@@ -500,6 +500,10 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
     - [x] Compensation change workflow routing
     - [x] Job info change workflow routing
     - [x] Bamboo API permission enforcement
+    - [x] Terminate / ROE / rehire
+    - [x] Employment status and promotion approvals
+    - [x] Custom report access-level scoping and backend filters
+    - [x] Bamboo tables, files, meta, changed, ATS, and who's-out endpoints
 - [ ] E2E tests for critical flows - Missing
 - [ ] Performance testing - Missing
 - [x] Security audit ⚠️ Partial (API key auth + field-level permissions + scope enforcement verified)
@@ -520,10 +524,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 **Last Updated:** 2026-11-09  
 **Current Phase:** 
-- ✅ Multi-step approvals complete (time-off, comp changes, job info changes)
-- ✅ Atomic balance deduction using db.batch
-- ✅ Unified /approvals dashboard
-- ✅ Integration tests against real Postgres
-- ✅ Seed org structure: CEO with exactly 6 direct reports, no manager >10 reports, 85 total employees
-- ✅ Bamboo API compensation fields returned when canViewCompensation=true
-- ✅ API keys UI shows status, created date, and last-used timestamps
+- ✅ Multi-step approvals complete (time-off, comp, job info, employment status, promotion)
+- ✅ Terminate reasons + Canadian ROE mapping + rehire (original hire date preserved)
+- ✅ Effective-dated employment_status_history with change types
+- ✅ Custom reports: backend filters + access-level scoping + email privacy
+- ✅ Remaining BambooHR-compatible API tables/meta/files/ATS/who's out
+- ✅ Home announcements, celebrations calendar, seeded letter templates
