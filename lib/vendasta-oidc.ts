@@ -22,6 +22,7 @@ export const VENDASTA_OIDC_SCOPES = "openid profile";
 
 export const VENDASTA_ENTRY_PATH = "/auth/vendasta";
 export const VENDASTA_CALLBACK_PATH = "/api/auth/callback/vendasta";
+export const VENDASTA_LOGOUT_PATH = "/auth/logout";
 export const VENDASTA_LEGACY_SESSION_PATH = "/api/auth/vendasta/legacy-session";
 
 export const LEGACY_SESSION_DISABLED = {
@@ -189,12 +190,14 @@ export function parseVendastaEntrySearchParams(searchParams: URLSearchParams): {
 export function vendastaRegistrationUrls(appOrigin: string): {
   entryUrl: string;
   redirectUri: string;
+  logoutUrl: string;
   sessionUrl: string;
 } {
   const origin = appOrigin.replace(/\/$/, "");
   return {
-    entryUrl: `${origin}${VENDASTA_ENTRY_PATH}?account_id={account_id}`,
+    entryUrl: `${origin}${VENDASTA_ENTRY_PATH}`,
     redirectUri: `${origin}${VENDASTA_CALLBACK_PATH}`,
+    logoutUrl: `${origin}${VENDASTA_LOGOUT_PATH}`,
     sessionUrl: `${origin}${VENDASTA_LEGACY_SESSION_PATH}`,
   };
 }

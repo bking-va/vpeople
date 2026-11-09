@@ -262,6 +262,7 @@ const authConfig = {
   pages: {
     signIn: "/auth/signin",
     error: "/auth/error",
+    signOut: "/auth/logout",
   },
 } as any;
 

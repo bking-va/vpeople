@@ -4,6 +4,7 @@ import {
   VENDASTA_CALLBACK_PATH,
   VENDASTA_ENTRY_PATH,
   VENDASTA_LEGACY_SESSION_PATH,
+  VENDASTA_LOGOUT_PATH,
   VENDASTA_OIDC_AUTHORIZATION,
   VENDASTA_OIDC_ISSUER,
   VENDASTA_OIDC_SCOPES,
@@ -276,18 +277,20 @@ describe("Vendasta SSO entry URL", () => {
     expect(parsed.callbackUrl).toBe("/people");
   });
 
-  test("registration URLs keep callback distinct from the legacy session POST", () => {
+  test("registration URLs keep callback distinct from logout and session POST", () => {
     const urls = vendastaRegistrationUrls("https://vpeople.example.com/");
-    expect(urls.entryUrl).toBe(
-      "https://vpeople.example.com/auth/vendasta?account_id={account_id}"
-    );
+    expect(urls.entryUrl).toBe("https://vpeople.example.com/auth/vendasta");
     expect(urls.redirectUri).toBe(
       "https://vpeople.example.com/api/auth/callback/vendasta"
     );
+    expect(urls.logoutUrl).toBe("https://vpeople.example.com/auth/logout");
     expect(urls.sessionUrl).toBe(
       `https://vpeople.example.com${VENDASTA_LEGACY_SESSION_PATH}`
     );
+    expect(VENDASTA_LOGOUT_PATH).toBe("/auth/logout");
+    expect(urls.logoutUrl).not.toBe(urls.redirectUri);
     expect(urls.sessionUrl).not.toBe(urls.redirectUri);
+    expect(urls.logoutUrl).not.toBe(urls.sessionUrl);
   });
 
   test("credentials are required under dedicated AUTH_VENDASTA_* names", () => {

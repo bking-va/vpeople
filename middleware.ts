@@ -8,6 +8,7 @@ export function middleware(req: NextRequest) {
     "/auth/signin",
     "/auth/error",
     "/auth/vendasta",
+    "/auth/logout",
     "/careers",
   ];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
