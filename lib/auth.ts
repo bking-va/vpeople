@@ -175,17 +175,23 @@ const authConfig = {
         token.role = user.role || "employee";
 
         if (account?.provider === VENDASTA_PROVIDER_ID) {
+          const sub =
+            typeof profile?.sub === "string"
+              ? profile.sub.trim()
+              : account.providerAccountId;
           await linkVendastaEmployee(user.id, profile);
           const [employee] = await db
             .select({
               id: employees.id,
+              email: employees.email,
               accessLevel: employees.accessLevel,
             })
             .from(employees)
-            .where(eq(employees.userId, user.id))
+            .where(eq(employees.vendastaSub, sub))
             .limit(1);
           token.employeeId = employee?.id ?? null;
           token.role = sessionRoleFromAccessLevel(employee?.accessLevel);
+          if (employee?.email) token.email = employee.email;
           return token;
         }
 
@@ -211,12 +217,16 @@ const authConfig = {
           session.user.id = token.id as string;
           session.user.role = (token.role as string) || "employee";
           session.user.employeeId = (token.employeeId as number) || null;
+          if (typeof token.email === "string" && token.email) {
+            session.user.email = token.email;
+          }
         } else if (user) {
           session.user.id = user.id;
 
           const [employee] = await db
             .select({
               id: employees.id,
+              email: employees.email,
               accessLevel: employees.accessLevel,
             })
             .from(employees)
@@ -227,6 +237,9 @@ const authConfig = {
           session.user.role = employee
             ? sessionRoleFromAccessLevel(employee.accessLevel)
             : "employee";
+          if (employee?.email) {
+            session.user.email = employee.email;
+          }
         }
       }
       return session;

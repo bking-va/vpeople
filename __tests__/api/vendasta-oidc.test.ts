@@ -156,6 +156,13 @@ describe("Vendasta identity mapping", () => {
       bindSub: false,
       sessionRole: "employee",
     });
+    expect(
+      decideVendastaEmployeeAccess(
+        { sub: SUB, roles: ["partner"] },
+        employee({ accessLevel: "global_view" }),
+        null
+      )
+    ).toMatchObject({ ok: true, sessionRole: "employee" });
   });
 
   test("binds a first login only with verified work email matching an existing employee", () => {
@@ -229,8 +236,9 @@ describe("Vendasta identity mapping", () => {
   test("session role comes from accessLevel, never from claims", () => {
     expect(sessionRoleFromAccessLevel("employee")).toBe("employee");
     expect(sessionRoleFromAccessLevel("manager")).toBe("manager");
-    expect(sessionRoleFromAccessLevel("full_admin")).toBe("admin");
-    expect(sessionRoleFromAccessLevel("global_view")).toBe("admin");
+    expect(sessionRoleFromAccessLevel("full_admin")).toBe("full_admin");
+    expect(sessionRoleFromAccessLevel("global_view")).toBe("employee");
+    expect(sessionRoleFromAccessLevel("regional_view")).toBe("employee");
     expect(sessionRoleFromAccessLevel("partner")).toBe("employee");
   });
 });

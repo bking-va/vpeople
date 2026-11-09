@@ -63,7 +63,7 @@ export type VendastaAccessDecision =
       ok: true;
       employeeId: number;
       bindSub: boolean;
-      sessionRole: "employee" | "manager" | "admin";
+      sessionRole: "employee" | "manager" | "admin" | "full_admin";
     }
   | {
       ok: false;

@@ -148,21 +148,14 @@ export function clampCandidateRating(value: unknown): number | null {
 
 /**
  * App session.role from vPeople accessLevel only.
- * Viewing roles map to "admin" for existing HR screens; writes still use accessLevel.
- * Never derive this from IdP claims, roles[], or user input.
+ * Viewing roles stay "employee" so they cannot pass session.role admin write
+ * gates. Never derive this from IdP claims, roles[], or user input.
  */
 export function sessionRoleFromAccessLevel(
   accessLevel: AccessLevel
-): "employee" | "manager" | "admin" {
+): "employee" | "manager" | "admin" | "full_admin" {
   if (accessLevel === "manager") return "manager";
-  if (
-    accessLevel === "full_admin" ||
-    accessLevel === "admin" ||
-    accessLevel === "global_view" ||
-    accessLevel === "regional_view"
-  ) {
-    return "admin";
-  }
+  if (accessLevel === "full_admin") return "full_admin";
   return "employee";
 }
 

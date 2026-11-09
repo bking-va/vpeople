@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
+import { isDevLoginEnabled } from "@/lib/authz";
 import {
   decideVendastaEmployeeAccess,
   isVendastaSubject,
@@ -55,13 +56,17 @@ export async function linkVendastaEmployee(
 
   const sub = profile.sub.trim();
   const patch: {
-    userId: string;
+    userId?: string;
     vendastaSub?: string;
     updatedAt: Date;
   } = {
-    userId,
     updatedAt: new Date(),
   };
+  // JWT/dev auth has no users row; writing that id into employees.user_id
+  // violates the FK. Adapter (production) sessions persist the Auth.js user.
+  if (!isDevLoginEnabled()) {
+    patch.userId = userId;
+  }
   if (decision.bindSub) {
     patch.vendastaSub = sub;
   }
