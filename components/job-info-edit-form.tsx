@@ -148,7 +148,6 @@ export function JobInfoEditForm({ employeeId, canEdit, currentData }: JobInfoEdi
                   <SelectItem value="part_time">Part-time</SelectItem>
                   <SelectItem value="contractor">Contractor</SelectItem>
                   <SelectItem value="on_leave">On Leave</SelectItem>
-                  <SelectItem value="terminated">Terminated</SelectItem>
                 </SelectContent>
               </Select>
             </div>

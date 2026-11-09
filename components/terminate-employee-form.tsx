@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AlertCircle } from "lucide-react";
+import { roeLabel } from "@/lib/roe";
 
 interface TerminateEmployeeFormProps {
   employee: {
@@ -26,15 +27,35 @@ interface TerminateEmployeeFormProps {
   };
 }
 
+interface TerminationReason {
+  id: number;
+  name: string;
+  category: string;
+  roeCode: string;
+  isActive: boolean;
+}
+
 export function TerminateEmployeeForm({ employee }: TerminateEmployeeFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reasons, setReasons] = useState<TerminationReason[]>([]);
   const [formData, setFormData] = useState({
     terminationDate: "",
     terminationType: "voluntary",
-    terminationReason: "",
+    terminationReasonId: "",
     notes: "",
   });
+
+  useEffect(() => {
+    fetch("/api/settings/termination-reasons")
+      .then((r) => r.json())
+      .then((data) => setReasons((data.terminationReasons || []).filter((row: TerminationReason) => row.isActive)))
+      .catch(() => setReasons([]));
+  }, []);
+
+  const selectedReason = reasons.find(
+    (row) => String(row.id) === formData.terminationReasonId
+  );
 
   const updateField = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -45,6 +66,10 @@ export function TerminateEmployeeForm({ employee }: TerminateEmployeeFormProps) 
 
     if (!formData.terminationDate) {
       alert("Termination date is required");
+      return;
+    }
+    if (!formData.terminationReasonId) {
+      alert("Select a termination reason");
       return;
     }
 
@@ -61,7 +86,12 @@ export function TerminateEmployeeForm({ employee }: TerminateEmployeeFormProps) 
       const response = await fetch(`/api/employees/${employee.id}/terminate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          terminationDate: formData.terminationDate,
+          terminationType: formData.terminationType,
+          terminationReasonId: Number(formData.terminationReasonId),
+          notes: formData.notes,
+        }),
       });
 
       if (response.ok) {
@@ -89,14 +119,12 @@ export function TerminateEmployeeForm({ employee }: TerminateEmployeeFormProps) 
             <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-yellow-800">
               <p className="font-medium">Important</p>
-              <p>
-                Terminating an employee will:
-              </p>
+              <p>Terminating an employee will:</p>
               <ul className="list-disc list-inside mt-2 space-y-1">
                 <li>Update their status to &quot;Terminated&quot;</li>
+                <li>Record a Canadian ROE code from the selected reason</li>
                 <li>Create offboarding tasks</li>
-                <li>Record the termination in audit logs</li>
-                <li>Preserve their record for reporting purposes</li>
+                <li>Preserve history for reporting and possible rehire</li>
               </ul>
             </div>
           </div>
@@ -131,13 +159,28 @@ export function TerminateEmployeeForm({ employee }: TerminateEmployeeFormProps) 
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="terminationReason">Reason</Label>
-            <Input
-              id="terminationReason"
-              value={formData.terminationReason}
-              onChange={(e) => updateField("terminationReason", e.target.value)}
-              placeholder="e.g., Accepted position elsewhere, Performance issues"
-            />
+            <Label htmlFor="terminationReasonId">Reason *</Label>
+            <Select
+              value={formData.terminationReasonId}
+              onValueChange={(value) => updateField("terminationReasonId", value)}
+            >
+              <SelectTrigger id="terminationReasonId">
+                <SelectValue placeholder="Select a reason" />
+              </SelectTrigger>
+              <SelectContent>
+                {reasons.map((reason) => (
+                  <SelectItem key={reason.id} value={String(reason.id)}>
+                    {reason.name} (ROE {reason.roeCode})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedReason && (
+              <p className="text-sm text-muted-foreground">
+                Canadian ROE code {selectedReason.roeCode}
+                {roeLabel(selectedReason.roeCode) ? ` — ${roeLabel(selectedReason.roeCode)}` : ""}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -163,7 +206,7 @@ export function TerminateEmployeeForm({ employee }: TerminateEmployeeFormProps) 
             <Button
               type="submit"
               variant="destructive"
-              disabled={isSubmitting || !formData.terminationDate}
+              disabled={isSubmitting || !formData.terminationDate || !formData.terminationReasonId}
             >
               {isSubmitting ? "Processing..." : "Process Termination"}
             </Button>

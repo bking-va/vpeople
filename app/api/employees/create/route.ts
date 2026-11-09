@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
         lastName: data.lastName,
         email: data.email,
         hireDate: data.hireDate,
+        originalHireDate: data.hireDate,
         employmentStatus: data.employmentStatus || "full_time",
         jobTitle: data.jobTitle,
         departmentId: data.departmentId ? parseInt(data.departmentId, 10) : null,
@@ -73,6 +74,8 @@ export async function POST(request: NextRequest) {
       status: newEmployee.employmentStatus,
       effectiveDate: newEmployee.hireDate || new Date().toISOString().split("T")[0],
       comment: "Hire",
+      changeType: "hire",
+      recordedById: currentEmployee.id,
     });
 
     // Create onboarding tasks from templates

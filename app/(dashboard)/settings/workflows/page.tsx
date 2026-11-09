@@ -26,6 +26,7 @@ export default async function WorkflowsPage() {
     employment_status_change: "Employment Status Change",
     job_info_change: "Job Info Change",
     information_update: "Information Update",
+    promotion: "Promotion",
   };
 
   return (

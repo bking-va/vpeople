@@ -46,7 +46,13 @@ export async function getUserPermissions(email: string) {
   };
 }
 
-type WorkflowType = "time_off" | "compensation_change" | "employment_status_change" | "job_info_change" | "information_update";
+type WorkflowType =
+  | "time_off"
+  | "compensation_change"
+  | "employment_status_change"
+  | "job_info_change"
+  | "information_update"
+  | "promotion";
 
 export async function getWorkflowConfig(type: WorkflowType) {
   const { approvalWorkflows } = await import("@/lib/db/schema");

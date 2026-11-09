@@ -45,6 +45,9 @@ import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 import { CompensationEditForm } from "@/components/compensation-edit-form";
 import { JobInfoEditForm } from "@/components/job-info-edit-form";
+import { EmploymentStatusForm } from "@/components/employment-status-form";
+import { PromotionForm } from "@/components/promotion-form";
+import { Button } from "@/components/ui/button";
 
 export default async function EmployeeProfilePage({
   params,
@@ -88,8 +91,11 @@ export default async function EmployeeProfilePage({
       locationId: employees.locationId,
       managerId: employees.managerId,
       hireDate: employees.hireDate,
+      originalHireDate: employees.originalHireDate,
       employmentStatus: employees.employmentStatus,
       terminationDate: employees.terminationDate,
+      terminationType: employees.terminationType,
+      roeCode: employees.roeCode,
       jobFamilyId: employees.jobFamilyId,
       jobLevelId: employees.jobLevelId,
       accessLevel: employees.accessLevel,
@@ -342,7 +348,19 @@ export default async function EmployeeProfilePage({
           <h1 className="text-3xl font-bold">{displayName}</h1>
           <p className="text-muted-foreground">{employee.jobTitle}</p>
         </div>
-        <Badge>{formatEmploymentStatus(employee.employmentStatus)}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge>{formatEmploymentStatus(employee.employmentStatus)}</Badge>
+          {permissions.canManageUsers && employee.employmentStatus !== "terminated" && (
+            <Link href={`/people/${employee.id}/terminate`}>
+              <Button variant="destructive" size="sm">Terminate</Button>
+            </Link>
+          )}
+          {permissions.canManageUsers && employee.employmentStatus === "terminated" && (
+            <Link href={`/people/${employee.id}/rehire`}>
+              <Button size="sm">Rehire</Button>
+            </Link>
+          )}
+        </div>
       </div>
 
       <Card>
@@ -540,11 +558,20 @@ export default async function EmployeeProfilePage({
               <InfoField label="Job Level" value={level[0]?.code} />
               <InfoField label="Employment Status" value={formatEmploymentStatus(employee.employmentStatus)} />
               <InfoField label="Hire Date" value={formatDate(employee.hireDate)} />
+              {employee.originalHireDate && employee.originalHireDate !== employee.hireDate && (
+                <InfoField label="Original Hire Date" value={formatDate(employee.originalHireDate)} />
+              )}
               {employee.terminationDate && (
                 <InfoField
                   label="Termination Date"
                   value={formatDate(employee.terminationDate)}
                 />
+              )}
+              {employee.roeCode && (
+                <InfoField label="Canadian ROE code" value={employee.roeCode} />
+              )}
+              {employee.terminationType && (
+                <InfoField label="Termination type" value={employee.terminationType} />
               )}
             </CardContent>
           </Card>
@@ -579,6 +606,11 @@ export default async function EmployeeProfilePage({
                         {formatDate(record.effectiveDate)}
                       </p>
                       <p className="font-medium">{formatEmploymentStatus(record.status)}</p>
+                      {record.changeType && (
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {record.changeType.replace("_", " ")}
+                        </p>
+                      )}
                       {record.comment && (
                         <p className="text-sm text-muted-foreground">{record.comment}</p>
                       )}
@@ -637,6 +669,20 @@ export default async function EmployeeProfilePage({
                 jobLevelId: employee.jobLevelId || undefined,
               }}
             />
+          )}
+          {permissions.canManageUsers && (
+            <>
+              <EmploymentStatusForm
+                employeeId={employee.id}
+                currentStatus={employee.employmentStatus}
+              />
+              {employee.employmentStatus !== "terminated" && (
+                <PromotionForm
+                  employeeId={employee.id}
+                  currentTitle={employee.jobTitle}
+                />
+              )}
+            </>
           )}
         </TabsContent>
 

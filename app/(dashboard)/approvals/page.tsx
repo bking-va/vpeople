@@ -72,7 +72,9 @@ export default async function ApprovalsPage() {
         entityData = timeOffData;
       } else if (
         item.request.entityType === "compensation_change" ||
-        item.request.entityType === "job_info_change"
+        item.request.entityType === "job_info_change" ||
+        item.request.entityType === "employment_status_change" ||
+        item.request.entityType === "promotion"
       ) {
         const [affectedEmployee] = await db
           .select()
@@ -118,6 +120,9 @@ export default async function ApprovalsPage() {
                       {item.request.entityType === "compensation_change" &&
                         "Compensation Change"}
                       {item.request.entityType === "job_info_change" && "Job Info Change"}
+                      {item.request.entityType === "employment_status_change" &&
+                        "Employment Status Change"}
+                      {item.request.entityType === "promotion" && "Promotion"}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground mt-1">
                       Requested by {item.requester.firstName} {item.requester.lastName}
@@ -248,6 +253,48 @@ export default async function ApprovalsPage() {
                             <span className="text-muted-foreground">Effective Date:</span>{" "}
                             <span className="font-medium">
                               {formatDate(item.entityData.metadata.effectiveDate)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                  {(item.request.entityType === "employment_status_change" ||
+                    item.request.entityType === "promotion") &&
+                    item.entityData && (
+                      <div className="grid md:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Employee:</span>{" "}
+                          <span className="font-medium">
+                            {item.entityData.employee?.firstName}{" "}
+                            {item.entityData.employee?.lastName}
+                          </span>
+                        </div>
+                        {item.entityData.metadata?.status && (
+                          <div>
+                            <span className="text-muted-foreground">New status:</span>{" "}
+                            <span className="font-medium">{item.entityData.metadata.status}</span>
+                          </div>
+                        )}
+                        {item.entityData.metadata?.jobTitle && (
+                          <div>
+                            <span className="text-muted-foreground">New title:</span>{" "}
+                            <span className="font-medium">{item.entityData.metadata.jobTitle}</span>
+                          </div>
+                        )}
+                        {item.entityData.metadata?.effectiveDate && (
+                          <div>
+                            <span className="text-muted-foreground">Effective Date:</span>{" "}
+                            <span className="font-medium">
+                              {formatDate(item.entityData.metadata.effectiveDate)}
+                            </span>
+                          </div>
+                        )}
+                        {item.entityData.metadata?.changeReason && (
+                          <div className="md:col-span-2">
+                            <span className="text-muted-foreground">Reason:</span>{" "}
+                            <span className="font-medium">
+                              {item.entityData.metadata.changeReason}
                             </span>
                           </div>
                         )}
