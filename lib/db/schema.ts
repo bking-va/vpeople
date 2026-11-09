@@ -991,7 +991,7 @@ export const rateLimits = pgTable("rate_limits", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
-  identifierEndpointIdx: index("rate_limits_identifier_endpoint_idx").on(
+  identifierEndpointUid: uniqueIndex("rate_limits_identifier_endpoint_uidx").on(
     table.identifier,
     table.endpoint
   ),

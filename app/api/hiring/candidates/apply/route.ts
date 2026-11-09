@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { candidates } from "@/lib/db/schema";
+import { candidates, jobOpenings } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
@@ -71,10 +72,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Sanitize inputs (basic)
+    const [opening] = await db
+      .select({ id: jobOpenings.id, status: jobOpenings.status })
+      .from(jobOpenings)
+      .where(eq(jobOpenings.id, parseInt(data.jobOpeningId, 10)))
+      .limit(1);
+
+    if (!opening || opening.status !== "open") {
+      return NextResponse.json({ error: "Opening not available" }, { status: 404 });
+    }
+
     const sanitize = (str: string) => str.trim().slice(0, 255);
 
-    const [candidate] = await db
+    await db
       .insert(candidates)
       .values({
         jobOpeningId: parseInt(data.jobOpeningId),

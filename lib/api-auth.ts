@@ -7,6 +7,8 @@ import crypto from "crypto";
 export interface ApiKeyAuth {
   employeeId: number;
   email: string;
+  accessLevel: string;
+  managerId: number | null;
   permissions: {
     canViewCompensation: boolean;
     canEditCompensation: boolean;
@@ -53,6 +55,7 @@ export async function authenticateApiKey(
         email: employees.email,
         apiKeyHash: employees.apiKeyHash,
         accessLevel: employees.accessLevel,
+        managerId: employees.managerId,
         permissions: accessLevels,
       })
       .from(employees)
@@ -88,6 +91,8 @@ export async function authenticateApiKey(
     return {
       employeeId: employee.id,
       email: employee.email,
+      accessLevel: employee.accessLevel,
+      managerId: employee.managerId,
       permissions: {
         canViewCompensation: perms.canViewCompensation,
         canEditCompensation: perms.canEditCompensation,

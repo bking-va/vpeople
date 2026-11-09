@@ -3,13 +3,15 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { candidates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { clampCandidateRating } from "@/lib/authz";
+import { hiringAccessForCandidate } from "@/lib/hiring-access";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -18,13 +20,24 @@ export async function PATCH(
     const { id: idStr } = await params;
     const id = parseInt(idStr);
 
-    const updateData: any = { updatedAt: new Date() };
+    const access = await hiringAccessForCandidate(session.user.email, id);
+    if (access.notFound) {
+      return NextResponse.json({ error: "Candidate not found" }, { status: 404 });
+    }
+    if (!access.allowed) {
+      return NextResponse.json(
+        { error: "Forbidden", message: "Hiring team or admin access required" },
+        { status: 403 }
+      );
+    }
+
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
     
     if (data.stage !== undefined) {
       updateData.stage = data.stage;
     }
     if (data.rating !== undefined) {
-      updateData.rating = data.rating;
+      updateData.rating = clampCandidateRating(data.rating);
     }
 
     const [candidate] = await db

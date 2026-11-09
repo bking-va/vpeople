@@ -1,3 +1,5 @@
+import { csvRow } from "@/lib/csv";
+
 export type TurnoverCsvInput = {
   activeHeadcount: number;
   hires: number;
@@ -8,14 +10,14 @@ export type TurnoverCsvInput = {
 
 export function turnoverToCsv(report: TurnoverCsvInput): string {
   const lines = [
-    "Metric,Value",
-    `Active Headcount,${report.activeHeadcount}`,
-    `Hires (12mo),${report.hires}`,
-    `Terminations (12mo),${report.terminations}`,
-    `Turnover Rate %,${report.turnoverRate}`,
+    csvRow(["Metric", "Value"]),
+    csvRow(["Active Headcount", report.activeHeadcount]),
+    csvRow(["Hires (12mo)", report.hires]),
+    csvRow(["Terminations (12mo)", report.terminations]),
+    csvRow(["Turnover Rate %", report.turnoverRate]),
     "",
-    "Month,Hires,Terminations",
-    ...report.byMonth.map((row) => `${row.month},${row.hires},${row.terms}`),
+    csvRow(["Month", "Hires", "Terminations"]),
+    ...report.byMonth.map((row) => csvRow([row.month, row.hires, row.terms])),
   ];
   return lines.join("\n") + "\n";
 }

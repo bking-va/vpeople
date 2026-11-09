@@ -6,11 +6,15 @@ import { eq } from "drizzle-orm";
 import { getHeadcountReport, headcountToCsv } from "@/lib/reports/headcount";
 import { getTurnoverReport } from "@/lib/reports/turnover";
 import { turnoverToCsv } from "@/lib/reports/turnover-format";
+import { csvRow } from "@/lib/csv";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
-  if (!session?.user || (session.user.role !== "admin" && session.user.role !== "full_admin")) {
+  if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (session.user.role !== "admin" && session.user.role !== "full_admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -37,23 +41,32 @@ export async function GET(request: NextRequest) {
         .leftJoin(locations, eq(employees.locationId, locations.id));
 
       // CSV header
-      csvData = "Employee Number,First Name,Last Name,Email,Job Title,Department,Location,Hire Date,Status\n";
+      csvData =
+        csvRow([
+          "Employee Number",
+          "First Name",
+          "Last Name",
+          "Email",
+          "Job Title",
+          "Department",
+          "Location",
+          "Hire Date",
+          "Status",
+        ]) + "\n";
 
-      // CSV rows
       for (const row of data) {
-        csvData += [
-          row.employeeNumber,
-          row.firstName,
-          row.lastName,
-          row.email,
-          row.jobTitle,
-          row.department || "",
-          row.location || "",
-          row.hireDate || "",
-          row.employmentStatus,
-        ]
-          .map((val) => `"${String(val).replace(/"/g, '""')}"`)
-          .join(",") + "\n";
+        csvData +=
+          csvRow([
+            row.employeeNumber,
+            row.firstName,
+            row.lastName,
+            row.email,
+            row.jobTitle,
+            row.department || "",
+            row.location || "",
+            row.hireDate || "",
+            row.employmentStatus,
+          ]) + "\n";
       }
     } else if (reportType === "headcount") {
       const report = await getHeadcountReport();

@@ -111,4 +111,69 @@ describe("Time-off accrual scheduler (Real Postgres)", () => {
       );
     expect(runs.length).toBe(1);
   });
+
+  test("each balance uses its own policy rate when two policies differ", async () => {
+    const testRunId = Date.now();
+    const [vacation] = await db
+      .insert(timeOffPolicies)
+      .values({
+        name: `Vacation Canada ${testRunId}`,
+        policyType: "vacation",
+        accrualRate: "15",
+        accrualPeriod: "annual",
+      })
+      .returning();
+    const [sick] = await db
+      .insert(timeOffPolicies)
+      .values({
+        name: `Sick All ${testRunId}`,
+        policyType: "sick",
+        accrualRate: "10",
+        accrualPeriod: "annual",
+      })
+      .returning();
+    const [emp] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `ACC2_${testRunId}`,
+        firstName: "Two",
+        lastName: "Policies",
+        email: `two.policies.${testRunId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+      })
+      .returning();
+    const [vacBal] = await db
+      .insert(timeOffBalances)
+      .values({ employeeId: emp.id, policyId: vacation.id, balance: "0.00" })
+      .returning();
+    const [sickBal] = await db
+      .insert(timeOffBalances)
+      .values({ employeeId: emp.id, policyId: sick.id, balance: "0.00" })
+      .returning();
+
+    try {
+      await runTimeOffAccruals(new Date("2028-06-15T12:00:00Z"));
+      const [vacationAfter] = await db
+        .select()
+        .from(timeOffBalances)
+        .where(eq(timeOffBalances.id, vacBal.id));
+      const [sickAfter] = await db
+        .select()
+        .from(timeOffBalances)
+        .where(eq(timeOffBalances.id, sickBal.id));
+      expect(parseFloat(vacationAfter.balance)).toBeCloseTo(15, 2);
+      expect(parseFloat(sickAfter.balance)).toBeCloseTo(10, 2);
+    } finally {
+      await db.delete(timeOffAccrualRuns).where(eq(timeOffAccrualRuns.balanceId, vacBal.id));
+      await db.delete(timeOffAccrualRuns).where(eq(timeOffAccrualRuns.balanceId, sickBal.id));
+      await db.delete(timeOffBalanceAdjustments).where(eq(timeOffBalanceAdjustments.balanceId, vacBal.id));
+      await db.delete(timeOffBalanceAdjustments).where(eq(timeOffBalanceAdjustments.balanceId, sickBal.id));
+      await db.delete(timeOffBalances).where(eq(timeOffBalances.id, vacBal.id));
+      await db.delete(timeOffBalances).where(eq(timeOffBalances.id, sickBal.id));
+      await db.delete(employees).where(eq(employees.id, emp.id));
+      await db.delete(timeOffPolicies).where(eq(timeOffPolicies.id, vacation.id));
+      await db.delete(timeOffPolicies).where(eq(timeOffPolicies.id, sick.id));
+    }
+  });
 });

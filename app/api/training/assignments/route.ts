@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { trainingCompletions, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -11,12 +12,16 @@ export async function POST(request: NextRequest) {
   }
 
   const [employee] = await db
-    .select({ accessLevel: employees.accessLevel })
+    .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)
     .where(eq(employees.email, session.user.email))
     .limit(1);
 
-  if (!employee || (employee.accessLevel !== "full_admin" && employee.accessLevel !== "manager")) {
+  if (
+    !employee ||
+    isViewingAccessLevel(employee.accessLevel) ||
+    (!isFullAdmin(employee.accessLevel) && !isManagerAccessLevel(employee.accessLevel))
+  ) {
     return NextResponse.json(
       { error: "Admin or manager access required" },
       { status: 403 }
@@ -29,8 +34,14 @@ export async function POST(request: NextRequest) {
     let targetEmployees: number[] = [];
 
     if (data.type === "individual") {
-      targetEmployees = data.employeeIds;
+      targetEmployees = data.employeeIds || [];
     } else if (data.type === "department") {
+      if (!isFullAdmin(employee.accessLevel)) {
+        return NextResponse.json(
+          { error: "Only full admins can assign training to a whole department" },
+          { status: 403 }
+        );
+      }
       const deptEmployees = await db
         .select({ id: employees.id })
         .from(employees)
@@ -39,7 +50,20 @@ export async function POST(request: NextRequest) {
       targetEmployees = deptEmployees.map((e) => e.id);
     }
 
-    // Create pending training completion records
+    if (isManagerAccessLevel(employee.accessLevel)) {
+      const reports = await db
+        .select({ id: employees.id })
+        .from(employees)
+        .where(eq(employees.managerId, employee.id));
+      const reportIds = new Set(reports.map((r) => r.id));
+      if (targetEmployees.some((id) => !reportIds.has(id))) {
+        return NextResponse.json(
+          { error: "Managers can only assign training to their direct reports" },
+          { status: 403 }
+        );
+      }
+    }
+
     const assignments = targetEmployees.map((empId) => ({
       courseId: data.courseId,
       employeeId: empId,

@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { jobTitles } from "@/lib/db/schema";
+import { employees, jobTitles } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
 import { eq } from "drizzle-orm";
+import { canWriteSettings } from "@/lib/authz";
+
+async function requireSettingsAdmin(employeeId: number) {
+  const [actor] = await db
+    .select({ accessLevel: employees.accessLevel })
+    .from(employees)
+    .where(eq(employees.id, employeeId))
+    .limit(1);
+  return canWriteSettings(actor?.accessLevel);
+}
 
 export async function PUT(
   request: NextRequest,
@@ -14,9 +24,9 @@ export async function PUT(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.user.role !== "full_admin" && session.user.role !== "admin") {
+    if (!(await requireSettingsAdmin(session.user.employeeId))) {
       return NextResponse.json(
-        { error: "Only admins can update job titles" },
+        { error: "Only full admins can update job titles" },
         { status: 403 }
       );
     }
@@ -61,9 +71,9 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (session.user.role !== "full_admin" && session.user.role !== "admin") {
+    if (!(await requireSettingsAdmin(session.user.employeeId))) {
       return NextResponse.json(
-        { error: "Only admins can delete job titles" },
+        { error: "Only full admins can delete job titles" },
         { status: 403 }
       );
     }

@@ -11,6 +11,8 @@ import {
 } from "@/lib/db/schema";
 import { desc, eq, sql, and, gte } from "drizzle-orm";
 import { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
+import { takenDaysInYear } from "@/lib/calendar-days";
+import { formatGender } from "@/lib/utils/formatters";
 
 export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 
@@ -86,10 +88,10 @@ export async function getTimeOffBalanceReport() {
     .where(sql`${employees.employmentStatus} <> 'terminated'`);
 }
 
-export async function getTimeOffUsedReport(year: number) {
+export async function getTimeOffUsedReport(year: number, asOf: Date = new Date()) {
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
-  return db
+  const rows = await db
     .select({
       employeeId: employees.id,
       firstName: employees.firstName,
@@ -110,6 +112,13 @@ export async function getTimeOffUsedReport(year: number) {
         sql`${timeOffRequests.startDate} <= ${end}`
       )
     );
+
+  return rows
+    .map((row) => {
+      const daysUsed = takenDaysInYear(row.startDate, row.endDate, year, asOf);
+      return { ...row, daysUsed: daysUsed.toString() };
+    })
+    .filter((row) => parseFloat(row.daysUsed) > 0);
 }
 
 export async function getLastPayChangeReport() {
@@ -198,7 +207,7 @@ export async function getAgeGenderReport(asOf: Date = new Date()) {
   for (const band of bands) byAgeBand.set(band, 0);
 
   for (const row of rows) {
-    const g = row.gender || "unspecified";
+    const g = formatGender(row.gender);
     byGender.set(g, (byGender.get(g) || 0) + 1);
     if (!row.birthDate) {
       byAgeBand.set("unknown", (byAgeBand.get("unknown") || 0) + 1);

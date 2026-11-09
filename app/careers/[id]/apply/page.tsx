@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { jobOpenings, departments, locations } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ApplicationForm } from "@/components/application-form";
 
@@ -23,7 +23,7 @@ export default async function ApplyPage({
     .from(jobOpenings)
     .leftJoin(departments, eq(jobOpenings.departmentId, departments.id))
     .leftJoin(locations, eq(jobOpenings.locationId, locations.id))
-    .where(eq(jobOpenings.id, openingId));
+    .where(and(eq(jobOpenings.id, openingId), eq(jobOpenings.status, "open")));
 
   if (!opening || opening.id === null) {
     notFound();

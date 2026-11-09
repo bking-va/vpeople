@@ -7,6 +7,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { approveStep, rejectStep, getApprovalRequestForEntity } from "@/lib/approvals";
+import { findConfiguredTimeOffWorkflow } from "@/lib/time-off-workflow";
 
 export async function approveTimeOffRequest(requestId: number) {
   const session = await auth();
@@ -128,7 +129,16 @@ export async function approveTimeOffRequest(requestId: number) {
 
     return { success: true };
   } else {
-    // Legacy single-step approval
+    const configured = await findConfiguredTimeOffWorkflow();
+    if (configured) {
+      return {
+        success: false,
+        error:
+          "This request must be approved through the configured multi-step workflow",
+      };
+    }
+
+    // Legacy single-step approval only when no time-off workflow is configured
     const daysRequested = parseFloat(request.request.daysRequested);
 
     // Atomically update status AND deduct balance using transaction

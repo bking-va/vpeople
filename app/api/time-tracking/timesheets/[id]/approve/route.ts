@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { timesheets, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
+import { getUserPermissions } from "@/lib/permissions";
 
 export async function POST(
   request: NextRequest,
@@ -27,8 +29,7 @@ export async function POST(
       );
     }
 
-    // Only managers can approve
-    if (employee.accessLevel === "employee") {
+    if (isViewingAccessLevel(employee.accessLevel) || employee.accessLevel === "employee") {
       return NextResponse.json(
         { error: "You do not have permission to approve timesheets" },
         { status: 403 }
@@ -38,7 +39,36 @@ export async function POST(
     const { id: idStr } = await params;
     const id = parseInt(idStr);
     const data = await request.json();
-    const action = data.action; // "approve" or "reject"
+    const action = data.action;
+
+    const [timesheet] = await db
+      .select()
+      .from(timesheets)
+      .where(eq(timesheets.id, id))
+      .limit(1);
+
+    if (!timesheet) {
+      return NextResponse.json({ error: "Timesheet not found" }, { status: 404 });
+    }
+
+    const permissions = await getUserPermissions(session.user.email);
+    const [owner] = await db
+      .select({ managerId: employees.managerId })
+      .from(employees)
+      .where(eq(employees.id, timesheet.employeeId))
+      .limit(1);
+
+    const inScope =
+      isFullAdmin(employee.accessLevel) ||
+      permissions.canManageUsers ||
+      (isManagerAccessLevel(employee.accessLevel) && owner?.managerId === employee.id);
+
+    if (!inScope) {
+      return NextResponse.json(
+        { error: "You do not have permission to approve this timesheet" },
+        { status: 403 }
+      );
+    }
 
     const [updated] = await db
       .update(timesheets)
