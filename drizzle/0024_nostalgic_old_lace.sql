@@ -12,3 +12,10 @@ DO $$ BEGIN
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
+--> statement-breakpoint
+INSERT INTO "employment_status_history" ("employee_id", "effective_date", "status", "comment")
+SELECT "id", COALESCE("hire_date", CURRENT_DATE), "employment_status", 'Hire'
+FROM "employees"
+WHERE NOT EXISTS (
+  SELECT 1 FROM "employment_status_history" h WHERE h."employee_id" = "employees"."id"
+);

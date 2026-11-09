@@ -7,15 +7,27 @@ import {
   employees,
 } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { carryoverPeriodKey } from "@/lib/time-off-accrual-period";
+import { carryoverPeriodKey, isCarryoverWindow } from "@/lib/time-off-accrual-period";
 
 /**
- * At the start of a calendar year, forfeit unused days above maxCarryover
- * for the year that just ended. Idempotent per (balance, carryover:YYYY).
- * Policies with a null maxCarryover are unlimited and skipped.
+ * In January, forfeit unused days above maxCarryover for the year that just
+ * ended. Idempotent per (balance, carryover:YYYY). Policies with a null
+ * maxCarryover are unlimited and skipped. Mid-year runs are no-ops so a
+ * November deploy cannot treat current-year balances as last year's leftover.
  */
 export async function runTimeOffCarryover(asOf: Date = new Date()) {
   const periodKey = carryoverPeriodKey(asOf);
+  if (!isCarryoverWindow(asOf)) {
+    return {
+      balancesProcessed: 0,
+      skippedAlreadyApplied: 0,
+      totalForfeited: 0,
+      periodKey,
+      skipped: "not_january" as const,
+      asOf: asOf.toISOString(),
+    };
+  }
+
   let balancesProcessed = 0;
   let skippedAlreadyApplied = 0;
   let totalForfeited = 0;
@@ -24,7 +36,6 @@ export async function runTimeOffCarryover(asOf: Date = new Date()) {
     .select({
       id: timeOffBalances.id,
       employeeId: timeOffBalances.employeeId,
-      balance: timeOffBalances.balance,
       maxCarryover: timeOffPolicies.maxCarryover,
     })
     .from(timeOffBalances)
@@ -37,20 +48,20 @@ export async function runTimeOffCarryover(asOf: Date = new Date()) {
       continue;
     }
 
-    const current = parseFloat(row.balance);
     const cap = parseFloat(row.maxCarryover);
     if (!Number.isFinite(cap) || cap < 0) continue;
 
-    const next = Math.min(current, cap);
-    const forfeited = Number((current - next).toFixed(2));
-
     const applied = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT 1 FROM time_off_balances WHERE id = ${row.id} FOR UPDATE`
+      );
+
       const inserted = await tx
         .insert(timeOffAccrualRuns)
         .values({
           balanceId: row.id,
           periodKey,
-          amount: (-forfeited).toFixed(2),
+          amount: "0.00",
         })
         .onConflictDoNothing()
         .returning();
@@ -59,11 +70,26 @@ export async function runTimeOffCarryover(asOf: Date = new Date()) {
         return null;
       }
 
+      const [live] = await tx
+        .select({ balance: timeOffBalances.balance })
+        .from(timeOffBalances)
+        .where(eq(timeOffBalances.id, row.id))
+        .limit(1);
+
+      const current = parseFloat(live?.balance || "0");
+      const next = Math.min(current, cap);
+      const forfeited = Number((current - next).toFixed(2));
+
       if (forfeited > 0) {
+        await tx
+          .update(timeOffAccrualRuns)
+          .set({ amount: (-forfeited).toFixed(2) })
+          .where(eq(timeOffAccrualRuns.id, inserted[0].id));
+
         await tx
           .update(timeOffBalances)
           .set({
-            balance: next.toFixed(2),
+            balance: sql`LEAST(${timeOffBalances.balance}::numeric, ${cap}::numeric)`,
             updatedAt: new Date(),
           })
           .where(eq(timeOffBalances.id, row.id));

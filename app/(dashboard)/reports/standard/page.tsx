@@ -284,10 +284,10 @@ export default async function StandardReportsPage({
     const rows: PayGroupRow[] = !permissions?.canViewCompensation
       ? []
       : type === "pay-by-title"
-        ? await getPayByTitleReport()
+        ? await getPayByTitleReport({ canViewCompensation: true })
         : type === "pay-by-department"
-          ? await getPayByDepartmentReport()
-          : await getPayByLocationReport();
+          ? await getPayByDepartmentReport({ canViewCompensation: true })
+          : await getPayByLocationReport({ canViewCompensation: true });
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">
@@ -318,7 +318,9 @@ export default async function StandardReportsPage({
     );
   } else if (type === "salary-history") {
     title = "Salary History";
-    const rows = permissions?.canViewCompensation ? await getSalaryHistoryReport() : [];
+    const rows = await getSalaryHistoryReport({
+      canViewCompensation: Boolean(permissions?.canViewCompensation),
+    });
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">

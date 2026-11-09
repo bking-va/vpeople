@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       if (reportType === "salary-history") {
-        const rows = await getSalaryHistoryReport();
+        const rows = await getSalaryHistoryReport({ canViewCompensation: true });
         csvData =
           csvRow([
             "Employee",
@@ -123,13 +123,13 @@ export async function GET(request: NextRequest) {
       } else {
         const rows: PayGroupRow[] =
           reportType === "pay-by-title"
-            ? await getPayByTitleReport()
+            ? await getPayByTitleReport({ canViewCompensation: true })
             : reportType === "pay-by-department"
-              ? await getPayByDepartmentReport()
-              : await getPayByLocationReport();
-        csvData = csvRow(["Group", "Count", "Avg Pay", "Min Pay", "Max Pay"]) + "\n";
+              ? await getPayByDepartmentReport({ canViewCompensation: true })
+              : await getPayByLocationReport({ canViewCompensation: true });
+        csvData = csvRow(["Group", "Count", "Avg Pay", "Min Pay", "Max Pay", "Currency", "Pay Type"]) + "\n";
         for (const row of rows) {
-          csvData += csvRow([row.group, row.count, row.avgPay, row.minPay, row.maxPay]) + "\n";
+          csvData += csvRow([row.group, row.count, row.avgPay, row.minPay, row.maxPay, row.currency, row.payType]) + "\n";
         }
       }
     } else if (reportType === "time-off-schedule") {

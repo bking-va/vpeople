@@ -189,6 +189,47 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
     expect(parseFloat(after.balance)).toBeCloseTo(22, 2);
   });
 
+  test("mid-year cron does not apply last year's carryover cap", async () => {
+    const [policy] = await db
+      .insert(timeOffPolicies)
+      .values({
+        name: `Parity Mid ${runId}`,
+        policyType: "vacation",
+        accrualRate: "10",
+        accrualPeriod: "annual",
+        maxCarryover: "5",
+      })
+      .returning();
+    ids.policies.push(policy.id);
+
+    const [emp] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `PAR_MID_${runId}`,
+        firstName: "Mid",
+        lastName: "Year",
+        email: `mid.year.${runId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+      })
+      .returning();
+    ids.employees.push(emp.id);
+
+    const [balance] = await db
+      .insert(timeOffBalances)
+      .values({ employeeId: emp.id, policyId: policy.id, balance: "20.00" })
+      .returning();
+    ids.balances.push(balance.id);
+
+    const result = await runTimeOffCarryover(new Date("2029-11-15T12:00:00Z"));
+    expect(result.balancesProcessed).toBe(0);
+    const [after] = await db
+      .select()
+      .from(timeOffBalances)
+      .where(eq(timeOffBalances.id, balance.id));
+    expect(parseFloat(after.balance)).toBeCloseTo(20, 2);
+  });
+
   test("pay by title/dept/location aggregates current salaries", async () => {
     const title = `Parity Eng ${runId}`;
     const [dept] = await db
@@ -254,23 +295,40 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
         changeReason: "Hire",
       })
       .returning();
-    ids.compensation.push(c1.id, c2.id);
+    const [future] = await db
+      .insert(compensationHistory)
+      .values({
+        employeeId: a.id,
+        effectiveDate: "2099-01-01",
+        payRate: "999999",
+        payType: "salary",
+        currency: "CAD",
+        changeReason: "Scheduled raise",
+      })
+      .returning();
+    ids.compensation.push(c1.id, c2.id, future.id);
 
-    const byTitle = await getPayByTitleReport();
-    const titleRow = byTitle.find((row) => row.group === title);
+    const denied = await getPayByTitleReport({ canViewCompensation: false });
+    expect(denied).toEqual([]);
+    expect(await getSalaryHistoryReport({ canViewCompensation: false })).toEqual([]);
+
+    const byTitle = await getPayByTitleReport({ canViewCompensation: true });
+    const titleRow = byTitle.find((row) => row.group.startsWith(title));
     expect(titleRow).toBeDefined();
     expect(titleRow!.count).toBe(2);
     expect(titleRow!.avgPay).toBeCloseTo(150000, 2);
     expect(titleRow!.minPay).toBeCloseTo(100000, 2);
     expect(titleRow!.maxPay).toBeCloseTo(200000, 2);
+    expect(titleRow!.currency).toBe("CAD");
+    expect(titleRow!.payType).toBe("salary");
 
-    const byDept = await getPayByDepartmentReport();
-    expect(byDept.find((row) => row.group === dept.name)?.avgPay).toBeCloseTo(150000, 2);
+    const byDept = await getPayByDepartmentReport({ canViewCompensation: true });
+    expect(byDept.find((row) => row.group.startsWith(dept.name))?.avgPay).toBeCloseTo(150000, 2);
 
-    const byLoc = await getPayByLocationReport();
-    expect(byLoc.find((row) => row.group === loc.name)?.avgPay).toBeCloseTo(150000, 2);
+    const byLoc = await getPayByLocationReport({ canViewCompensation: true });
+    expect(byLoc.find((row) => row.group.startsWith(loc.name))?.avgPay).toBeCloseTo(150000, 2);
 
-    const history = await getSalaryHistoryReport();
+    const history = await getSalaryHistoryReport({ canViewCompensation: true });
     expect(
       history.some((row) => row.id === c2.id && parseFloat(row.payRate || "0") === 200000)
     ).toBe(true);

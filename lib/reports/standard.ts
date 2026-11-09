@@ -262,7 +262,8 @@ export async function getEmploymentStatusHistoryReport() {
     .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id));
 }
 
-export async function getSalaryHistoryReport() {
+export async function getSalaryHistoryReport(opts: { canViewCompensation: boolean }) {
+  if (!opts.canViewCompensation) return [];
   return db
     .select({
       id: compensationHistory.id,
@@ -318,11 +319,32 @@ type PayRow = {
   department: string | null;
   location: string | null;
   payRate: string | null;
+  payType: string | null;
+  currency: string | null;
 };
 
-async function getCurrentPayRows(): Promise<PayRow[]> {
-  const latest = await getLastPayChangeReport();
-  const latestByEmployee = new Map(latest.map((row) => [row.employeeId, row]));
+type CompensationAccess = { canViewCompensation: boolean; asOf?: Date };
+
+async function getCurrentPayRows(opts: CompensationAccess): Promise<PayRow[]> {
+  if (!opts.canViewCompensation) return [];
+  const asOfKey = (opts.asOf ?? new Date()).toISOString().slice(0, 10);
+
+  const history = await db
+    .select({
+      employeeId: compensationHistory.employeeId,
+      payRate: compensationHistory.payRate,
+      payType: compensationHistory.payType,
+      currency: compensationHistory.currency,
+      effectiveDate: compensationHistory.effectiveDate,
+    })
+    .from(compensationHistory)
+    .where(lte(compensationHistory.effectiveDate, asOfKey))
+    .orderBy(desc(compensationHistory.effectiveDate), desc(compensationHistory.id));
+
+  const latest = new Map<number, (typeof history)[number]>();
+  for (const row of history) {
+    if (!latest.has(row.employeeId)) latest.set(row.employeeId, row);
+  }
 
   const active = await db
     .select({
@@ -339,7 +361,7 @@ async function getCurrentPayRows(): Promise<PayRow[]> {
     .where(sql`${employees.employmentStatus} <> 'terminated'`);
 
   return active.map((emp) => {
-    const pay = latestByEmployee.get(emp.id);
+    const pay = latest.get(emp.id);
     return {
       employeeId: emp.id,
       firstName: emp.firstName,
@@ -348,6 +370,8 @@ async function getCurrentPayRows(): Promise<PayRow[]> {
       department: emp.department,
       location: emp.location,
       payRate: pay?.payRate ?? null,
+      payType: pay?.payType ?? "salary",
+      currency: pay?.currency ?? "CAD",
     };
   });
 }
@@ -358,38 +382,53 @@ export type PayGroupRow = {
   avgPay: number;
   minPay: number;
   maxPay: number;
+  currency: string;
+  payType: string;
 };
 
 function aggregatePay(rows: PayRow[], groupOf: (row: PayRow) => string | null | undefined): PayGroupRow[] {
-  const groups = new Map<string, number[]>();
+  const groups = new Map<string, { rates: number[]; currency: string; payType: string; label: string }>();
   for (const row of rows) {
     const rate = row.payRate != null ? parseFloat(row.payRate) : NaN;
     if (!Number.isFinite(rate)) continue;
-    const key = (groupOf(row) || "Unassigned").trim() || "Unassigned";
-    const list = groups.get(key) || [];
-    list.push(rate);
-    groups.set(key, list);
+    const payType = (row.payType || "salary").toLowerCase();
+    const currency = row.currency || "CAD";
+    const base = (groupOf(row) || "Unassigned").trim() || "Unassigned";
+    const key = `${base}\u0000${currency}\u0000${payType}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rates.push(rate);
+    } else {
+      groups.set(key, {
+        rates: [rate],
+        currency,
+        payType,
+        label: `${base} · ${currency} · ${payType}`,
+      });
+    }
   }
 
-  return Array.from(groups.entries())
-    .map(([group, rates]) => ({
-      group,
-      count: rates.length,
-      avgPay: Number((rates.reduce((sum, n) => sum + n, 0) / rates.length).toFixed(2)),
-      minPay: Math.min(...rates),
-      maxPay: Math.max(...rates),
+  return Array.from(groups.values())
+    .map((entry) => ({
+      group: entry.label,
+      count: entry.rates.length,
+      avgPay: Number((entry.rates.reduce((sum, n) => sum + n, 0) / entry.rates.length).toFixed(2)),
+      minPay: Math.min(...entry.rates),
+      maxPay: Math.max(...entry.rates),
+      currency: entry.currency,
+      payType: entry.payType,
     }))
     .sort((a, b) => b.avgPay - a.avgPay);
 }
 
-export async function getPayByTitleReport() {
-  return aggregatePay(await getCurrentPayRows(), (row) => row.jobTitle);
+export async function getPayByTitleReport(opts: CompensationAccess) {
+  return aggregatePay(await getCurrentPayRows(opts), (row) => row.jobTitle);
 }
 
-export async function getPayByDepartmentReport() {
-  return aggregatePay(await getCurrentPayRows(), (row) => row.department);
+export async function getPayByDepartmentReport(opts: CompensationAccess) {
+  return aggregatePay(await getCurrentPayRows(opts), (row) => row.department);
 }
 
-export async function getPayByLocationReport() {
-  return aggregatePay(await getCurrentPayRows(), (row) => row.location);
+export async function getPayByLocationReport(opts: CompensationAccess) {
+  return aggregatePay(await getCurrentPayRows(opts), (row) => row.location);
 }

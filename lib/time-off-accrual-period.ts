@@ -40,6 +40,11 @@ export function carryoverPeriodKey(asOf: Date): string {
   return `carryover:${asOf.getUTCFullYear() - 1}`;
 }
 
+/** Carryover runs only in January so a mid-year deploy cannot forfeit YTD leave. */
+export function isCarryoverWindow(asOf: Date): boolean {
+  return asOf.getUTCMonth() === 0;
+}
+
 export function accrualAmount(rate: number, period: string | null | undefined): number {
   if (!period || period === "none" || !Number.isFinite(rate) || rate <= 0) {
     return 0;
