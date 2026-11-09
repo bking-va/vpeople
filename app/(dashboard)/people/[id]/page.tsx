@@ -38,6 +38,7 @@ import {
   canViewPrivateDocuments,
   canViewTimeOffLedger,
   redactVisaDocumentNumber,
+  visibleProfileEmail,
 } from "@/lib/authz";
 import Link from "next/link";
 import { ProfileDocuments } from "@/components/profile-documents";
@@ -178,6 +179,14 @@ export default async function EmployeeProfilePage({
   const canEditCompensation = permissions.canEditCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
   const canEditEmployee = isViewingSelf || permissions.canManageUsers;
+  const displayEmail = visibleProfileEmail(employee.email, {
+    isViewingSelf,
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  });
+  const displayPersonalEmail = visibleProfileEmail(employee.personalEmail, {
+    isViewingSelf,
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  });
 
   // Only query sensitive personal info if authorized
   const sensitivePersonalInfo = canViewSensitivePersonalInfo
@@ -378,12 +387,16 @@ export default async function EmployeeProfilePage({
             </div>
             <div>
               <p className="text-muted-foreground">Email</p>
+              {displayEmail ? (
               <a
-                href={`mailto:${employee.email}`}
+                href={`mailto:${displayEmail}`}
                 className="font-medium text-primary hover:underline truncate block"
               >
-                {employee.email}
+                {displayEmail}
               </a>
+              ) : (
+                <p className="font-medium">—</p>
+              )}
             </div>
           </div>
         </CardContent>
@@ -448,7 +461,7 @@ export default async function EmployeeProfilePage({
               <InfoField label="Extension" value={employee.extension} />
               <InfoField label="Mobile Phone" value={employee.mobilePhone} />
               <InfoField label="Home Phone" value={employee.homePhone} />
-              <InfoField label="Personal Email" value={employee.personalEmail} />
+              <InfoField label="Personal Email" value={displayPersonalEmail} />
               <InfoField label="LinkedIn" value={employee.linkedInUrl} />
               <InfoField label="Twitter" value={employee.twitterUrl} />
               <InfoField label="GitHub" value={employee.githubUrl} />

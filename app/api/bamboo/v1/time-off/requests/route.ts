@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { timeOffRequests, employees, timeOffPolicies } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
-import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
+import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel, visibleDirectoryEmail } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
   const auth = await authenticateApiKey(request);
@@ -71,7 +71,9 @@ export async function GET(request: NextRequest) {
         employeeId: req.employeeId.toString(),
         employee: {
           name: `${req.employee?.firstName} ${req.employee?.lastName}`,
-          email: req.employee?.email,
+          email: visibleDirectoryEmail(req.employee?.email, {
+            isSelf: req.employeeId === auth.employeeId,
+          }),
         },
         type: req.policy?.name || "Time Off",
         start: req.startDate,

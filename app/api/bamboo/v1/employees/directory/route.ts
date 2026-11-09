@@ -61,7 +61,10 @@ export async function GET(request: NextRequest) {
         const dept = row.departments;
         
         // Filter sensitive fields based on permissions
-        const filtered = filterEmployeeFields(emp, auth.permissions);
+        const filtered = filterEmployeeFields(emp, auth.permissions, {
+          isSelf: emp.id === auth.employeeId,
+          isDirectory: true,
+        });
         
         return {
           id: filtered.id.toString(),

@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { departments, locations, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { JobOpeningForm } from "@/components/job-opening-form";
+import { getUserPermissions } from "@/lib/permissions";
+import { visibleProfileEmail } from "@/lib/authz";
 
 export default async function NewJobOpeningPage() {
   const session = await auth();
@@ -13,6 +15,9 @@ export default async function NewJobOpeningPage() {
 
   const depts = await db.select().from(departments);
   const locs = await db.select().from(locations);
+  const permissions = session.user.email
+    ? await getUserPermissions(session.user.email)
+    : null;
   const managers = await db
     .select({
       id: employees.id,
@@ -22,6 +27,14 @@ export default async function NewJobOpeningPage() {
     })
     .from(employees)
     .where(eq(employees.accessLevel, "manager"));
+  const hiringLeads = managers.map((lead) => ({
+    ...lead,
+    email:
+      visibleProfileEmail(lead.email, {
+        isViewingSelf: lead.id === session.user.employeeId,
+        canViewSensitivePersonalInfo: Boolean(permissions?.canViewSensitivePersonalInfo),
+      }) || "",
+  }));
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -35,7 +48,7 @@ export default async function NewJobOpeningPage() {
       <JobOpeningForm
         departments={depts}
         locations={locs}
-        hiringLeads={managers}
+        hiringLeads={hiringLeads}
       />
     </div>
   );

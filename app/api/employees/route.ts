@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -22,7 +23,13 @@ export async function GET(request: NextRequest) {
       .from(employees)
       .where(eq(employees.employmentStatus, "full_time"));
 
-    return NextResponse.json({ employees: emps });
+    const viewerId = session.user.employeeId;
+    return NextResponse.json({
+      employees: emps.map((emp) => ({
+        ...emp,
+        email: visibleDirectoryEmail(emp.email, { isSelf: emp.id === viewerId }),
+      })),
+    });
   } catch (error: any) {
     console.error("Failed to fetch employees:", error);
     return NextResponse.json(

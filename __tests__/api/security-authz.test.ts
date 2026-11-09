@@ -1,9 +1,13 @@
 import {
   canViewCustomFieldValue,
   canViewImmigrationNumbers,
+  canViewPersonalEmail,
   canViewPrivateDocuments,
   canViewTimeOffLedger,
   canWriteSettings,
+  isVendastaWorkEmail,
+  visibleDirectoryEmail,
+  visibleProfileEmail,
   clampCandidateRating,
   isCronAuthorized,
   isDevAdminImpersonationEnabled,
@@ -115,6 +119,58 @@ describe("field-level authz helpers", () => {
         accessLevel: "admin",
       })
     ).toBe(true);
+  });
+
+  test("@vendasta.com work emails stay visible; personal addresses are restricted", () => {
+    expect(isVendastaWorkEmail("brendan.king@vendasta.com")).toBe(true);
+    expect(isVendastaWorkEmail("Brendan.King@Vendasta.COM")).toBe(true);
+    expect(isVendastaWorkEmail("brendan@gmail.com")).toBe(false);
+    expect(isVendastaWorkEmail("notvendasta.com")).toBe(false);
+    expect(isVendastaWorkEmail("user@notvendasta.com")).toBe(false);
+
+    expect(
+      canViewPersonalEmail({
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewPersonalEmail({
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
+
+    expect(
+      visibleDirectoryEmail("amy@vendasta.com", { isSelf: false })
+    ).toBe("amy@vendasta.com");
+    expect(visibleDirectoryEmail("amy@gmail.com", { isSelf: false })).toBeNull();
+    expect(visibleDirectoryEmail("amy@gmail.com", { isSelf: true })).toBe("amy@gmail.com");
+
+    expect(
+      visibleProfileEmail("amy@vendasta.com", {
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe("amy@vendasta.com");
+    expect(
+      visibleProfileEmail("amy@gmail.com", {
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBeNull();
+    expect(
+      visibleProfileEmail("amy@gmail.com", {
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: true,
+      })
+    ).toBe("amy@gmail.com");
+    expect(
+      visibleProfileEmail("amy@gmail.com", {
+        isViewingSelf: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe("amy@gmail.com");
   });
 });
 

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employees, accessLevels } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import crypto from "crypto";
+import { visibleDirectoryEmail, visibleProfileEmail } from "@/lib/authz";
 
 export interface ApiKeyAuth {
   employeeId: number;
@@ -115,7 +116,11 @@ export async function authenticateApiKey(
 /**
  * Filter employee object to remove fields the API key owner cannot view
  */
-export function filterEmployeeFields(employee: any, permissions: ApiKeyAuth["permissions"]) {
+export function filterEmployeeFields(
+  employee: any,
+  permissions: ApiKeyAuth["permissions"],
+  opts?: { isSelf?: boolean; isDirectory?: boolean }
+) {
   const filtered: any = { ...employee };
 
   // Remove compensation if not permitted
@@ -145,6 +150,23 @@ export function filterEmployeeFields(employee: any, permissions: ApiKeyAuth["per
     delete filtered.bankRoutingNumber;
     delete filtered.bankSwiftCode;
   }
+
+  const emailOpts = {
+    isSelf: Boolean(opts?.isSelf),
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  };
+  filtered.email = opts?.isDirectory
+    ? visibleDirectoryEmail(employee.email, { isSelf: emailOpts.isSelf })
+    : visibleProfileEmail(employee.email, {
+        isViewingSelf: emailOpts.isSelf,
+        canViewSensitivePersonalInfo: emailOpts.canViewSensitivePersonalInfo,
+      });
+  filtered.personalEmail = opts?.isDirectory
+    ? visibleDirectoryEmail(employee.personalEmail, { isSelf: emailOpts.isSelf })
+    : visibleProfileEmail(employee.personalEmail, {
+        isViewingSelf: emailOpts.isSelf,
+        canViewSensitivePersonalInfo: emailOpts.canViewSensitivePersonalInfo,
+      });
 
   return filtered;
 }

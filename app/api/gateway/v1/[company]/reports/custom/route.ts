@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employees, departments, locations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 export async function GET(
   request: NextRequest,
@@ -44,7 +45,7 @@ export async function GET(
     employeeNumber: emp.employeeNumber,
     firstName: emp.firstName,
     lastName: emp.lastName,
-    email: emp.email,
+    email: visibleDirectoryEmail(emp.email, { isSelf: emp.id === auth.employeeId }),
     jobTitle: emp.jobTitle,
     department: emp.departmentId ? deptMap.get(emp.departmentId) : null,
     location: emp.locationId ? locMap.get(emp.locationId) : null,

@@ -47,6 +47,48 @@ export function canViewImmigrationNumbers(opts: {
   return opts.isViewingSelf || opts.canViewSensitivePersonalInfo;
 }
 
+export const VENDASTA_WORK_EMAIL_DOMAIN = "vendasta.com";
+
+/** Work emails @vendasta.com are directory-visible. Any other address is personal. */
+export function isVendastaWorkEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const trimmed = email.trim();
+  const at = trimmed.lastIndexOf("@");
+  if (at <= 0 || at === trimmed.length - 1) return false;
+  return trimmed.slice(at + 1).toLowerCase() === VENDASTA_WORK_EMAIL_DOMAIN;
+}
+
+/** Personal (non-@vendasta.com) emails: self or HR with sensitive-PII access. Not coworkers or unrelated managers. */
+export function canViewPersonalEmail(opts: {
+  isViewingSelf: boolean;
+  canViewSensitivePersonalInfo: boolean;
+}) {
+  return opts.isViewingSelf || opts.canViewSensitivePersonalInfo === true;
+}
+
+/**
+ * Directory / list / API-key directory exports: work emails stay visible;
+ * personal addresses only on the viewer's own row.
+ */
+export function visibleDirectoryEmail(
+  email: string | null | undefined,
+  opts: { isSelf: boolean }
+): string | null {
+  if (!email) return email ?? null;
+  if (isVendastaWorkEmail(email)) return email;
+  return opts.isSelf ? email : null;
+}
+
+/** Profile / single-employee: work emails always; personal only for self or authorized HR. */
+export function visibleProfileEmail(
+  email: string | null | undefined,
+  opts: { isViewingSelf: boolean; canViewSensitivePersonalInfo: boolean }
+): string | null {
+  if (!email) return email ?? null;
+  if (isVendastaWorkEmail(email)) return email;
+  return canViewPersonalEmail(opts) ? email : null;
+}
+
 export function canViewPrivateDocuments(opts: {
   isViewingSelf: boolean;
   canManageUsers: boolean;

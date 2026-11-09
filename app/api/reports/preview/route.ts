@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, departments, locations, divisions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getUserPermissions } from "@/lib/permissions";
+import { visibleProfileEmail } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -28,11 +30,17 @@ export async function GET(request: NextRequest) {
     const locMap = new Map(locs.map((l) => [l.id, l.name]));
     const divMap = new Map(divs.map((d) => [d.id, d.name]));
 
+    const permissions = session.user.email
+      ? await getUserPermissions(session.user.email)
+      : null;
     const enrichedData = allEmployees.map((emp) => ({
       employeeNumber: emp.employeeNumber,
       firstName: emp.firstName,
       lastName: emp.lastName,
-      email: emp.email,
+      email: visibleProfileEmail(emp.email, {
+        isViewingSelf: emp.id === session.user.employeeId,
+        canViewSensitivePersonalInfo: Boolean(permissions?.canViewSensitivePersonalInfo),
+      }),
       jobTitle: emp.jobTitle,
       department: emp.departmentId ? deptMap.get(emp.departmentId) : null,
       division: emp.divisionId ? divMap.get(emp.divisionId) : null,

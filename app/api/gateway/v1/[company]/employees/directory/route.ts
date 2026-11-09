@@ -60,7 +60,10 @@ export async function GET(
       locationName: emp.locationId ? locMap.get(emp.locationId) : null,
     };
 
-    return formatBambooEmployee(employee, fields || undefined);
+    return formatBambooEmployee(employee, fields || undefined, {
+      isSelf: emp.id === auth.employeeId,
+      isDirectory: true,
+    });
   });
 
   return NextResponse.json({

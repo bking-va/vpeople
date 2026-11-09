@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { employees, departments, locations, jobLevels } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { csvRow } from "@/lib/csv";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
         employeeNumber: employees.employeeNumber,
         firstName: employees.firstName,
         lastName: employees.lastName,
+        id: employees.id,
         email: employees.email,
         jobTitle: employees.jobTitle,
         department: departments.name,
@@ -63,7 +65,7 @@ export async function GET(request: NextRequest) {
         emp.employeeNumber || "",
         emp.firstName,
         emp.lastName,
-        emp.email,
+        visibleDirectoryEmail(emp.email, { isSelf: emp.id === session.user.employeeId }),
         emp.jobTitle || "",
         emp.department || "",
         emp.location || "",
