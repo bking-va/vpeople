@@ -13,6 +13,7 @@ import {
   VENDASTA_INTERNAL_PARTNER_ID,
   VENDASTA_OIDC_WELL_KNOWN,
   VENDASTA_PROVIDER_ID,
+  VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD,
   decideVendastaEmployeeAccess,
   isSafeInternalPath,
   isVendastaOidcConfigured,
@@ -25,6 +26,7 @@ import {
   vendastaPartnerIdFromEnv,
   vendastaRegistrationUrls,
   vendastaSignInAuthorizationParams,
+  trimVendastaCredential,
   verifiedWorkEmailFromIdToken,
   type EmployeeIdentityRow,
 } from "@/lib/vendasta-oidc";
@@ -58,8 +60,15 @@ describe("Vendasta OIDC provider", () => {
     expect(provider.type).toBe("oidc");
     expect(provider.issuer).toBe(VENDASTA_OIDC_ISSUER);
     expect(provider.wellKnown).toBe(VENDASTA_OIDC_WELL_KNOWN);
-    expect(provider.token).toBe(VENDASTA_OIDC_TOKEN);
-    expect(provider.userinfo).toBe(VENDASTA_OIDC_USERINFO);
+    expect(provider.token).toEqual(
+      expect.objectContaining({ url: VENDASTA_OIDC_TOKEN })
+    );
+    expect(provider.userinfo).toEqual(
+      expect.objectContaining({
+        url: VENDASTA_OIDC_USERINFO,
+        request: expect.any(Function),
+      })
+    );
     expect(provider.authorization).toEqual(
       expect.objectContaining({
         url: VENDASTA_OIDC_AUTHORIZATION,
@@ -72,14 +81,53 @@ describe("Vendasta OIDC provider", () => {
     expect(VENDASTA_OIDC_SCOPES).toBe("openid profile");
     expect(VENDASTA_OIDC_SCOPES.split(" ")).not.toContain("email");
     expect(provider.checks).toEqual(["pkce", "state", "nonce"]);
-    expect(provider.client).toEqual(
-      expect.objectContaining({
-        token_endpoint_auth_method: "client_secret_basic",
-        id_token_signed_response_alg: "RS256",
-      })
-    );
+    expect(VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD).toBe("client_secret_post");
+    expect(provider.client).toEqual({
+      token_endpoint_auth_method: "client_secret_post",
+    });
+    expect(provider.client).not.toHaveProperty("id_token_signed_response_alg");
     expect(provider.idToken).toBe(true);
     expect(provider.allowDangerousEmailAccountLinking).toBe(false);
+  });
+
+  test("trims client id and secret so whitespace cannot cause invalid_client", () => {
+    const provider = vendastaOidcProvider({
+      clientId: "  client-id\n",
+      clientSecret: "\tclient-secret  ",
+      env: { AUTH_VENDASTA_PARTNER_ID: "vuni" },
+    });
+    expect(provider.clientId).toBe("client-id");
+    expect(provider.clientSecret).toBe("client-secret");
+    expect(trimVendastaCredential("  x\n")).toBe("x");
+    expect(
+      isVendastaOidcConfigured({
+        AUTH_VENDASTA_ID: "  id  ",
+        AUTH_VENDASTA_SECRET: "\nsecret\n",
+      })
+    ).toBe(true);
+    expect(
+      isVendastaOidcConfigured({
+        AUTH_VENDASTA_ID: "id",
+        AUTH_VENDASTA_SECRET: "   ",
+      })
+    ).toBe(false);
+  });
+
+  test("authorize params include partner_id=vuni from env like features", () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      env: { AUTH_VENDASTA_PARTNER_ID: "vuni" },
+    });
+    expect(provider.authorization).toEqual(
+      expect.objectContaining({
+        params: {
+          scope: VENDASTA_OIDC_SCOPES,
+          response_type: "code",
+          partner_id: "vuni",
+        },
+      })
+    );
   });
 
   test("profile maps stable sub and never stores a real mailbox", async () => {

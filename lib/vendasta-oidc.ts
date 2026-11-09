@@ -32,6 +32,14 @@ export const VENDASTA_LEGACY_SESSION_PATH = "/api/auth/vendasta/legacy-session";
  */
 export const VENDASTA_INTERNAL_PARTNER_ID = "vuni";
 
+/**
+ * Token endpoint auth. Discovery lists client_secret_post first; vendasta-sign
+ * uses post. Features omits the field (Auth.js defaults to basic) and works for
+ * that client — for the dedicated vPeople client we follow discovery/sign and
+ * send credentials in the token body.
+ */
+export const VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD = "client_secret_post" as const;
+
 export const LEGACY_SESSION_DISABLED = {
   error: "legacy_session_transfer_disabled",
   message:
@@ -78,10 +86,20 @@ export type VendastaAccessDecision =
       reason: "invalid_sub" | "no_employee" | "terminated" | "sub_mismatch";
     };
 
+/** Trim env credentials; whitespace/newlines on the secret cause invalid_client. */
+export function trimVendastaCredential(
+  value: string | undefined | null
+): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function isVendastaOidcConfigured(
   env: Record<string, string | undefined> = process.env
 ): boolean {
-  return Boolean(env.AUTH_VENDASTA_ID?.trim() && env.AUTH_VENDASTA_SECRET?.trim());
+  return Boolean(
+    trimVendastaCredential(env.AUTH_VENDASTA_ID) &&
+      trimVendastaCredential(env.AUTH_VENDASTA_SECRET)
+  );
 }
 
 /**
@@ -247,29 +265,60 @@ export function vendastaRegistrationUrls(appOrigin: string): {
   };
 }
 
+/**
+ * Provider shape aligned with bking-va/vFeatureRequest auth.ts (features):
+ * explicit token URL object, custom userinfo Bearer fetch, partner_id from env,
+ * PKCE/state/nonce. Keeps vPeople sub-binding and no dangerous email linking.
+ * Token auth: client_secret_post (discovery first; vendasta-sign).
+ */
 export function vendastaOidcProvider(options: {
   clientId: string;
   clientSecret: string;
   env?: Record<string, string | undefined>;
 }): OIDCConfig<VendastaIdTokenClaims> {
+  const clientId = trimVendastaCredential(options.clientId);
+  const clientSecret = trimVendastaCredential(options.clientSecret);
+
   return {
     id: VENDASTA_PROVIDER_ID,
     name: "Vendasta",
     type: "oidc",
     issuer: VENDASTA_OIDC_ISSUER,
     wellKnown: VENDASTA_OIDC_WELL_KNOWN,
-    clientId: options.clientId,
-    clientSecret: options.clientSecret,
+    clientId,
+    clientSecret,
     authorization: {
       url: VENDASTA_OIDC_AUTHORIZATION,
       params: vendastaAuthorizeParams(options.env),
     },
-    token: VENDASTA_OIDC_TOKEN,
-    userinfo: VENDASTA_OIDC_USERINFO,
+    token: {
+      url: VENDASTA_OIDC_TOKEN,
+    },
+    userinfo: {
+      url: VENDASTA_OIDC_USERINFO,
+      async request({
+        tokens,
+        provider,
+      }: {
+        tokens: { access_token?: string };
+        provider: { userinfo?: { url?: string } };
+      }) {
+        const url =
+          typeof provider.userinfo === "object" && provider.userinfo?.url
+            ? provider.userinfo.url
+            : VENDASTA_OIDC_USERINFO;
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${tokens.access_token}`,
+            Accept: "application/json",
+          },
+        });
+        return await response.json();
+      },
+    },
     checks: ["pkce", "state", "nonce"],
     client: {
-      token_endpoint_auth_method: "client_secret_basic",
-      id_token_signed_response_alg: "RS256",
+      token_endpoint_auth_method: VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD,
     },
     idToken: true,
     allowDangerousEmailAccountLinking: false,
