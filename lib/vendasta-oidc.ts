@@ -313,6 +313,11 @@ export function vendastaOidcProvider(options: {
             Accept: "application/json",
           },
         });
+        if (!response.ok) {
+          throw new Error(
+            `Vendasta userinfo request failed with HTTP ${response.status}`
+          );
+        }
         return await response.json();
       },
     },

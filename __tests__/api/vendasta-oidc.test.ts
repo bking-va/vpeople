@@ -130,6 +130,77 @@ describe("Vendasta OIDC provider", () => {
     );
   });
 
+  test("userinfo request fetches with Bearer token and returns JSON on 2xx", async () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    });
+    const profile = { sub: SUB, name: "Jane Doe" };
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => profile,
+    });
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      const userinfo = provider.userinfo as {
+        url: string;
+        request: (args: {
+          tokens: { access_token?: string };
+          provider: { userinfo?: { url?: string } };
+        }) => Promise<unknown>;
+      };
+      await expect(
+        userinfo.request({
+          tokens: { access_token: "access-token" },
+          provider: { userinfo: { url: VENDASTA_OIDC_USERINFO } },
+        })
+      ).resolves.toEqual(profile);
+      expect(fetchMock).toHaveBeenCalledWith(VENDASTA_OIDC_USERINFO, {
+        headers: {
+          Authorization: "Bearer access-token",
+          Accept: "application/json",
+        },
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("userinfo request throws on non-2xx instead of returning error JSON", async () => {
+    const provider = vendastaOidcProvider({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    });
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "invalid_token" }),
+    });
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as typeof fetch;
+
+    try {
+      const userinfo = provider.userinfo as {
+        request: (args: {
+          tokens: { access_token?: string };
+          provider: { userinfo?: { url?: string } };
+        }) => Promise<unknown>;
+      };
+      await expect(
+        userinfo.request({
+          tokens: { access_token: "bad-token" },
+          provider: { userinfo: { url: VENDASTA_OIDC_USERINFO } },
+        })
+      ).rejects.toThrow("Vendasta userinfo request failed with HTTP 401");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   test("profile maps stable sub and never stores a real mailbox", async () => {
     const provider = vendastaOidcProvider({
       clientId: "client-id",
