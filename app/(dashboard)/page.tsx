@@ -11,6 +11,7 @@ import {
   employeeTasks,
   timesheets,
   documents,
+  announcements,
 } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -346,6 +347,19 @@ export default async function HomePage() {
     (item) => item.startDate && item.endDate && isOutOnDate(item.startDate, item.endDate, todayKey)
   );
 
+  const now = new Date();
+  const activeAnnouncements = await db
+    .select()
+    .from(announcements)
+    .where(
+      and(
+        eq(announcements.isActive, true),
+        sql`(${announcements.expiresAt} IS NULL OR ${announcements.expiresAt} >= ${now})`
+      )
+    )
+    .orderBy(sql`${announcements.publishedAt} desc`)
+    .limit(5);
+
   return (
     <div className="space-y-6">
       <div>
@@ -354,6 +368,22 @@ export default async function HomePage() {
         </h1>
         <p className="text-muted-foreground">Here&apos;s what&apos;s happening today</p>
       </div>
+
+      {activeAnnouncements.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Announcements</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {activeAnnouncements.map((item) => (
+              <div key={item.id} className="border-l-2 border-primary pl-3">
+                <p className="font-medium text-sm">{item.title}</p>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{item.body}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {/* Clock In/Out Widget */}

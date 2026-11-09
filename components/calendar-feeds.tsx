@@ -97,6 +97,7 @@ export function CalendarFeeds({ employeeId }: CalendarFeedsProps) {
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
   const timeOffUrl = `${baseUrl}/api/calendar/${token}/time-off`;
   const holidaysUrl = `${baseUrl}/api/calendar/${token}/holidays`;
+  const celebrationsUrl = `${baseUrl}/api/calendar/${token}/celebrations`;
 
   return (
     <Card>
@@ -147,6 +148,23 @@ export function CalendarFeeds({ employeeId }: CalendarFeedsProps) {
           </div>
           <p className="text-xs text-muted-foreground">
             Subscribe to this URL in your calendar app to see company holidays
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="celebrationsUrl">Birthdays and Anniversaries Calendar URL</Label>
+          <div className="flex gap-2">
+            <Input id="celebrationsUrl" value={celebrationsUrl} readOnly />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => copyToClipboard(celebrationsUrl)}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Subscribe to this URL to see upcoming birthdays and work anniversaries
           </p>
         </div>
 
