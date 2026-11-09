@@ -203,6 +203,7 @@ export const employees = pgTable("employees", {
   id: serial("id").primaryKey(),
   employeeNumber: text("employee_number").unique(),
   userId: text("user_id").references(() => users.id),
+  vendastaSub: text("vendasta_sub").unique(),
   firstName: text("first_name").notNull(),
   middleName: text("middle_name"),
   lastName: text("last_name").notNull(),

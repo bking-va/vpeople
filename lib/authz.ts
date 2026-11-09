@@ -146,6 +146,26 @@ export function clampCandidateRating(value: unknown): number | null {
   return Math.min(5, Math.max(1, Math.round(n)));
 }
 
+/**
+ * App session.role from vPeople accessLevel only.
+ * Viewing roles map to "admin" for existing HR screens; writes still use accessLevel.
+ * Never derive this from IdP claims, roles[], or user input.
+ */
+export function sessionRoleFromAccessLevel(
+  accessLevel: AccessLevel
+): "employee" | "manager" | "admin" {
+  if (accessLevel === "manager") return "manager";
+  if (
+    accessLevel === "full_admin" ||
+    accessLevel === "admin" ||
+    accessLevel === "global_view" ||
+    accessLevel === "regional_view"
+  ) {
+    return "admin";
+  }
+  return "employee";
+}
+
 export function isDevLoginEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.ENABLE_DEV_AUTH !== "true") return false;
   const isProd = env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
