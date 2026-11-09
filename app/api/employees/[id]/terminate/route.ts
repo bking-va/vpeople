@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, employeeTasks, taskTemplates, auditLogs } from "@/lib/db/schema";
+import { recordEmploymentStatusChange } from "@/lib/employment-status";
 import { eq } from "drizzle-orm";
 
 export async function POST(
@@ -67,6 +68,13 @@ export async function POST(
       })
       .where(eq(employees.id, targetEmployeeId))
       .returning();
+
+    await recordEmploymentStatusChange({
+      employeeId: targetEmployeeId,
+      status: "terminated",
+      effectiveDate: terminationDate,
+      comment: terminationReason || terminationType || "Termination",
+    });
 
     // Create offboarding tasks from templates
     const templates = await db

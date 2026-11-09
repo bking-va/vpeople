@@ -15,8 +15,16 @@ import {
   getJobHistoryReport,
   getEmploymentStatusHistoryReport,
   getPeopleWithoutRaise,
+  getPayByTitleReport,
+  getPayByDepartmentReport,
+  getPayByLocationReport,
+  getSalaryHistoryReport,
+  getTimeOffScheduleReport,
+  type PayGroupRow,
 } from "@/lib/reports/standard";
 import { getUserPermissions } from "@/lib/permissions";
+import { formatCurrency } from "@/lib/utils";
+import { formatEmploymentStatus } from "@/lib/utils/formatters";
 
 export default async function StandardReportsPage({
   searchParams,
@@ -249,17 +257,108 @@ export default async function StandardReportsPage({
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">
-          {rows.map((row) => (
-            <div key={row.id} className="text-sm flex justify-between">
-              <Link href={`/people/${row.id}`} className="text-primary hover:underline">
-                {row.firstName} {row.lastName}
-              </Link>
-              <span>
-                {row.employmentStatus}
-                {row.terminationDate ? ` · ended ${row.terminationDate}` : ""}
-              </span>
-            </div>
-          ))}
+          {rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No status history recorded yet</p>
+          ) : (
+            rows.map((row) => (
+              <div key={row.id} className="text-sm flex justify-between gap-4">
+                <Link href={`/people/${row.employeeId}`} className="text-primary hover:underline">
+                  {row.firstName} {row.lastName}
+                </Link>
+                <span>
+                  {formatEmploymentStatus(row.employmentStatus)} · {row.effectiveDate}
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+    );
+  } else if (type === "pay-by-title" || type === "pay-by-department" || type === "pay-by-location") {
+    title =
+      type === "pay-by-title"
+        ? "Pay by Title"
+        : type === "pay-by-department"
+          ? "Pay by Department"
+          : "Pay by Location";
+    const rows: PayGroupRow[] = !permissions?.canViewCompensation
+      ? []
+      : type === "pay-by-title"
+        ? await getPayByTitleReport()
+        : type === "pay-by-department"
+          ? await getPayByDepartmentReport()
+          : await getPayByLocationReport();
+    body = (
+      <Card>
+        <CardContent className="pt-6 space-y-2">
+          {!permissions?.canViewCompensation ? (
+            <p className="text-sm text-muted-foreground">Compensation permission required</p>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground grid grid-cols-5 gap-2 font-medium">
+                <span>Group</span>
+                <span className="text-right">Count</span>
+                <span className="text-right">Avg</span>
+                <span className="text-right">Min</span>
+                <span className="text-right">Max</span>
+              </div>
+              {rows.map((row) => (
+                <div key={row.group} className="text-sm grid grid-cols-5 gap-2">
+                  <span>{row.group}</span>
+                  <span className="text-right">{row.count}</span>
+                  <span className="text-right">{formatCurrency(row.avgPay)}</span>
+                  <span className="text-right">{formatCurrency(row.minPay)}</span>
+                  <span className="text-right">{formatCurrency(row.maxPay)}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    );
+  } else if (type === "salary-history") {
+    title = "Salary History";
+    const rows = permissions?.canViewCompensation ? await getSalaryHistoryReport() : [];
+    body = (
+      <Card>
+        <CardContent className="pt-6 space-y-2">
+          {!permissions?.canViewCompensation ? (
+            <p className="text-sm text-muted-foreground">Compensation permission required</p>
+          ) : (
+            rows.map((row) => (
+              <div key={row.id} className="text-sm flex justify-between gap-4">
+                <Link href={`/people/${row.employeeId}`} className="text-primary hover:underline">
+                  {row.firstName} {row.lastName}
+                </Link>
+                <span>
+                  {row.payRate ? formatCurrency(row.payRate, row.currency || "CAD") : "—"} · {row.effectiveDate}
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+    );
+  } else if (type === "time-off-schedule") {
+    title = "Time Off Schedule";
+    const rows = await getTimeOffScheduleReport(year);
+    body = (
+      <Card>
+        <CardContent className="pt-6 space-y-2">
+          {rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No scheduled time off this year</p>
+          ) : (
+            rows.map((row) => (
+              <div key={row.id} className="text-sm flex justify-between gap-4">
+                <span>
+                  {row.firstName} {row.lastName} · {row.policy || "Time off"}
+                </span>
+                <span>
+                  {row.startDate} – {row.endDate} · {row.daysRequested}d · {row.status}
+                </span>
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
     );

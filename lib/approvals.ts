@@ -10,10 +10,12 @@ import {
   compensationHistory,
   jobHistory,
   timeOffBalances,
+  employmentStatusHistory,
 } from "@/lib/db/schema";
 import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { createAuditLog } from "@/lib/audit";
 import { isApproverBlockedFromActing } from "@/lib/approval-errors";
+import { recordTimeOffUsageAdjustment } from "@/lib/time-off-adjustments";
 
 export { isApproverBlockedFromActing } from "@/lib/approval-errors";
 
@@ -359,6 +361,14 @@ export async function approveStep(
             )
           );
 
+        await recordTimeOffUsageAdjustment(tx, {
+          employeeId: timeOffRequest.employeeId,
+          policyId: timeOffRequest.policyId,
+          daysRequested,
+          requestId: updatedRequest.entityId,
+          adjustedBy: approverId,
+        });
+
         await createAuditLog({
           employeeId: approverId,
           action: "time_off_approved",
@@ -426,6 +436,15 @@ export async function approveStep(
           if (metadata.divisionId !== undefined) employeeUpdates.divisionId = metadata.divisionId;
           if (metadata.locationId !== undefined) employeeUpdates.locationId = metadata.locationId;
           if (metadata.managerId !== undefined) employeeUpdates.managerId = metadata.managerId;
+          const nextStatus =
+            metadata.employmentStatus || metadata.employeeUpdates?.employmentStatus;
+          if (nextStatus !== undefined) employeeUpdates.employmentStatus = nextStatus;
+
+          const [previous] = await tx
+            .select({ employmentStatus: employees.employmentStatus })
+            .from(employees)
+            .where(eq(employees.id, metadata.employeeId))
+            .limit(1);
 
           if (Object.keys(employeeUpdates).length > 1) {
             await tx
@@ -442,8 +461,18 @@ export async function approveStep(
             divisionId: metadata.divisionId || null,
             locationId: metadata.locationId || null,
             managerId: metadata.managerId || null,
+            employmentStatus: nextStatus || null,
             comment: metadata.changeReason || null,
           });
+
+          if (nextStatus && previous?.employmentStatus !== nextStatus) {
+            await tx.insert(employmentStatusHistory).values({
+              employeeId: metadata.employeeId,
+              effectiveDate: metadata.effectiveDate,
+              status: nextStatus,
+              comment: metadata.changeReason || "Job info update",
+            });
+          }
 
           await createAuditLog({
             employeeId: approverId,

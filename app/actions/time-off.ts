@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { approveStep, rejectStep, getApprovalRequestForEntity } from "@/lib/approvals";
 import { findConfiguredTimeOffWorkflow } from "@/lib/time-off-workflow";
+import { recordTimeOffUsageAdjustment } from "@/lib/time-off-adjustments";
 
 export async function approveTimeOffRequest(requestId: number) {
   const session = await auth();
@@ -164,6 +165,14 @@ export async function approveTimeOffRequest(requestId: number) {
             eq(timeOffBalances.policyId, request.request.policyId)
           )
         );
+
+      await recordTimeOffUsageAdjustment(tx, {
+        employeeId: request.request.employeeId,
+        policyId: request.request.policyId,
+        daysRequested,
+        requestId,
+        adjustedBy: currentEmployee.id,
+      });
     });
 
     // Legacy single-step audit log

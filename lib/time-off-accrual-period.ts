@@ -35,6 +35,11 @@ export function legacyBiweeklyPeriodKeys(asOf: Date): string[] {
   return keys;
 }
 
+/** Idempotency key for the prior calendar year's carryover trim. */
+export function carryoverPeriodKey(asOf: Date): string {
+  return `carryover:${asOf.getUTCFullYear() - 1}`;
+}
+
 export function accrualAmount(rate: number, period: string | null | undefined): number {
   if (!period || period === "none" || !Number.isFinite(rate) || rate <= 0) {
     return 0;

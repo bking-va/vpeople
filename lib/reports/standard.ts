@@ -8,8 +8,9 @@ import {
   timeOffRequests,
   compensationHistory,
   jobHistory,
+  employmentStatusHistory,
 } from "@/lib/db/schema";
-import { desc, eq, sql, and, gte } from "drizzle-orm";
+import { desc, eq, sql, and, gte, lte, or } from "drizzle-orm";
 import { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 import { takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
@@ -244,16 +245,151 @@ export async function getJobHistoryReport() {
 export async function getEmploymentStatusHistoryReport() {
   return db
     .select({
+      id: employmentStatusHistory.id,
+      employeeId: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      employmentStatus: employmentStatusHistory.status,
+      effectiveDate: employmentStatusHistory.effectiveDate,
+      comment: employmentStatusHistory.comment,
+      department: departments.name,
+      location: locations.name,
+    })
+    .from(employmentStatusHistory)
+    .innerJoin(employees, eq(employmentStatusHistory.employeeId, employees.id))
+    .leftJoin(departments, eq(employees.departmentId, departments.id))
+    .leftJoin(locations, eq(employees.locationId, locations.id))
+    .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id));
+}
+
+export async function getSalaryHistoryReport() {
+  return db
+    .select({
+      id: compensationHistory.id,
+      employeeId: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      jobTitle: employees.jobTitle,
+      payRate: compensationHistory.payRate,
+      payType: compensationHistory.payType,
+      paySchedule: compensationHistory.paySchedule,
+      currency: compensationHistory.currency,
+      effectiveDate: compensationHistory.effectiveDate,
+      changeReason: compensationHistory.changeReason,
+    })
+    .from(compensationHistory)
+    .innerJoin(employees, eq(compensationHistory.employeeId, employees.id))
+    .orderBy(desc(compensationHistory.effectiveDate), desc(compensationHistory.id));
+}
+
+export async function getTimeOffScheduleReport(year: number) {
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+  return db
+    .select({
+      id: timeOffRequests.id,
+      employeeId: employees.id,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      policy: timeOffPolicies.name,
+      startDate: timeOffRequests.startDate,
+      endDate: timeOffRequests.endDate,
+      daysRequested: timeOffRequests.daysRequested,
+      status: timeOffRequests.status,
+    })
+    .from(timeOffRequests)
+    .innerJoin(employees, eq(timeOffRequests.employeeId, employees.id))
+    .leftJoin(timeOffPolicies, eq(timeOffRequests.policyId, timeOffPolicies.id))
+    .where(
+      and(
+        or(eq(timeOffRequests.status, "approved"), eq(timeOffRequests.status, "pending")),
+        lte(timeOffRequests.startDate, end),
+        gte(timeOffRequests.endDate, start)
+      )
+    )
+    .orderBy(timeOffRequests.startDate, employees.lastName);
+}
+
+type PayRow = {
+  employeeId: number;
+  firstName: string;
+  lastName: string;
+  jobTitle: string | null;
+  department: string | null;
+  location: string | null;
+  payRate: string | null;
+};
+
+async function getCurrentPayRows(): Promise<PayRow[]> {
+  const latest = await getLastPayChangeReport();
+  const latestByEmployee = new Map(latest.map((row) => [row.employeeId, row]));
+
+  const active = await db
+    .select({
       id: employees.id,
       firstName: employees.firstName,
       lastName: employees.lastName,
-      employmentStatus: employees.employmentStatus,
-      hireDate: employees.hireDate,
-      terminationDate: employees.terminationDate,
+      jobTitle: employees.jobTitle,
       department: departments.name,
       location: locations.name,
     })
     .from(employees)
     .leftJoin(departments, eq(employees.departmentId, departments.id))
-    .leftJoin(locations, eq(employees.locationId, locations.id));
+    .leftJoin(locations, eq(employees.locationId, locations.id))
+    .where(sql`${employees.employmentStatus} <> 'terminated'`);
+
+  return active.map((emp) => {
+    const pay = latestByEmployee.get(emp.id);
+    return {
+      employeeId: emp.id,
+      firstName: emp.firstName,
+      lastName: emp.lastName,
+      jobTitle: emp.jobTitle,
+      department: emp.department,
+      location: emp.location,
+      payRate: pay?.payRate ?? null,
+    };
+  });
+}
+
+export type PayGroupRow = {
+  group: string;
+  count: number;
+  avgPay: number;
+  minPay: number;
+  maxPay: number;
+};
+
+function aggregatePay(rows: PayRow[], groupOf: (row: PayRow) => string | null | undefined): PayGroupRow[] {
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const rate = row.payRate != null ? parseFloat(row.payRate) : NaN;
+    if (!Number.isFinite(rate)) continue;
+    const key = (groupOf(row) || "Unassigned").trim() || "Unassigned";
+    const list = groups.get(key) || [];
+    list.push(rate);
+    groups.set(key, list);
+  }
+
+  return Array.from(groups.entries())
+    .map(([group, rates]) => ({
+      group,
+      count: rates.length,
+      avgPay: Number((rates.reduce((sum, n) => sum + n, 0) / rates.length).toFixed(2)),
+      minPay: Math.min(...rates),
+      maxPay: Math.max(...rates),
+    }))
+    .sort((a, b) => b.avgPay - a.avgPay);
+}
+
+export async function getPayByTitleReport() {
+  return aggregatePay(await getCurrentPayRows(), (row) => row.jobTitle);
+}
+
+export async function getPayByDepartmentReport() {
+  return aggregatePay(await getCurrentPayRows(), (row) => row.department);
+}
+
+export async function getPayByLocationReport() {
+  return aggregatePay(await getCurrentPayRows(), (row) => row.location);
 }

@@ -733,6 +733,13 @@ describe("Security authz integration (Real Postgres)", () => {
     expect(res.status).toBe(403);
   });
 
+  test("viewing role cannot export pay-by-title even with session admin", async () => {
+    session({ email: viewer.email, employeeId: viewer.id, role: "admin" });
+    const req = new NextRequest("http://localhost/api/reports/export?type=pay-by-title");
+    const res = await exportReports(req);
+    expect(res.status).toBe(403);
+  });
+
   test("rate limiter is atomic across concurrent requests", async () => {
     const identifier = `sec-rate-${runId}`;
     const results = await Promise.all(

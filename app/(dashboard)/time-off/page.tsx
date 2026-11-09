@@ -93,6 +93,11 @@ export default async function TimeOffPage() {
               <Link href="/time-off/approvals">View All Approvals</Link>
             </Button>
           )}
+          {isAdmin && (
+            <Button asChild variant="outline">
+              <Link href="/time-off/balances">All Balances</Link>
+            </Button>
+          )}
           <Button asChild variant="outline">
             <Link href={`/people/${employeeId}#time-off`}>View My Balances</Link>
           </Button>

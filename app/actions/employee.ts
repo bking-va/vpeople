@@ -3,6 +3,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, jobHistory, compensationHistory, approvalWorkflows } from "@/lib/db/schema";
+import { recordEmploymentStatusChange } from "@/lib/employment-status";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
@@ -210,16 +211,26 @@ export async function updateEmployeeJobInfo(
     .where(eq(employees.id, employeeId));
 
   if (hasSignificantChange) {
+    const effectiveDate = new Date().toISOString().split("T")[0];
+    const nextStatus = data.employmentStatus || existingEmployee.employmentStatus;
     await db.insert(jobHistory).values({
       employeeId,
-      effectiveDate: new Date().toISOString().split("T")[0],
+      effectiveDate,
       jobTitle: data.jobTitle || existingEmployee.jobTitle,
       departmentId: data.departmentId || existingEmployee.departmentId,
       divisionId: data.divisionId || existingEmployee.divisionId || null,
       locationId: data.locationId || existingEmployee.locationId,
       managerId: data.managerId || existingEmployee.managerId || null,
-      employmentStatus: data.employmentStatus || existingEmployee.employmentStatus,
+      employmentStatus: nextStatus,
     });
+    if (data.employmentStatus && data.employmentStatus !== existingEmployee.employmentStatus) {
+      await recordEmploymentStatusChange({
+        employeeId,
+        status: data.employmentStatus,
+        effectiveDate,
+        comment: "Job info update",
+      });
+    }
   }
 
   await createAuditLog({
