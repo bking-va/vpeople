@@ -7,12 +7,31 @@ import { formatDate } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { getUserPermissions } from "@/lib/permissions";
+import { canViewTimeOffLedger } from "@/lib/authz";
 
 export default async function TimeOffBalancesPage() {
   const session = await auth();
   if (!session?.user || (session.user.role !== "admin" && session.user.role !== "full_admin")) {
     redirect("/time-off");
   }
+
+  const permissions = session.user.email
+    ? await getUserPermissions(session.user.email)
+    : null;
+  const [viewer] = session.user.employeeId
+    ? await db
+        .select({ accessLevel: employees.accessLevel })
+        .from(employees)
+        .where(eq(employees.id, session.user.employeeId))
+        .limit(1)
+    : [null];
+  const canViewHistory = canViewTimeOffLedger({
+    isViewingSelf: false,
+    isManager: false,
+    canManageUsers: Boolean(permissions?.canManageUsers),
+    accessLevel: viewer?.accessLevel,
+  });
 
   const allBalances = await db
     .select({
@@ -58,22 +77,24 @@ export default async function TimeOffBalancesPage() {
 
   // Enhance balances with available, pending, and scheduled
   // Note: stored balance already reflects approved deductions, so available = stored balance
-  const recentAdjustments = await db
-    .select({
-      id: timeOffBalanceAdjustments.id,
-      amount: timeOffBalanceAdjustments.amount,
-      reason: timeOffBalanceAdjustments.reason,
-      createdAt: timeOffBalanceAdjustments.createdAt,
-      firstName: employees.firstName,
-      lastName: employees.lastName,
-      policyName: timeOffPolicies.name,
-    })
-    .from(timeOffBalanceAdjustments)
-    .innerJoin(timeOffBalances, eq(timeOffBalanceAdjustments.balanceId, timeOffBalances.id))
-    .innerJoin(employees, eq(timeOffBalances.employeeId, employees.id))
-    .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
-    .orderBy(desc(timeOffBalanceAdjustments.createdAt))
-    .limit(50);
+  const recentAdjustments = canViewHistory
+    ? await db
+        .select({
+          id: timeOffBalanceAdjustments.id,
+          amount: timeOffBalanceAdjustments.amount,
+          reason: timeOffBalanceAdjustments.reason,
+          createdAt: timeOffBalanceAdjustments.createdAt,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+          policyName: timeOffPolicies.name,
+        })
+        .from(timeOffBalanceAdjustments)
+        .innerJoin(timeOffBalances, eq(timeOffBalanceAdjustments.balanceId, timeOffBalances.id))
+        .innerJoin(employees, eq(timeOffBalances.employeeId, employees.id))
+        .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
+        .orderBy(desc(timeOffBalanceAdjustments.createdAt))
+        .limit(50)
+    : [];
 
   const balancesWithDetails = allBalances.map(item => {
     const key = `${item.balance.employeeId}-${item.balance.policyId}`;
@@ -143,6 +164,7 @@ export default async function TimeOffBalancesPage() {
         </CardContent>
       </Card>
 
+      {canViewHistory && (
       <Card>
         <CardHeader>
           <CardTitle>Balance History</CardTitle>
@@ -178,6 +200,7 @@ export default async function TimeOffBalancesPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

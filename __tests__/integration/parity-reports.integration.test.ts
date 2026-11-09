@@ -189,6 +189,53 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
     expect(parseFloat(after.balance)).toBeCloseTo(22, 2);
   });
 
+  test("January carryover after this year's accrual does not forfeit YTD credits", async () => {
+    const [policy] = await db
+      .insert(timeOffPolicies)
+      .values({
+        name: `Parity YTD ${runId}`,
+        policyType: "vacation",
+        accrualRate: "10",
+        accrualPeriod: "annual",
+        maxCarryover: "5",
+      })
+      .returning();
+    ids.policies.push(policy.id);
+
+    const [emp] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `PAR_YTD_${runId}`,
+        firstName: "Year",
+        lastName: "ToDate",
+        email: `ytd.carry.${runId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+      })
+      .returning();
+    ids.employees.push(emp.id);
+
+    const [balance] = await db
+      .insert(timeOffBalances)
+      .values({ employeeId: emp.id, policyId: policy.id, balance: "30.00" })
+      .returning();
+    ids.balances.push(balance.id);
+
+    await db.insert(timeOffAccrualRuns).values({
+      balanceId: balance.id,
+      periodKey: "2029",
+      amount: "10.00",
+      createdAt: new Date("2029-01-01T00:05:00Z"),
+    });
+
+    await runTimeOffCarryover(new Date("2029-01-15T12:00:00Z"));
+    const [after] = await db
+      .select()
+      .from(timeOffBalances)
+      .where(eq(timeOffBalances.id, balance.id));
+    expect(parseFloat(after.balance)).toBeCloseTo(15, 2);
+  });
+
   test("mid-year cron does not apply last year's carryover cap", async () => {
     const [policy] = await db
       .insert(timeOffPolicies)

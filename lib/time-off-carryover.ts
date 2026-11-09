@@ -6,14 +6,20 @@ import {
   timeOffBalanceAdjustments,
   employees,
 } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
-import { carryoverPeriodKey, isCarryoverWindow } from "@/lib/time-off-accrual-period";
+import { and, eq, gte, lt, sql } from "drizzle-orm";
+import {
+  carryoverCeiling,
+  carryoverPeriodKey,
+  isCarryoverWindow,
+} from "@/lib/time-off-accrual-period";
 
 /**
  * In January, forfeit unused days above maxCarryover for the year that just
  * ended. Idempotent per (balance, carryover:YYYY). Policies with a null
  * maxCarryover are unlimited and skipped. Mid-year runs are no-ops so a
  * November deploy cannot treat current-year balances as last year's leftover.
+ * January runs raise the cap by this year's already-applied accrual credits so
+ * a deploy after the annual credit cannot forfeit YTD leave.
  */
 export async function runTimeOffCarryover(asOf: Date = new Date()) {
   const periodKey = carryoverPeriodKey(asOf);
@@ -70,6 +76,23 @@ export async function runTimeOffCarryover(asOf: Date = new Date()) {
         return null;
       }
 
+      const year = asOf.getUTCFullYear();
+      const yearStart = new Date(Date.UTC(year, 0, 1));
+      const nextYear = new Date(Date.UTC(year + 1, 0, 1));
+      const [ytd] = await tx
+        .select({
+          credited: sql<string>`coalesce(sum(${timeOffAccrualRuns.amount}::numeric), 0)`,
+        })
+        .from(timeOffAccrualRuns)
+        .where(
+          and(
+            eq(timeOffAccrualRuns.balanceId, row.id),
+            sql`${timeOffAccrualRuns.periodKey} not like 'carryover:%'`,
+            gte(timeOffAccrualRuns.createdAt, yearStart),
+            lt(timeOffAccrualRuns.createdAt, nextYear)
+          )
+        );
+
       const [live] = await tx
         .select({ balance: timeOffBalances.balance })
         .from(timeOffBalances)
@@ -77,7 +100,8 @@ export async function runTimeOffCarryover(asOf: Date = new Date()) {
         .limit(1);
 
       const current = parseFloat(live?.balance || "0");
-      const next = Math.min(current, cap);
+      const ceiling = carryoverCeiling(cap, parseFloat(ytd?.credited || "0"));
+      const next = Math.min(current, ceiling);
       const forfeited = Number((current - next).toFixed(2));
 
       if (forfeited > 0) {
@@ -89,7 +113,7 @@ export async function runTimeOffCarryover(asOf: Date = new Date()) {
         await tx
           .update(timeOffBalances)
           .set({
-            balance: sql`LEAST(${timeOffBalances.balance}::numeric, ${cap}::numeric)`,
+            balance: sql`LEAST(${timeOffBalances.balance}::numeric, ${ceiling}::numeric)`,
             updatedAt: new Date(),
           })
           .where(eq(timeOffBalances.id, row.id));

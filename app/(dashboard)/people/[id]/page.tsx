@@ -36,6 +36,7 @@ import { getUserPermissions } from "@/lib/permissions";
 import {
   canViewImmigrationNumbers,
   canViewPrivateDocuments,
+  canViewTimeOffLedger,
   redactVisaDocumentNumber,
 } from "@/lib/authz";
 import Link from "next/link";
@@ -166,14 +167,7 @@ export default async function EmployeeProfilePage({
     .where(eq(jobHistory.employeeId, employeeId))
     .orderBy(desc(jobHistory.effectiveDate));
 
-  const statusHistoryRecords = await db
-    .select()
-    .from(employmentStatusHistory)
-    .where(eq(employmentStatusHistory.employeeId, employeeId))
-    .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id));
-
   const isViewingSelf = session.user.employeeId === employeeId;
-  const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
   const isManager = employee.managerId === session.user.employeeId;
 
   // Get DB-backed permissions
@@ -206,6 +200,23 @@ export default async function EmployeeProfilePage({
       ])
     : [[], [], []];
 
+  let viewerAccessLevel = isViewingSelf ? employee.accessLevel : null;
+  if (!viewerAccessLevel && session.user.employeeId) {
+    const [viewer] = await db
+      .select({ accessLevel: employees.accessLevel })
+      .from(employees)
+      .where(eq(employees.id, session.user.employeeId))
+      .limit(1);
+    viewerAccessLevel = viewer?.accessLevel ?? null;
+  }
+
+  const canViewLedger = canViewTimeOffLedger({
+    isViewingSelf,
+    isManager,
+    canManageUsers: permissions.canManageUsers,
+    accessLevel: viewerAccessLevel,
+  });
+
   const timeOffData = await db
     .select({
       balance: timeOffBalances,
@@ -216,19 +227,20 @@ export default async function EmployeeProfilePage({
     .where(eq(timeOffBalances.employeeId, employeeId));
 
   const balanceIds = timeOffData.map((item) => item.balance.id);
-  const balanceAdjustments = balanceIds.length
-    ? await db
-        .select({
-          id: timeOffBalanceAdjustments.id,
-          balanceId: timeOffBalanceAdjustments.balanceId,
-          amount: timeOffBalanceAdjustments.amount,
-          reason: timeOffBalanceAdjustments.reason,
-          createdAt: timeOffBalanceAdjustments.createdAt,
-        })
-        .from(timeOffBalanceAdjustments)
-        .where(inArray(timeOffBalanceAdjustments.balanceId, balanceIds))
-        .orderBy(desc(timeOffBalanceAdjustments.createdAt))
-    : [];
+  const balanceAdjustments =
+    canViewLedger && balanceIds.length
+      ? await db
+          .select({
+            id: timeOffBalanceAdjustments.id,
+            balanceId: timeOffBalanceAdjustments.balanceId,
+            amount: timeOffBalanceAdjustments.amount,
+            reason: timeOffBalanceAdjustments.reason,
+            createdAt: timeOffBalanceAdjustments.createdAt,
+          })
+          .from(timeOffBalanceAdjustments)
+          .where(inArray(timeOffBalanceAdjustments.balanceId, balanceIds))
+          .orderBy(desc(timeOffBalanceAdjustments.createdAt))
+      : [];
 
   const requests = await db
     .select()
@@ -248,10 +260,18 @@ export default async function EmployeeProfilePage({
     .where(eq(employeeTasks.employeeId, employeeId))
     .orderBy(employeeTasks.createdAt);
 
+  const statusHistoryRecords = canViewLedger
+    ? await db
+        .select()
+        .from(employmentStatusHistory)
+        .where(eq(employmentStatusHistory.employeeId, employeeId))
+        .orderBy(desc(employmentStatusHistory.effectiveDate), desc(employmentStatusHistory.id))
+    : [];
+
   const canViewDocs = canViewPrivateDocuments({
     isViewingSelf,
     canManageUsers: permissions.canManageUsers,
-    accessLevel: session.user.role === "full_admin" ? "full_admin" : undefined,
+    accessLevel: viewerAccessLevel,
   });
   const employeeDocs = canViewDocs
     ? await db

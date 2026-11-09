@@ -2,6 +2,7 @@ import {
   canViewCustomFieldValue,
   canViewImmigrationNumbers,
   canViewPrivateDocuments,
+  canViewTimeOffLedger,
   canWriteSettings,
   clampCandidateRating,
   isCronAuthorized,
@@ -14,7 +15,12 @@ import {
 import { calendarDaysInclusive, takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
 import { csvField, csvRow } from "@/lib/csv";
-import { accrualPeriodKey, legacyBiweeklyPeriodKeys } from "@/lib/time-off-accrual-period";
+import {
+  accrualPeriodKey,
+  carryoverCeiling,
+  isCarryoverWindow,
+  legacyBiweeklyPeriodKeys,
+} from "@/lib/time-off-accrual-period";
 
 describe("field-level authz helpers", () => {
   test("visa document numbers are redacted for coworkers", () => {
@@ -72,6 +78,41 @@ describe("field-level authz helpers", () => {
         isViewingSelf: true,
         canManageUsers: false,
         accessLevel: "employee",
+      })
+    ).toBe(true);
+  });
+
+  test("time-off ledger is hidden from coworkers and viewing roles", () => {
+    expect(
+      canViewTimeOffLedger({
+        isViewingSelf: false,
+        isManager: false,
+        canManageUsers: false,
+        accessLevel: "global_view",
+      })
+    ).toBe(false);
+    expect(
+      canViewTimeOffLedger({
+        isViewingSelf: false,
+        isManager: true,
+        canManageUsers: false,
+        accessLevel: "manager",
+      })
+    ).toBe(true);
+    expect(
+      canViewTimeOffLedger({
+        isViewingSelf: true,
+        isManager: false,
+        canManageUsers: false,
+        accessLevel: "employee",
+      })
+    ).toBe(true);
+    expect(
+      canViewTimeOffLedger({
+        isViewingSelf: false,
+        isManager: false,
+        canManageUsers: true,
+        accessLevel: "admin",
       })
     ).toBe(true);
   });
@@ -199,5 +240,12 @@ describe("biweekly accrual period", () => {
   test("legacy ISO-week keys cover both weeks in the fortnight", () => {
     const keys = legacyBiweeklyPeriodKeys(new Date("2026-01-05T12:00:00Z"));
     expect(keys).toEqual(expect.arrayContaining(["2026-W01", "2026-W02"]));
+  });
+
+  test("carryover window is January-only and preserves YTD credits in the cap", () => {
+    expect(isCarryoverWindow(new Date("2029-01-15T12:00:00Z"))).toBe(true);
+    expect(isCarryoverWindow(new Date("2029-11-15T12:00:00Z"))).toBe(false);
+    expect(carryoverCeiling(5, 10)).toBe(15);
+    expect(carryoverCeiling(5, 0)).toBe(5);
   });
 });

@@ -281,13 +281,14 @@ export default async function StandardReportsPage({
         : type === "pay-by-department"
           ? "Pay by Department"
           : "Pay by Location";
-    const rows: PayGroupRow[] = !permissions?.canViewCompensation
+    const canViewPay = Boolean(permissions?.canViewCompensation);
+    const rows: PayGroupRow[] = !canViewPay
       ? []
       : type === "pay-by-title"
-        ? await getPayByTitleReport({ canViewCompensation: true })
+        ? await getPayByTitleReport({ canViewCompensation: canViewPay })
         : type === "pay-by-department"
-          ? await getPayByDepartmentReport({ canViewCompensation: true })
-          : await getPayByLocationReport({ canViewCompensation: true });
+          ? await getPayByDepartmentReport({ canViewCompensation: canViewPay })
+          : await getPayByLocationReport({ canViewCompensation: canViewPay });
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">

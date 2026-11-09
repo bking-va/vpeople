@@ -93,11 +93,12 @@ export async function GET(request: NextRequest) {
       const permissions = session.user.email
         ? await getUserPermissions(session.user.email)
         : null;
-      if (!permissions?.canViewCompensation) {
+      const canViewPay = Boolean(permissions?.canViewCompensation);
+      if (!canViewPay) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       if (reportType === "salary-history") {
-        const rows = await getSalaryHistoryReport({ canViewCompensation: true });
+        const rows = await getSalaryHistoryReport({ canViewCompensation: canViewPay });
         csvData =
           csvRow([
             "Employee",
@@ -123,10 +124,10 @@ export async function GET(request: NextRequest) {
       } else {
         const rows: PayGroupRow[] =
           reportType === "pay-by-title"
-            ? await getPayByTitleReport({ canViewCompensation: true })
+            ? await getPayByTitleReport({ canViewCompensation: canViewPay })
             : reportType === "pay-by-department"
-              ? await getPayByDepartmentReport({ canViewCompensation: true })
-              : await getPayByLocationReport({ canViewCompensation: true });
+              ? await getPayByDepartmentReport({ canViewCompensation: canViewPay })
+              : await getPayByLocationReport({ canViewCompensation: canViewPay });
         csvData = csvRow(["Group", "Count", "Avg Pay", "Min Pay", "Max Pay", "Currency", "Pay Type"]) + "\n";
         for (const row of rows) {
           csvData += csvRow([row.group, row.count, row.avgPay, row.minPay, row.maxPay, row.currency, row.payType]) + "\n";
