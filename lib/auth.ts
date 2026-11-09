@@ -5,7 +5,7 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "./db";
 import { users, employees } from "./db/schema";
 import { eq } from "drizzle-orm";
-import { isDevLoginEnabled } from "./authz";
+import { devLoginSessionRole, isDevLoginEnabled } from "./authz";
 
 declare module "next-auth" {
   interface Session {
@@ -63,22 +63,11 @@ const authConfig = {
                 .where(eq(employees.email, email))
                 .limit(1);
 
-              // Determine session role from employee access level
-              // Session role can be "employee" | "manager" | "admin" | "full_admin"
-              let sessionRole = "employee";
-              if (employee?.accessLevel === "full_admin") {
-                sessionRole = "full_admin";
-              } else if (employee?.accessLevel === "global_view") {
-                sessionRole = "admin";
-              } else if (employee?.accessLevel === "regional_view") {
-                sessionRole = "admin";
-              } else if (employee?.accessLevel === "manager") {
-                sessionRole = "manager";
-              }
+              const sessionRole = devLoginSessionRole(employee?.accessLevel);
 
               // Map to userRoleEnum for database (only supports "employee" | "manager" | "admin")
-              const dbRole: "employee" | "manager" | "admin" = 
-                sessionRole === "full_admin" ? "admin" : sessionRole as "employee" | "manager" | "admin";
+              const dbRole: "employee" | "manager" | "admin" =
+                sessionRole === "full_admin" ? "admin" : sessionRole;
 
               let [user] = await db
                 .select()

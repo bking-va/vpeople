@@ -96,6 +96,28 @@ export function isDevLoginEnabled(env: NodeJS.ProcessEnv = process.env): boolean
   return true;
 }
 
+/** Separate from enabling the form: an email lookup must not become full_admin. */
+export function isDevAdminImpersonationEnabled(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return isDevLoginEnabled(env) && env.ALLOW_DEV_ADMIN_IMPERSONATION === "true";
+}
+
+/**
+ * Dev login session role from an email's employee row. Viewing roles stay
+ * "employee". full_admin requires ALLOW_DEV_ADMIN_IMPERSONATION.
+ */
+export function devLoginSessionRole(
+  accessLevel: AccessLevel,
+  env: NodeJS.ProcessEnv = process.env
+): "employee" | "manager" | "full_admin" {
+  if (accessLevel === "manager") return "manager";
+  if (accessLevel === "full_admin" && isDevAdminImpersonationEnabled(env)) {
+    return "full_admin";
+  }
+  return "employee";
+}
+
 export function isCronAuthorized(
   authHeader: string | null,
   secret: string | undefined = process.env.CRON_SECRET

@@ -133,8 +133,16 @@ export default async function EmployeeProfilePage({
     employee.jobLevelId
       ? db.select().from(jobLevels).where(eq(jobLevels.id, employee.jobLevelId)).limit(1)
       : Promise.resolve([null]),
-    employee.managerId
-      ? db.select().from(employees).where(eq(employees.id, employee.managerId)).limit(1)
+      employee.managerId
+      ? db
+          .select({
+            id: employees.id,
+            firstName: employees.firstName,
+            lastName: employees.lastName,
+          })
+          .from(employees)
+          .where(eq(employees.id, employee.managerId))
+          .limit(1)
       : Promise.resolve([null]),
   ]);
 
@@ -240,13 +248,30 @@ export default async function EmployeeProfilePage({
     isViewingSelf,
     canViewSensitivePersonalInfo,
   });
-  const visaRows = (
-    await db
-      .select()
-      .from(employeeVisas)
-      .where(eq(employeeVisas.employeeId, employeeId))
-      .orderBy(desc(employeeVisas.expiryDate))
-  ).map((row) => redactVisaDocumentNumber(row, canSeeVisaNumbers));
+  const visaPublicFields = {
+    id: employeeVisas.id,
+    visaType: employeeVisas.visaType,
+    country: employeeVisas.country,
+    status: employeeVisas.status,
+    issuedDate: employeeVisas.issuedDate,
+    expiryDate: employeeVisas.expiryDate,
+  };
+  const visaRows = canSeeVisaNumbers
+    ? await db
+        .select({
+          ...visaPublicFields,
+          documentNumber: employeeVisas.documentNumber,
+        })
+        .from(employeeVisas)
+        .where(eq(employeeVisas.employeeId, employeeId))
+        .orderBy(desc(employeeVisas.expiryDate))
+    : (
+        await db
+          .select(visaPublicFields)
+          .from(employeeVisas)
+          .where(eq(employeeVisas.employeeId, employeeId))
+          .orderBy(desc(employeeVisas.expiryDate))
+      ).map((row) => redactVisaDocumentNumber({ ...row, documentNumber: null }, false));
 
   const employeeTeamsList = await db
     .select({ team: teams })

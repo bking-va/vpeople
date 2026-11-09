@@ -83,15 +83,25 @@ export default async function CandidateDetailPage({
     candidateId
   );
 
-  const [offerRow] = await db
-    .select()
-    .from(offerLetters)
-    .where(eq(offerLetters.candidateId, candidateId));
-  const offer = offerRow
-    ? hiringAccess.canViewSalary
-      ? offerRow
-      : { ...offerRow, salary: null }
-    : null;
+  const offerPublicFields = {
+    id: offerLetters.id,
+    candidateId: offerLetters.candidateId,
+    jobTitle: offerLetters.jobTitle,
+    startDate: offerLetters.startDate,
+    signedAt: offerLetters.signedAt,
+    documentUrl: offerLetters.documentUrl,
+  };
+  const [offer] = hiringAccess.canViewSalary
+    ? await db
+        .select({ ...offerPublicFields, salary: offerLetters.salary })
+        .from(offerLetters)
+        .where(eq(offerLetters.candidateId, candidateId))
+    : (
+        await db
+          .select(offerPublicFields)
+          .from(offerLetters)
+          .where(eq(offerLetters.candidateId, candidateId))
+      ).map((row) => ({ ...row, salary: null as string | null }));
 
   const stageLabels = {
     new: "New",

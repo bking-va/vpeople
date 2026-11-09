@@ -87,7 +87,9 @@ export default async function CandidatesListPage({
       </div>
 
       <div className="space-y-4">
-        {candidatesList.map((candidate) => (
+        {candidatesList.map((candidate) => {
+          const stars = clampCandidateRating(candidate.rating);
+          return (
           <Link key={candidate.id} href={`/hiring/candidates/${candidate.id}`}>
             <Card className="hover:shadow-md transition-shadow">
               <CardContent className="p-6">
@@ -100,16 +102,16 @@ export default async function CandidatesListPage({
                       <Badge variant={stageBadgeVariant(candidate.stage)}>
                         {stageLabels[candidate.stage as keyof typeof stageLabels]}
                       </Badge>
-                      {clampCandidateRating(candidate.rating) && (
-                        <div className="flex items-center gap-1">
-                          {Array.from({ length: clampCandidateRating(candidate.rating) as number }).map((_, i) => (
-                            <Star
-                              key={i}
-                              className="h-4 w-4 fill-yellow-400 text-yellow-400"
-                            />
-                          ))}
-                        </div>
-                      )}
+                      {stars ? (
+                          <div className="flex items-center gap-1">
+                            {Array.from({ length: stars }).map((_, i) => (
+                              <Star
+                                key={i}
+                                className="h-4 w-4 fill-yellow-400 text-yellow-400"
+                              />
+                            ))}
+                          </div>
+                      ) : null}
                     </div>
 
                     <div className="flex items-center gap-6 text-sm text-muted-foreground">
@@ -139,7 +141,8 @@ export default async function CandidatesListPage({
               </CardContent>
             </Card>
           </Link>
-        ))}
+          );
+        })}
 
         {candidatesList.length === 0 && (
           <Card>

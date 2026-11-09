@@ -5,7 +5,9 @@ import {
   canWriteSettings,
   clampCandidateRating,
   isCronAuthorized,
+  isDevAdminImpersonationEnabled,
   isDevLoginEnabled,
+  devLoginSessionRole,
   isViewingAccessLevel,
   redactVisaDocumentNumber,
 } from "@/lib/authz";
@@ -107,6 +109,32 @@ describe("cron and dev login fail-closed", () => {
         NODE_ENV: "development",
       } as NodeJS.ProcessEnv)
     ).toBe(true);
+  });
+
+  test("dev login does not impersonate admins from an email without an extra flag", () => {
+    const devEnv = {
+      ENABLE_DEV_AUTH: "true",
+      NODE_ENV: "development",
+    } as NodeJS.ProcessEnv;
+    expect(isDevAdminImpersonationEnabled(devEnv)).toBe(false);
+    expect(devLoginSessionRole("full_admin", devEnv)).toBe("employee");
+    expect(devLoginSessionRole("global_view", devEnv)).toBe("employee");
+    expect(devLoginSessionRole("regional_view", devEnv)).toBe("employee");
+    expect(devLoginSessionRole("manager", devEnv)).toBe("manager");
+    expect(
+      devLoginSessionRole("full_admin", {
+        ...devEnv,
+        ALLOW_DEV_ADMIN_IMPERSONATION: "true",
+      })
+    ).toBe("full_admin");
+    expect(
+      isDevAdminImpersonationEnabled({
+        ENABLE_DEV_AUTH: "true",
+        ALLOW_DEV_ADMIN_IMPERSONATION: "true",
+        NODE_ENV: "production",
+        VERCEL_ENV: "production",
+      } as NodeJS.ProcessEnv)
+    ).toBe(false);
   });
 });
 

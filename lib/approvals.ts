@@ -50,18 +50,27 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
     return { success: false, error: "No workflow steps defined" };
   }
 
-  // Fetch requester to determine manager
+  const employeeManagerFields = {
+    id: employees.id,
+    managerId: employees.managerId,
+  };
+
+  // Fetch requester to determine manager — never pull SIN/SSN/compensation.
   const [requester] = await db
-    .select()
+    .select(employeeManagerFields)
     .from(employees)
     .where(eq(employees.id, requesterId))
     .limit(1);
+
+  if (!requester) {
+    throw new Error("Requester not found");
+  }
 
   // For compensation_change and job_info_change, fetch the affected employee
   let affectedEmployee = requester;
   if (entityType === "compensation_change" || entityType === "job_info_change") {
     const [affected] = await db
-      .select()
+      .select(employeeManagerFields)
       .from(employees)
       .where(eq(employees.id, entityId))
       .limit(1);
@@ -101,7 +110,7 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
       if (affectedEmployee.managerId) {
         // Get manager's manager
         const [manager] = await db
-          .select()
+          .select({ managerId: employees.managerId })
           .from(employees)
           .where(eq(employees.id, affectedEmployee.managerId))
           .limit(1);
