@@ -29,6 +29,7 @@ import {
   approvalWorkflows,
   approvalWorkflowSteps,
   auditLogs,
+  accessLevels,
 } from "@/lib/db/schema";
 import { getApprovalRequestForEntity } from "@/lib/approvals";
 import { approveTimeOffRequest } from "@/app/actions/time-off";
@@ -56,6 +57,11 @@ import { POST as applyToOpening } from "@/app/api/hiring/candidates/apply/route"
 import { GET as cronAccrue } from "@/app/api/cron/accrue-time-off/route";
 import { POST as createSessionTimeOff } from "@/app/api/time-off/requests/route";
 import { GET as exportReports } from "@/app/api/reports/export/route";
+import { GET as bambooDirectory } from "@/app/api/bamboo/v1/employees/directory/route";
+import { GET as bambooEmployee } from "@/app/api/bamboo/v1/employees/[id]/route";
+import { GET as listEmployees } from "@/app/api/employees/route";
+import { GET as orgChartExport } from "@/app/api/org-chart/export/route";
+import { GET as gatewayDirectory } from "@/app/api/gateway/v1/[company]/employees/directory/route";
 
 const mockedAuth = auth as jest.MockedFunction<typeof auth>;
 
@@ -738,6 +744,157 @@ describe("Security authz integration (Real Postgres)", () => {
     const req = new NextRequest("http://localhost/api/reports/export?type=pay-by-title");
     const res = await exportReports(req);
     expect(res.status).toBe(403);
+  });
+
+  test("directory and API exports keep @vendasta.com and hide personal emails", async () => {
+    await db
+      .insert(accessLevels)
+      .values({
+        name: `Sec Privacy Admin ${runId}`,
+        code: "full_admin",
+        canViewSensitivePersonalInfo: true,
+        canManageUsers: true,
+        canViewCompensation: true,
+        canEditCompensation: false,
+        canEditSensitivePersonalInfo: false,
+        canViewBankInfo: false,
+        canEditBankInfo: false,
+        canManageSettings: true,
+        canApproveTimeOff: true,
+        canApproveCompensationChanges: true,
+      })
+      .onConflictDoNothing();
+
+    const [work] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `SEC_WORK_${runId}`,
+        firstName: "Work",
+        lastName: "Mail",
+        email: `privacy.work.${runId}@vendasta.com`,
+        personalEmail: `privacy.work.${runId}@gmail.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+        accessLevel: "employee",
+        managerId: manager.id,
+      })
+      .returning();
+    const [personal] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `SEC_HOME_${runId}`,
+        firstName: "Home",
+        lastName: "Mail",
+        email: `privacy.home.${runId}@gmail.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+        accessLevel: "employee",
+        managerId: manager.id,
+      })
+      .returning();
+    ids.employees.push(work.id, personal.id);
+
+    const managerDir = await bambooDirectory(
+      new NextRequest("http://localhost/api/bamboo/v1/employees/directory", {
+        headers: { authorization: basicAuth(managerKey) },
+      })
+    );
+    expect(managerDir.status).toBe(200);
+    const managerBody = await managerDir.json();
+    const managerEmails = (managerBody.employees || []).map((row: { workEmail?: string | null }) => row.workEmail);
+    expect(managerEmails).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(managerEmails).not.toContain(`privacy.home.${runId}@gmail.com`);
+    expect(managerEmails).not.toContain(`privacy.work.${runId}@gmail.com`);
+
+    const adminKey = `adm-key-${runId}`;
+    await db
+      .update(employees)
+      .set({ apiKeyHash: crypto.createHash("sha256").update(adminKey).digest("hex") })
+      .where(eq(employees.id, admin.id));
+
+    const adminDir = await bambooDirectory(
+      new NextRequest("http://localhost/api/bamboo/v1/employees/directory", {
+        headers: { authorization: basicAuth(adminKey) },
+      })
+    );
+    expect(adminDir.status).toBe(200);
+    const adminBody = await adminDir.json();
+    const adminEmails = (adminBody.employees || []).map((row: { workEmail?: string | null }) => row.workEmail);
+    expect(adminEmails).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(adminEmails).not.toContain(`privacy.home.${runId}@gmail.com`);
+
+    const adminPersonal = await bambooEmployee(
+      new NextRequest(`http://localhost/api/bamboo/v1/employees/${personal.id}`, {
+        headers: { authorization: basicAuth(adminKey) },
+      }),
+      { params: Promise.resolve({ id: String(personal.id) }) }
+    );
+    expect(adminPersonal.status).toBe(200);
+    expect((await adminPersonal.json()).workEmail).toBe(`privacy.home.${runId}@gmail.com`);
+
+    const gw = await gatewayDirectory(
+      new NextRequest("http://localhost/api/gateway/v1/acme/employees/directory", {
+        headers: { authorization: basicAuth(managerKey) },
+      }),
+      { params: Promise.resolve({ company: "acme" }) }
+    );
+    expect(gw.status).toBe(200);
+    const gwBody = await gw.json();
+    const gwEmails = (gwBody.employees || []).map((row: { email?: string | null }) => row.email);
+    expect(gwEmails).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(gwEmails).not.toContain(`privacy.home.${runId}@gmail.com`);
+
+    const mgrPersonal = await bambooEmployee(
+      new NextRequest(`http://localhost/api/bamboo/v1/employees/${personal.id}`, {
+        headers: { authorization: basicAuth(managerKey) },
+      }),
+      { params: Promise.resolve({ id: String(personal.id) }) }
+    );
+    expect(mgrPersonal.status).toBe(200);
+    const mgrPersonalBody = await mgrPersonal.json();
+    expect(mgrPersonalBody.workEmail).toBeNull();
+
+    const mgrWork = await bambooEmployee(
+      new NextRequest(`http://localhost/api/bamboo/v1/employees/${work.id}`, {
+        headers: { authorization: basicAuth(managerKey) },
+      }),
+      { params: Promise.resolve({ id: String(work.id) }) }
+    );
+    expect(mgrWork.status).toBe(200);
+    expect((await mgrWork.json()).workEmail).toBe(`privacy.work.${runId}@vendasta.com`);
+
+    session({ email: viewer.email, employeeId: viewer.id, role: "admin" });
+    const exportRes = await exportReports(
+      new NextRequest("http://localhost/api/reports/export?type=employees")
+    );
+    expect(exportRes.status).toBe(200);
+    const csv = await exportRes.text();
+    expect(csv).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(csv).not.toContain(`privacy.home.${runId}@gmail.com`);
+    expect(csv).not.toContain(`privacy.work.${runId}@gmail.com`);
+
+    session({ email: admin.email, employeeId: admin.id, role: "full_admin" });
+    const hrExport = await exportReports(
+      new NextRequest("http://localhost/api/reports/export?type=employees")
+    );
+    expect(hrExport.status).toBe(200);
+    const hrCsv = await hrExport.text();
+    expect(hrCsv).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(hrCsv).toContain(`privacy.home.${runId}@gmail.com`);
+
+    const orgRes = await orgChartExport(new NextRequest("http://localhost/api/org-chart/export"));
+    expect(orgRes.status).toBe(200);
+    const orgCsv = await orgRes.text();
+    expect(orgCsv).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(orgCsv).not.toContain(`privacy.home.${runId}@gmail.com`);
+
+    session({ email: outsider.email, employeeId: outsider.id, role: "employee" });
+    const listRes = await listEmployees(new NextRequest("http://localhost/api/employees"));
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json();
+    const listEmails = (listBody.employees || []).map((row: { email?: string | null }) => row.email);
+    expect(listEmails).toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(listEmails).not.toContain(`privacy.home.${runId}@gmail.com`);
   });
 
   test("rate limiter is atomic across concurrent requests", async () => {

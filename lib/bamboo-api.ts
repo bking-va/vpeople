@@ -1,3 +1,5 @@
+import { visibleDirectoryEmail, visibleProfileEmail } from "@/lib/authz";
+
 export function validateApiKey(apiKey: string | null | undefined): boolean {
   if (!apiKey) return false;
 
@@ -5,7 +7,17 @@ export function validateApiKey(apiKey: string | null | undefined): boolean {
   return validKeys.includes(apiKey);
 }
 
-export function formatBambooEmployee(employee: any, fields?: string): any {
+export function formatBambooEmployee(
+  employee: any,
+  fields?: string,
+  opts?: { isSelf?: boolean; isDirectory?: boolean; canViewSensitivePersonalInfo?: boolean }
+): any {
+  const email = opts?.isDirectory
+    ? visibleDirectoryEmail(employee.email, { isSelf: Boolean(opts.isSelf) })
+    : visibleProfileEmail(employee.email, {
+        isViewingSelf: Boolean(opts?.isSelf),
+        canViewSensitivePersonalInfo: Boolean(opts?.canViewSensitivePersonalInfo),
+      });
   const allFields = {
     id: employee.id.toString(),
     employeeNumber: employee.employeeNumber,
@@ -15,7 +27,7 @@ export function formatBambooEmployee(employee: any, fields?: string): any {
     displayName: employee.preferredName
       ? `${employee.preferredName} ${employee.lastName}`
       : `${employee.firstName} ${employee.lastName}`,
-    email: employee.email,
+    email,
     workPhone: employee.workPhone,
     workPhoneExtension: employee.extension,
     mobilePhone: employee.mobilePhone,

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Users } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 interface EmployeeNode {
   id: number;
@@ -50,7 +51,7 @@ async function buildOrgTree(): Promise<EmployeeNode[]> {
       id: emp.id,
       name,
       jobTitle: emp.jobTitle,
-      email: emp.email,
+      email: visibleDirectoryEmail(emp.email, { isSelf: emp.id === session.user.employeeId }) || "",
       employeeNumber: emp.employeeNumber,
       managerId: emp.managerId,
       children: [],

@@ -8,6 +8,7 @@ import { getTurnoverReport } from "@/lib/reports/turnover";
 import { turnoverToCsv } from "@/lib/reports/turnover-format";
 import { csvRow } from "@/lib/csv";
 import { getUserPermissions } from "@/lib/permissions";
+import { visibleProfileEmail } from "@/lib/authz";
 import {
   getPayByTitleReport,
   getPayByDepartmentReport,
@@ -64,13 +65,19 @@ export async function GET(request: NextRequest) {
           "Status",
         ]) + "\n";
 
+      const exportPermissions = session.user.email
+        ? await getUserPermissions(session.user.email)
+        : null;
       for (const row of data) {
         csvData +=
           csvRow([
             row.employeeNumber,
             row.firstName,
             row.lastName,
-            row.email,
+            visibleProfileEmail(row.email, {
+              isViewingSelf: false,
+              canViewSensitivePersonalInfo: Boolean(exportPermissions?.canViewSensitivePersonalInfo),
+            }),
             row.jobTitle,
             row.department || "",
             row.location || "",

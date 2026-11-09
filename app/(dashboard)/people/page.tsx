@@ -9,6 +9,7 @@ import { Mail, Phone, MapPin, Users, Table2, Download } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { PeopleViewSelector } from "@/components/people-view-selector";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 export default async function PeoplePage({
   searchParams,
@@ -145,7 +146,11 @@ export default async function PeoplePage({
                       )}
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <Mail className="h-4 w-4" />
-                        <span className="truncate">{employee.email}</span>
+                        <span className="truncate">
+                          {visibleDirectoryEmail(employee.email, {
+                            isSelf: employee.id === session.user.employeeId,
+                          }) || "—"}
+                        </span>
                       </div>
                       {employee.workPhone && (
                         <div className="flex items-center gap-2 text-muted-foreground">

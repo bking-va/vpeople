@@ -86,5 +86,10 @@ export async function GET(
     locationName: loc?.name,
   };
 
-  return NextResponse.json(formatBambooEmployee(employeeData, fields || undefined));
+  return NextResponse.json(
+    formatBambooEmployee(employeeData, fields || undefined, {
+      isSelf: employee.id === auth.employeeId,
+      canViewSensitivePersonalInfo: auth.permissions.canViewSensitivePersonalInfo,
+    })
+  );
 }

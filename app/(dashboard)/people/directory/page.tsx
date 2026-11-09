@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { employees, departments, locations, peopleViews } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { PeopleDirectoryTable } from "@/components/people-directory-table";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 export default async function PeopleDirectoryPage() {
   const session = await auth();
@@ -52,7 +53,7 @@ export default async function PeopleDirectoryPage() {
     id: emp.id,
     employeeNumber: emp.employeeNumber,
     name: `${emp.firstName} ${emp.lastName}`,
-    email: emp.email,
+    email: visibleDirectoryEmail(emp.email, { isSelf: emp.id === employee.id }) || "",
     jobTitle: emp.jobTitle,
     department: emp.departmentId ? deptMap.get(emp.departmentId) : null,
     location: emp.locationId ? locMap.get(emp.locationId) : null,

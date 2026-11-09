@@ -39,7 +39,6 @@ export default async function TimeOffBalancesPage() {
       employee: {
         firstName: employees.firstName,
         lastName: employees.lastName,
-        email: employees.email,
       },
       policy: {
         name: timeOffPolicies.name,

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { visibleDirectoryEmail } from "@/lib/authz";
 
 interface SeatNode {
   id: number;
@@ -52,7 +53,10 @@ async function buildSeatTree(): Promise<SeatNode[]> {
             name: employee.preferredName
               ? `${employee.preferredName} ${employee.lastName}`
               : `${employee.firstName} ${employee.lastName}`,
-            email: employee.email,
+            email:
+              visibleDirectoryEmail(employee.email, {
+                isSelf: employee.id === session.user.employeeId,
+              }) || "",
           }
         : null,
       children: [],

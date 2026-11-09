@@ -69,7 +69,9 @@ export async function GET(
       jobTitle: emp.jobTitle,
       department: dept?.name,
       location: loc?.name,
-      workEmail: emp.email,
+      workEmail: filterEmployeeFields(emp, auth.permissions, {
+        isSelf: emp.id === auth.employeeId,
+      }).email,
       workPhone: emp.workPhone,
       hireDate: emp.hireDate,
       status: emp.employmentStatus,
