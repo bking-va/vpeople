@@ -5,6 +5,8 @@ import { employees, departments, locations, jobLevels } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 import { csvRow } from "@/lib/csv";
 import { visibleDirectoryEmail } from "@/lib/authz";
+import { getUserPermissions } from "@/lib/permissions";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -13,6 +15,26 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (!session.user.employeeId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const [actor] = await db
+      .select({ id: employees.id, accessLevel: employees.accessLevel })
+      .from(employees)
+      .where(sql`${employees.id} = ${session.user.employeeId}`)
+      .limit(1);
+    if (!actor) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const permissions = session.user.email
+      ? await getUserPermissions(session.user.email)
+      : null;
+    const allowed = await scopedEmployeeIds({
+      employeeId: actor.id,
+      accessLevel: actor.accessLevel,
+      canManageUsers: Boolean(permissions?.canManageUsers),
+    });
+
     // Fetch all active employees with their reporting structure
     const orgData = await db
       .select({
@@ -55,7 +77,7 @@ export async function GET(request: NextRequest) {
       "Manager",
     ];
 
-    const rows = orgData.map((emp) => {
+    const rows = orgData.filter((emp) => employeeInScope(emp.id, allowed)).map((emp) => {
       const managerName =
         emp.managerFirstName && emp.managerLastName
           ? `${emp.managerFirstName} ${emp.managerLastName}`

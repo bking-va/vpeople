@@ -5,6 +5,8 @@ import { employees, departments, locations, peopleViews } from "@/lib/db/schema"
 import { eq } from "drizzle-orm";
 import { PeopleDirectoryTable } from "@/components/people-directory-table";
 import { visibleDirectoryEmail } from "@/lib/authz";
+import { getUserPermissions } from "@/lib/permissions";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export default async function PeopleDirectoryPage() {
   const session = await auth();
@@ -25,6 +27,16 @@ export default async function PeopleDirectoryPage() {
     .select()
     .from(peopleViews)
     .where(eq(peopleViews.userId, employee.id));
+
+  const permissions = await getUserPermissions(session.user.email);
+  const allowed =
+    employee.accessLevel === "regional_view"
+      ? await scopedEmployeeIds({
+          employeeId: employee.id,
+          accessLevel: employee.accessLevel,
+          canManageUsers: permissions.canManageUsers,
+        })
+      : "all";
 
   const allEmployees = await db
     .select({
@@ -49,7 +61,9 @@ export default async function PeopleDirectoryPage() {
   const deptMap = new Map(depts.map((d) => [d.id, d.name]));
   const locMap = new Map(locs.map((l) => [l.id, l.name]));
 
-  const enrichedEmployees = allEmployees.map((emp) => ({
+  const enrichedEmployees = allEmployees
+    .filter((emp) => employeeInScope(emp.id, allowed))
+    .map((emp) => ({
     id: emp.id,
     employeeNumber: emp.employeeNumber,
     name: `${emp.firstName} ${emp.lastName}`,

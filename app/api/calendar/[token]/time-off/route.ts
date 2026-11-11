@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { employees, timeOffRequests, timeOffPolicies } from "@/lib/db/schema";
 import { eq, and, gte } from "drizzle-orm";
 import { escapeIcalText } from "@/lib/ical";
+import {
+  employeeInScope,
+  scopedEmployeeIdsForEmployee,
+} from "@/lib/employee-scope";
 
 export async function GET(
   request: NextRequest,
@@ -23,7 +27,9 @@ export async function GET(
       return new NextResponse("Invalid calendar token", { status: 404 });
     }
 
-    // Fetch approved time off for all employees (60 days past, 365 days future)
+    const allowed = await scopedEmployeeIdsForEmployee(employee.id);
+
+    // Fetch approved time off for employees in the token owner's scope
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 60);
     const startDateStr = startDate.toISOString().split("T")[0];
@@ -32,6 +38,7 @@ export async function GET(
       .select({
         request: timeOffRequests,
         employee: {
+          id: employees.id,
           firstName: employees.firstName,
           lastName: employees.lastName,
         },
@@ -49,8 +56,12 @@ export async function GET(
         )
       );
 
+    const visibleTimeOff = timeOffData.filter(
+      (item) => item.employee?.id != null && employeeInScope(item.employee.id, allowed)
+    );
+
     // Generate iCalendar format
-    const icalEvents = timeOffData.map((item) => {
+    const icalEvents = visibleTimeOff.map((item) => {
       const empName = item.employee
         ? `${item.employee.firstName} ${item.employee.lastName}`
         : "Unknown";

@@ -10,6 +10,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { PeopleViewSelector } from "@/components/people-view-selector";
 import { visibleDirectoryEmail } from "@/lib/authz";
+import { getUserPermissions } from "@/lib/permissions";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export default async function PeoplePage({
   searchParams,
@@ -37,6 +39,16 @@ export default async function PeoplePage({
     .from(peopleViews)
     .where(eq(peopleViews.userId, employee.id));
 
+  const permissions = await getUserPermissions(session.user.email);
+  const allowed =
+    employee.accessLevel === "regional_view"
+      ? await scopedEmployeeIds({
+          employeeId: employee.id,
+          accessLevel: employee.accessLevel,
+          canManageUsers: permissions.canManageUsers,
+        })
+      : "all";
+
   const allEmployees = await db
     .select({
       id: employees.id,
@@ -57,6 +69,8 @@ export default async function PeoplePage({
     .from(employees)
     .where(eq(employees.employmentStatus, "full_time"))
     .orderBy(employees.lastName, employees.firstName);
+
+  const visibleEmployees = allEmployees.filter((row) => employeeInScope(row.id, allowed));
 
   const depts = await db.select().from(departments);
   const locs = await db.select().from(locations);
@@ -80,7 +94,7 @@ export default async function PeoplePage({
         <div>
           <h1 className="text-3xl font-bold">People Directory</h1>
           <p className="text-muted-foreground">
-            {allEmployees.length} active employees
+            {visibleEmployees.length} active employees
           </p>
         </div>
         <div className="flex gap-2">
@@ -101,7 +115,7 @@ export default async function PeoplePage({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {allEmployees.map((employee) => {
+        {visibleEmployees.map((employee) => {
           const displayName = employee.preferredName
             ? `${employee.preferredName} ${employee.lastName}`
             : `${employee.firstName} ${employee.lastName}`;

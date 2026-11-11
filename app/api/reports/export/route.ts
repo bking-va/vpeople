@@ -15,7 +15,8 @@ import {
 import { parseReportFilters, runCustomEmployeeReport } from "@/lib/reports/custom";
 import { getReportViewer } from "@/lib/reports/viewer";
 import { filterRowsByEmployeeScope, scopedEmployeeIds } from "@/lib/employee-scope";
-import { isFullAdmin, isViewingAccessLevel } from "@/lib/authz";
+import { isFullAdmin } from "@/lib/authz";
+import { canSeeAllEmployees } from "@/lib/access-scopes";
 
 function csvResponse(csvData: string, reportType: string) {
   return new NextResponse(csvData, {
@@ -35,11 +36,9 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const reportType = searchParams.get("type") || "employees";
   const isOrgAdmin =
-    session.user.role === "admin" ||
     session.user.role === "full_admin" ||
     isFullAdmin(viewer.accessLevel) ||
-    isViewingAccessLevel(viewer.accessLevel) ||
-    viewer.canManageUsers === true;
+    canSeeAllEmployees(viewer);
 
   try {
     if (reportType === "employees" || reportType === "custom") {

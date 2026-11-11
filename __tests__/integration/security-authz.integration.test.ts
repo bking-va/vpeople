@@ -49,7 +49,9 @@ import { POST as createTimeOffApi } from "@/app/api/bamboo/v1/time-off/create/ro
 import { GET as listTimeOffApi } from "@/app/api/bamboo/v1/time-off/requests/route";
 import { POST as approveTimesheet } from "@/app/api/time-tracking/timesheets/[id]/approve/route";
 import { POST as createJobTitle } from "@/app/api/settings/job-titles/route";
-import { PATCH as patchCandidate } from "@/app/api/hiring/candidates/[id]/route";
+import { GET as getCandidate, PATCH as patchCandidate } from "@/app/api/hiring/candidates/[id]/route";
+import { GET as listPublicCareers } from "@/app/api/careers/openings/route";
+import { GET as getPublicCareer } from "@/app/api/careers/openings/[id]/route";
 import { POST as addCandidateNote } from "@/app/api/hiring/candidates/[id]/notes/route";
 import { GET as getCustomFieldValues } from "@/app/api/custom-fields/values/route";
 import { POST as assignTraining } from "@/app/api/training/assignments/route";
@@ -646,6 +648,58 @@ describe("Security authz integration (Real Postgres)", () => {
       params: Promise.resolve({ id: String(candidate.id) }),
     });
     expect(noteRes.status).toBe(403);
+
+    const getRes = await getCandidate(
+      new NextRequest(`http://localhost/api/hiring/candidates/${candidate.id}`),
+      { params: Promise.resolve({ id: String(candidate.id) }) }
+    );
+    expect(getRes.status).toBe(403);
+  });
+
+  test("hiring lead or full admin can read candidate PII; public careers omit it", async () => {
+    session({ email: admin.email, employeeId: admin.id, role: "full_admin" });
+    const getRes = await getCandidate(
+      new NextRequest(`http://localhost/api/hiring/candidates/${candidate.id}`),
+      { params: Promise.resolve({ id: String(candidate.id) }) }
+    );
+    expect(getRes.status).toBe(200);
+    const hired = await getRes.json();
+    expect(hired.candidate.email).toBe(candidate.email);
+
+    const listRes = await listPublicCareers();
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json();
+    const listed = (listBody.openings || []).find((o: { id: number }) => o.id === openOpening.id);
+    expect(listed).toBeTruthy();
+    expect(listed).not.toHaveProperty("hiringLeadId");
+    expect(JSON.stringify(listed)).not.toMatch(/@test\.com|hiringLead/i);
+
+    const draftRes = await getPublicCareer(
+      new NextRequest(`http://localhost/api/careers/openings/${draftOpening.id}`),
+      { params: Promise.resolve({ id: String(draftOpening.id) }) }
+    );
+    expect(draftRes.status).toBe(404);
+
+    const applyRes = await applyToOpening(
+      new NextRequest("http://localhost/api/hiring/candidates/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jobOpeningId: openOpening.id,
+          firstName: "Pub",
+          lastName: "Lic",
+          email: `public.apply.${runId}@example.com`,
+        }),
+      })
+    );
+    expect(applyRes.status).toBe(200);
+    const applyBody = await applyRes.json();
+    expect(applyBody).toEqual({ success: true });
+    const applied = await db
+      .select({ id: candidates.id })
+      .from(candidates)
+      .where(eq(candidates.email, `public.apply.${runId}@example.com`));
+    ids.candidates.push(...applied.map((row) => row.id));
   });
 
   test("full admin ratings are clamped to 5", async () => {
@@ -888,13 +942,22 @@ describe("Security authz integration (Real Postgres)", () => {
     expect(orgCsv).toContain(`privacy.work.${runId}@vendasta.com`);
     expect(orgCsv).not.toContain(`privacy.home.${runId}@gmail.com`);
 
-    session({ email: outsider.email, employeeId: outsider.id, role: "employee" });
+    session({ email: viewer.email, employeeId: viewer.id, role: "admin" });
     const listRes = await listEmployees(new NextRequest("http://localhost/api/employees"));
     expect(listRes.status).toBe(200);
     const listBody = await listRes.json();
     const listEmails = (listBody.employees || []).map((row: { email?: string | null }) => row.email);
     expect(listEmails).toContain(`privacy.work.${runId}@vendasta.com`);
     expect(listEmails).not.toContain(`privacy.home.${runId}@gmail.com`);
+
+    session({ email: outsider.email, employeeId: outsider.id, role: "employee" });
+    const scopedList = await listEmployees(new NextRequest("http://localhost/api/employees"));
+    expect(scopedList.status).toBe(200);
+    const scopedEmails = ((await scopedList.json()).employees || []).map(
+      (row: { email?: string | null }) => row.email
+    );
+    expect(scopedEmails).not.toContain(`privacy.work.${runId}@vendasta.com`);
+    expect(scopedEmails).not.toContain(`privacy.home.${runId}@gmail.com`);
   });
 
   test("rate limiter is atomic across concurrent requests", async () => {

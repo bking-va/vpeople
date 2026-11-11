@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { timeOffRequests, employees, timeOffPolicies } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
-import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel, visibleDirectoryEmail } from "@/lib/authz";
+import { visibleDirectoryEmail } from "@/lib/authz";
+import { scopedEmployeeIds } from "@/lib/employee-scope";
 
 export async function GET(request: NextRequest) {
   const auth = await authenticateApiKey(request);
@@ -100,21 +101,9 @@ async function allowedTimeOffEmployeeIds(auth: {
   accessLevel: string;
   permissions: { canManageUsers: boolean };
 }): Promise<Set<number> | "all"> {
-  if (
-    isFullAdmin(auth.accessLevel) ||
-    auth.permissions.canManageUsers ||
-    isViewingAccessLevel(auth.accessLevel)
-  ) {
-    return "all";
-  }
-
-  const allowed = new Set<number>([auth.employeeId]);
-  if (isManagerAccessLevel(auth.accessLevel)) {
-    const reports = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(eq(employees.managerId, auth.employeeId));
-    for (const report of reports) allowed.add(report.id);
-  }
-  return allowed;
+  return scopedEmployeeIds({
+    employeeId: auth.employeeId,
+    accessLevel: auth.accessLevel,
+    canManageUsers: auth.permissions.canManageUsers,
+  });
 }
