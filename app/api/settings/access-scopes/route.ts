@@ -80,19 +80,28 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  const locationIds: number[] = Array.isArray(data.locationIds)
-    ? [...new Set(data.locationIds.map((id: unknown) => parseInt(String(id), 10)).filter(Number.isFinite))]
-    : [];
-  const countries: string[] = Array.isArray(data.countries)
-    ? [
-        ...new Map(
-          data.countries
-            .map((c: unknown) => String(c).trim())
-            .filter(Boolean)
-            .map((country: string) => [country.toLowerCase(), country] as const)
-        ).values(),
-      ]
-    : [];
+  const locationIds: number[] = [];
+  if (Array.isArray(data.locationIds)) {
+    const seen = new Set<number>();
+    for (const item of data.locationIds) {
+      const id = parseInt(String(item), 10);
+      if (Number.isFinite(id) && !seen.has(id)) {
+        seen.add(id);
+        locationIds.push(id);
+      }
+    }
+  }
+  const countries: string[] = [];
+  if (Array.isArray(data.countries)) {
+    const seen = new Map<string, string>();
+    for (const item of data.countries) {
+      const country = String(item).trim();
+      if (!country) continue;
+      const key = country.toLowerCase();
+      if (!seen.has(key)) seen.set(key, country);
+    }
+    countries.push(...seen.values());
+  }
 
   if (locationIds.length) {
     const known = await db.select({ id: locations.id }).from(locations);
