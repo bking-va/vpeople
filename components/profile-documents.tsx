@@ -13,6 +13,8 @@ interface Document {
   status: string;
   signedAt: string | null;
   createdAt: string;
+  body?: string | null;
+  fileUrl?: string | null;
 }
 
 export function ProfileDocuments({
@@ -158,6 +160,11 @@ export function ProfileDocuments({
                     <p className="text-sm text-muted-foreground capitalize">
                       {doc.category} • {new Date(doc.createdAt).toLocaleDateString()}
                     </p>
+                    {doc.body && (
+                      <pre className="mt-2 max-w-xl whitespace-pre-wrap text-xs text-muted-foreground">
+                        {doc.body}
+                      </pre>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -168,13 +175,15 @@ export function ProfileDocuments({
                       Sign
                     </Button>
                   )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDownload(doc.id)}
-                  >
-                    <Download className="h-4 w-4" />
-                  </Button>
+                  {doc.fileUrl ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDownload(doc.id)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  ) : null}
                   {canUpload && (
                     <Button
                       size="sm"
