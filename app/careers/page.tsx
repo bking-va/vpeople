@@ -6,9 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MapPin, Briefcase } from "lucide-react";
 import Link from "next/link";
+import { toPublicCareerOpening } from "@/lib/careers-public";
 
 export default async function CareersPage() {
-  const openings = await db
+  const rows = await db
     .select({
       id: jobOpenings.id,
       title: jobOpenings.title,
@@ -16,13 +17,15 @@ export default async function CareersPage() {
       description: jobOpenings.description,
       requirements: jobOpenings.requirements,
       openDate: jobOpenings.openDate,
-      department: departments.name,
-      location: locations.name,
+      departmentName: departments.name,
+      locationName: locations.name,
     })
     .from(jobOpenings)
     .leftJoin(departments, eq(jobOpenings.departmentId, departments.id))
     .leftJoin(locations, eq(jobOpenings.locationId, locations.id))
     .where(eq(jobOpenings.status, "open"));
+
+  const openings = rows.map(toPublicCareerOpening);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -56,16 +59,16 @@ export default async function CareersPage() {
                     <div className="flex-1">
                       <CardTitle className="text-2xl mb-2">{opening.title}</CardTitle>
                       <CardDescription className="flex items-center gap-4 text-base">
-                        {opening.department && (
+                        {opening.departmentName && (
                           <span className="flex items-center gap-1">
                             <Briefcase className="h-4 w-4" />
-                            {opening.department}
+                            {opening.departmentName}
                           </span>
                         )}
-                        {opening.location && (
+                        {opening.locationName && (
                           <span className="flex items-center gap-1">
                             <MapPin className="h-4 w-4" />
-                            {opening.location}
+                            {opening.locationName}
                           </span>
                         )}
                       </CardDescription>

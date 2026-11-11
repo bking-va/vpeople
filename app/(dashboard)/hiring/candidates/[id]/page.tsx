@@ -38,7 +38,21 @@ export default async function CandidateDetailPage({
   }
 
   const { id } = await params;
-  const candidateId = parseInt(id);
+  const candidateId = parseInt(id, 10);
+  if (!Number.isFinite(candidateId)) {
+    notFound();
+  }
+
+  const hiringAccess = await hiringAccessForCandidate(
+    session.user.email,
+    candidateId
+  );
+  if (hiringAccess.notFound) {
+    notFound();
+  }
+  if (!hiringAccess.allowed) {
+    redirect("/hiring");
+  }
 
   const [candidate] = await db
     .select({
@@ -77,11 +91,6 @@ export default async function CandidateDetailPage({
     .leftJoin(employees, eq(candidateNotes.authorId, employees.id))
     .where(eq(candidateNotes.candidateId, candidateId))
     .orderBy(desc(candidateNotes.createdAt));
-
-  const hiringAccess = await hiringAccessForCandidate(
-    session.user.email,
-    candidateId
-  );
 
   const offerPublicFields = {
     id: offerLetters.id,
