@@ -329,16 +329,16 @@ All employee data uses realistic fake names and information.
 
 The following features are stubbed or partially implemented for future development:
 
-- **Write operations in Bamboo API** (POST/PUT/DELETE)
-- **Document management** (placeholder tab exists)
+- **Write operations in Bamboo API** (many POST/PUT/DELETE still return 405)
+- **Document management** (upload/sign exist; Blob token not provisioned; letter issuance uses `documents.body`)
 - **Benefits enrollment** (basic structure exists)
 - **Training/LMS** (basic structure exists)
-- **Hiring/ATS** (not included in v1)
+- **Hiring embed widget** and hired→employee conversion (public careers page + apply form exist)
 - **Performance reviews** (VOS integration planned)
 - **Real-time VOS seat sync** (integration boundary created)
-- **BambooHR data import** (currently uses seed data only)
-- **Advanced reporting** (basic reports implemented)
-- **Webhooks** (not implemented)
+- **BambooHR data import** (currently uses seed data only; import work is separate)
+- **Email alerts / Resend** and scheduled report delivery
+- **India-specific letter templates** and full custom access-level builder
 
 ## Environment Variables
 
