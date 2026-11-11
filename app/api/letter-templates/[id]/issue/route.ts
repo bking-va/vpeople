@@ -18,6 +18,7 @@ import {
   scopedEmployeeIds,
 } from "@/lib/employee-scope";
 import {
+  ISSUED_LETTER_STATUS,
   buildLetterMergeValues,
   rejectClientMergeOverrides,
   renderLetter,
@@ -161,7 +162,7 @@ export async function POST(
       employeeId: target.id,
       title: rendered.subject || template.name,
       category: "letter",
-      status: template.requiresSignature ? "pending_signature" : "draft",
+      status: ISSUED_LETTER_STATUS,
       body: rendered.body,
       letterTemplateId: template.id,
       uploadedBy: actor.id,

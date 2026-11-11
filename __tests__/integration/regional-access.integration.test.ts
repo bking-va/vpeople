@@ -24,6 +24,7 @@ import {
 } from "@/app/api/settings/access-scopes/route";
 import { GET as timeOffCalendar } from "@/app/api/calendar/[token]/time-off/route";
 import { GET as celebrationsCalendar } from "@/app/api/calendar/[token]/celebrations/route";
+import { GET as orgChartExport } from "@/app/api/org-chart/export/route";
 
 const mockedAuth = auth as jest.MockedFunction<typeof auth>;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -179,6 +180,10 @@ describe("Regional access v1 + iCal scope (Real Postgres)", () => {
       .returning();
     indiaEmp = indiaRow;
     ids.employees.push(indiaEmp.id);
+    await db
+      .update(employees)
+      .set({ managerId: indiaEmp.id })
+      .where(eq(employees.id, canadaEmp.id));
 
     const [outRow] = await db
       .insert(employees)
@@ -367,6 +372,15 @@ describe("Regional access v1 + iCal scope (Real Postgres)", () => {
     const icsBody = await ics.text();
     expect(icsBody).toContain("Canada Person");
     expect(icsBody).not.toContain("India Person");
+
+    const orgRes = await orgChartExport(
+      new NextRequest("http://localhost/api/org-chart/export")
+    );
+    expect(orgRes.status).toBe(200);
+    const orgCsv = await orgRes.text();
+    expect(orgCsv).toContain(`REG_CA_${runId}`);
+    expect(orgCsv).not.toContain("India Person");
+    expect(orgCsv).not.toContain(`REG_IN_${runId}`);
 
     session({ email: admin.email, employeeId: admin.id, role: "full_admin" });
     const adminList = await listEmployees(new NextRequest("http://localhost/api/employees"));

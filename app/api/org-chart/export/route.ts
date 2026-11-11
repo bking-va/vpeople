@@ -7,6 +7,7 @@ import { csvRow } from "@/lib/csv";
 import { visibleDirectoryEmail } from "@/lib/authz";
 import { getUserPermissions } from "@/lib/permissions";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
+import { visibleRelatedEmployeeName } from "@/lib/access-scopes";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -78,10 +79,10 @@ export async function GET(request: NextRequest) {
     ];
 
     const rows = orgData.filter((emp) => employeeInScope(emp.id, allowed)).map((emp) => {
-      const managerName =
-        emp.managerFirstName && emp.managerLastName
-          ? `${emp.managerFirstName} ${emp.managerLastName}`
-          : "";
+      const managerName = visibleRelatedEmployeeName(emp.managerId, {
+        firstName: emp.managerFirstName,
+        lastName: emp.managerLastName,
+      }, allowed);
 
       return csvRow([
         emp.employeeNumber || "",

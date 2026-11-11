@@ -47,3 +47,14 @@ export function employeeMatchesAccessScope(
 export function canManageAccessScopes(viewer: AccessScopeViewer): boolean {
   return isFullAdmin(viewer.accessLevel) || viewer.canManageUsers === true;
 }
+
+export function visibleRelatedEmployeeName(
+  relatedId: number | null | undefined,
+  name: { firstName?: string | null; lastName?: string | null },
+  allowed: Set<number> | "all"
+): string {
+  if (relatedId == null) return "";
+  if (allowed !== "all" && !allowed.has(relatedId)) return "";
+  if (!name.firstName || !name.lastName) return "";
+  return `${name.firstName} ${name.lastName}`;
+}

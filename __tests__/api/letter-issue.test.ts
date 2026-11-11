@@ -1,4 +1,5 @@
 import {
+  ISSUED_LETTER_STATUS,
   buildLetterMergeValues,
   rejectClientMergeOverrides,
   renderLetter,
@@ -19,6 +20,10 @@ const employee = {
 };
 
 describe("letter issuance helpers", () => {
+  test("issued letters always enter the pending-signature workflow", () => {
+    expect(ISSUED_LETTER_STATUS).toBe("pending_signature");
+  });
+
   test("rejects client-supplied merge overrides", () => {
     expect(rejectClientMergeOverrides({ employeeId: 1 })).toBeNull();
     expect(rejectClientMergeOverrides({ employeeId: 1, payRate: "9" })).toBeTruthy();

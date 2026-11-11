@@ -2,6 +2,7 @@ import {
   canManageAccessScopes,
   canSeeAllEmployees,
   employeeMatchesAccessScope,
+  visibleRelatedEmployeeName,
 } from "@/lib/access-scopes";
 
 describe("regional access v1 helpers", () => {
@@ -50,6 +51,19 @@ describe("regional access v1 helpers", () => {
     expect(
       canManageAccessScopes({ employeeId: 4, accessLevel: "global_view" })
     ).toBe(false);
+  });
+
+  test("hides related names that are outside the allowlist", () => {
+    const allowed = new Set([10]);
+    expect(
+      visibleRelatedEmployeeName(10, { firstName: "In", lastName: "Scope" }, allowed)
+    ).toBe("In Scope");
+    expect(
+      visibleRelatedEmployeeName(99, { firstName: "Out", lastName: "Scope" }, allowed)
+    ).toBe("");
+    expect(
+      visibleRelatedEmployeeName(99, { firstName: "Out", lastName: "Scope" }, "all")
+    ).toBe("Out Scope");
   });
 
   test("matches explicit location id or case-insensitive country", () => {

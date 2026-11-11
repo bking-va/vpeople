@@ -17,6 +17,8 @@ export type LetterEmployeeSnapshot = {
 
 const COMPANY_NAME = "Vendasta";
 
+export const ISSUED_LETTER_STATUS = "pending_signature" as const;
+
 export function rejectClientMergeOverrides(body: Record<string, unknown>): string | null {
   if (body.mergeValues != null || body.mergeFields != null || body.payRate != null) {
     return "Merge values are server-derived; do not send mergeValues, mergeFields, or payRate";
