@@ -49,11 +49,40 @@ function utcDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+/** Real UTC calendar date, or null if the Y-M-D does not exist (e.g. Feb 29 in a non-leap year). */
+function utcCalendarDate(year: number, month: number, day: number): Date | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function existingUtcDateKey(year: number, monthDay: string): string | null {
+  if (!/^\d{2}-\d{2}$/.test(monthDay)) return null;
+  const date = utcCalendarDate(
+    year,
+    Number(monthDay.slice(0, 2)),
+    Number(monthDay.slice(3, 5))
+  );
+  return date ? utcDateKey(date) : null;
+}
+
 export function isCompanyHoliday(
   dateKey: string,
   holidays: HolidayDate[]
 ): boolean {
-  const key = String(dateKey).slice(0, 10);
+  const keyDate = toUtcDateOnly(dateKey);
+  if (!keyDate) return false;
+  const key = utcDateKey(keyDate);
   const monthDay = holidayMonthDay(key);
   for (const holiday of holidays) {
     const holidayKey = String(holiday.date).slice(0, 10);
@@ -76,15 +105,19 @@ function holidayHitsInRange(
   const endYear = Number(endKey.slice(0, 4));
   for (const holiday of holidays) {
     const holidayKey = String(holiday.date).slice(0, 10);
-    if (holidayKey >= startKey && holidayKey <= endKey) {
-      hits.add(holidayKey);
+    const exact = toUtcDateOnly(holidayKey);
+    if (exact) {
+      const key = utcDateKey(exact);
+      if (key >= startKey && key <= endKey) {
+        hits.add(key);
+      }
     }
     if (!holiday.isRecurring) continue;
     const monthDay = holidayMonthDay(holidayKey);
     if (!monthDay) continue;
     for (let year = startYear; year <= endYear; year++) {
-      const candidate = `${year}-${monthDay}`;
-      if (candidate >= startKey && candidate <= endKey) {
+      const candidate = existingUtcDateKey(year, monthDay);
+      if (candidate && candidate >= startKey && candidate <= endKey) {
         hits.add(candidate);
       }
     }
@@ -141,9 +174,5 @@ export function takenDaysInYear(
 function toUtcDateOnly(value: string): Date | null {
   const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return new Date(Date.UTC(year, month - 1, day));
+  return utcCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]));
 }

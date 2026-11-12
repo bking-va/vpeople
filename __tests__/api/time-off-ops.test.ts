@@ -45,6 +45,26 @@ describe("time-off request days exclude company holidays", () => {
     expect(MAX_TIME_OFF_SPAN_DAYS).toBe(366);
   });
 
+  test("recurring Feb 29 is not invented in non-leap years", () => {
+    const leapDay = [{ date: "2024-02-29", isRecurring: true }];
+    expect(calendarDaysInclusive("2025-02-28", "2025-03-01")).toBe(2);
+    expect(
+      requestDaysExcludingHolidays("2025-02-28", "2025-03-01", leapDay)
+    ).toBe(2);
+    expect(calendarDaysInclusive("2024-02-28", "2024-03-01")).toBe(3);
+    expect(
+      requestDaysExcludingHolidays("2024-02-28", "2024-03-01", leapDay)
+    ).toBe(2);
+    const asOfNonLeap = new Date("2025-12-31T12:00:00Z");
+    const asOfLeap = new Date("2024-12-31T12:00:00Z");
+    expect(
+      takenDaysInYear("2025-02-28", "2025-03-01", 2025, asOfNonLeap, leapDay)
+    ).toBe(2);
+    expect(
+      takenDaysInYear("2024-02-28", "2024-03-01", 2024, asOfLeap, leapDay)
+    ).toBe(2);
+  });
+
   test("Time Off Used elapsed days exclude the same holidays", () => {
     const asOf = new Date("2026-12-31T12:00:00Z");
     expect(takenDaysInYear("2026-12-24", "2026-12-26", 2026, asOf)).toBe(3);

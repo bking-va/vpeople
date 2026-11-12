@@ -304,6 +304,42 @@ describe("Time-off ops: ledger, holidays, holiday exclusion (Real Postgres)", ()
     ids.holidays = ids.holidays.filter((id) => id !== holidayId);
   });
 
+  test("recurring Feb 29 does not undercharge Feb 28–Mar 1 in a non-leap year", async () => {
+    session({ email: admin.email, employeeId: admin.id, role: "full_admin" });
+    const created = await postHoliday(
+      new NextRequest("http://localhost/api/holidays", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: `Leap Day ${runId}`,
+          date: "2024-02-29",
+          country: "CA",
+          isRecurring: true,
+        }),
+      })
+    );
+    expect(created.status).toBe(201);
+    const holidayId = (await created.json()).holiday.id as number;
+    ids.holidays.push(holidayId);
+
+    session({ email: worker.email, employeeId: worker.id, role: "employee" });
+    const res = await createSessionTimeOff(
+      new NextRequest("http://localhost/api/time-off/requests", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          policyId: policy.id,
+          startDate: "2025-02-28",
+          endDate: "2025-03-01",
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(parseFloat(body.daysRequested)).toBe(2);
+    ids.requests.push(body.id);
+  });
+
   test("rejects oversized time-off spans before holiday expansion", async () => {
     session({ email: worker.email, employeeId: worker.id, role: "employee" });
     const res = await createSessionTimeOff(
