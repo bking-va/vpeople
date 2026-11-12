@@ -18,6 +18,7 @@ import { getUserPermissions } from "@/lib/permissions";
 import { isFullAdmin } from "@/lib/authz";
 import { hiringAccessForCandidate } from "@/lib/hiring-access";
 import { canOpenEmployeeCreate, safeHirePrefill } from "@/lib/hire-employee";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export default async function NewEmployeePage({
   searchParams,
@@ -137,13 +138,19 @@ export default async function NewEmployeePage({
     redirect("/people");
   }
 
+  const allowed = await scopedEmployeeIds({
+    employeeId: currentEmployee.id,
+    accessLevel: currentEmployee.accessLevel,
+    canManageUsers: permissions.canManageUsers,
+  });
+
   const [
     allDepartments,
     allDivisions,
     allLocations,
     allJobFamilies,
     allJobLevels,
-    potentialManagers,
+    managerRows,
   ] = await Promise.all([
     db.select().from(departments).orderBy(departments.name),
     db.select().from(divisions).orderBy(divisions.name),
@@ -161,6 +168,10 @@ export default async function NewEmployeePage({
       .where(eq(employees.employmentStatus, "full_time"))
       .orderBy(employees.lastName),
   ]);
+
+  const potentialManagers = managerRows.filter((row) =>
+    employeeInScope(row.id, allowed)
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 py-6">

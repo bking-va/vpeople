@@ -1,6 +1,7 @@
 import {
   requestDaysExcludingHolidays,
   calendarDaysInclusive,
+  takenDaysInYear,
 } from "@/lib/calendar-days";
 import { parseAdjustmentAmount } from "@/lib/time-off-adjustments";
 import { canManageTimeOffOperations } from "@/lib/authz";
@@ -28,6 +29,14 @@ describe("time-off request days exclude company holidays", () => {
     expect(
       requestDaysExcludingHolidays("2026-12-25", "2026-12-26", holidays)
     ).toBe(0);
+  });
+
+  test("Time Off Used elapsed days exclude the same holidays", () => {
+    const asOf = new Date("2026-12-31T12:00:00Z");
+    expect(takenDaysInYear("2026-12-24", "2026-12-26", 2026, asOf)).toBe(3);
+    expect(
+      takenDaysInYear("2026-12-24", "2026-12-26", 2026, asOf, holidays)
+    ).toBe(1);
   });
 });
 

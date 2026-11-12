@@ -23,6 +23,7 @@ describe("people directory RSC scope (PR #7 leftover)", () => {
       "app/(dashboard)/people/page.tsx",
       "app/(dashboard)/people/directory/page.tsx",
       "app/(dashboard)/people/[id]/page.tsx",
+      "app/(dashboard)/people/new/page.tsx",
     ];
     for (const page of pages) {
       const src = source(page);

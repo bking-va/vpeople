@@ -18,6 +18,7 @@ import {
   resolveCreatedAccessLevel,
 } from "@/lib/hire-employee";
 import { isFullAdmin } from "@/lib/authz";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 function isUniqueViolation(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -130,6 +131,23 @@ export async function POST(request: NextRequest) {
       nextNumber = `E${String(lastNumber + 1).padStart(3, "0")}`;
     }
 
+    const managerIdRaw =
+      data.managerId === undefined || data.managerId === null || data.managerId === ""
+        ? null
+        : parseInt(String(data.managerId), 10);
+    if (managerIdRaw != null && !Number.isFinite(managerIdRaw)) {
+      return NextResponse.json({ error: "Invalid managerId" }, { status: 400 });
+    }
+
+    const allowed = await scopedEmployeeIds({
+      employeeId: currentEmployee.id,
+      accessLevel: currentEmployee.accessLevel,
+      canManageUsers: permissions.canManageUsers,
+    });
+    if (managerIdRaw != null && !employeeInScope(managerIdRaw, allowed)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const accessLevel = resolveCreatedAccessLevel({
       requested: data.accessLevel,
       isHrOrAdmin,
@@ -152,7 +170,7 @@ export async function POST(request: NextRequest) {
           locationId: data.locationId ? parseInt(data.locationId, 10) : null,
           jobFamilyId: data.jobFamilyId ? parseInt(data.jobFamilyId, 10) : null,
           jobLevelId: data.jobLevelId ? parseInt(data.jobLevelId, 10) : null,
-          managerId: data.managerId ? parseInt(data.managerId, 10) : null,
+          managerId: managerIdRaw,
           accessLevel,
           workPhone: data.workPhone || null,
           linkedInUrl: data.linkedInUrl || data.linkedinUrl || null,

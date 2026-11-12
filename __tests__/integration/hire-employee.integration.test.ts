@@ -251,6 +251,26 @@ describe("Hired → employee prefill (Real Postgres)", () => {
     expect(res.status).toBe(403);
   });
 
+  test("hiring lead cannot assign an out-of-scope manager", async () => {
+    session({ email: lead.email, employeeId: lead.id, role: "manager" });
+    const res = await createEmployee(
+      new NextRequest("http://localhost/api/employees/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          candidateId: hired.id,
+          firstName: "Sam",
+          lastName: "Hired",
+          email: hired.email,
+          hireDate: "2026-12-01",
+          jobTitle: "Engineer",
+          managerId: outsider.id,
+        }),
+      })
+    );
+    expect(res.status).toBe(403);
+  });
+
   test("hiring lead prefills create, links the candidate, and does not provision login", async () => {
     const usersBefore = await db.select({ id: users.id }).from(users);
     session({ email: lead.email, employeeId: lead.id, role: "manager" });

@@ -322,7 +322,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Self-scheduling
 - [ ] Talent pools
 - [ ] Offer templates with e-sign
-- [x] "Hired" → employee prefill ✅ Done (`/people/new?candidateId=`; no auto-create on stage change; no login provisioning)
+- [x] "Hired" → employee prefill ✅ Done (`/people/new?candidateId=`; manager picker uses `scopedEmployeeIds`; no auto-create on stage change; no login provisioning)
 
 ---
 
@@ -410,7 +410,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Salary History ✅ Done (`/reports/standard?type=salary-history`; `canViewCompensation`)
 - [x] Time Off Balances ✅ Done (/reports/standard?type=time-off-balances)
 - [x] Time Off Schedule ✅ Done (`/reports/standard?type=time-off-schedule`; approved + pending overlapping the year)
-- [x] Time Off Used ✅ Done (/reports/standard?type=time-off-used)
+- [x] Time Off Used ✅ Done (/reports/standard?type=time-off-used; elapsed days exclude company holidays, same as request `daysRequested`)
 - [ ] Timesheet Hours
 - [ ] Project Hours
 - [ ] eNPS scores

@@ -64,7 +64,8 @@ export function takenDaysInYear(
   startInput: string,
   endInput: string,
   year: number,
-  asOf: Date = new Date()
+  asOf: Date = new Date(),
+  holidays: HolidayDate[] = []
 ): number {
   const start = String(startInput).slice(0, 10);
   const end = String(endInput).slice(0, 10);
@@ -75,7 +76,7 @@ export function takenDaysInYear(
   const rangeEnd = [end, yearEnd, asOfKey].sort()[0];
   if (rangeEnd < rangeStart) return 0;
   try {
-    return calendarDaysInclusive(rangeStart, rangeEnd);
+    return requestDaysExcludingHolidays(rangeStart, rangeEnd, holidays);
   } catch {
     return 0;
   }
