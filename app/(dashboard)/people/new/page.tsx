@@ -14,7 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { NewEmployeeWizard } from "@/components/new-employee-wizard";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { isFullAdmin } from "@/lib/authz";
 import { hiringAccessForCandidate } from "@/lib/hiring-access";
 import { canOpenEmployeeCreate, safeHirePrefill } from "@/lib/hire-employee";
@@ -46,7 +46,7 @@ export default async function NewEmployeePage({
     redirect("/people");
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const isHrOrAdmin =
     isFullAdmin(currentEmployee.accessLevel) || permissions.canManageUsers === true;
 

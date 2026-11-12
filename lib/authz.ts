@@ -55,6 +55,27 @@ export function canViewTerminationDetails(opts: {
   return opts.isViewingSelf || opts.canViewSensitivePersonalInfo === true;
 }
 
+/** Fail closed: treat status_change rows that look like terminations as terminations. */
+export function isTerminationHistoryRow(row: {
+  changeType?: string | null;
+  status?: string | null;
+  employmentStatus?: string | null;
+  terminationReasonId?: number | string | null;
+  terminationReason?: string | null;
+  terminationType?: string | null;
+  roeCode?: string | null;
+}): boolean {
+  const status = row.status ?? row.employmentStatus;
+  return (
+    row.changeType === "terminate" ||
+    status === "terminated" ||
+    row.terminationReasonId != null ||
+    Boolean(row.terminationReason) ||
+    Boolean(row.terminationType) ||
+    Boolean(row.roeCode)
+  );
+}
+
 export function redactTerminationDetails<
   T extends {
     roeCode?: string | null;
@@ -64,9 +85,13 @@ export function redactTerminationDetails<
     terminationTypeId?: string | null;
     comment?: string | null;
     changeType?: string | null;
+    status?: string | null;
+    employmentStatus?: string | null;
   },
 >(row: T, allowed: boolean): T {
   if (allowed) return row;
+  const hideComment =
+    Object.prototype.hasOwnProperty.call(row, "comment") && isTerminationHistoryRow(row);
   return {
     ...row,
     ...(Object.prototype.hasOwnProperty.call(row, "roeCode") ? { roeCode: null } : {}),
@@ -82,9 +107,7 @@ export function redactTerminationDetails<
     ...(Object.prototype.hasOwnProperty.call(row, "terminationTypeId")
       ? { terminationTypeId: null }
       : {}),
-    ...(Object.prototype.hasOwnProperty.call(row, "comment") && row.changeType === "terminate"
-      ? { comment: null }
-      : {}),
+    ...(hideComment ? { comment: null } : {}),
   } as T;
 }
 
@@ -169,6 +192,17 @@ export function canViewOfferSalary(opts: {
   return opts.canViewCompensation || isFullAdmin(opts.accessLevel) || opts.canManageUsers === true;
 }
 
+/** Compensation-bearing letter bodies: recipient or canViewCompensation. canManageUsers is not enough. */
+export function canViewIssuedLetterBody(opts: {
+  isRecipient: boolean;
+  containsCompensation: boolean;
+  canViewCompensation: boolean;
+}) {
+  if (opts.isRecipient) return true;
+  if (!opts.containsCompensation) return true;
+  return opts.canViewCompensation === true;
+}
+
 export function redactVisaDocumentNumber<T extends { documentNumber?: string | null }>(
   row: T,
   allowed: boolean
@@ -235,6 +269,46 @@ export function devLoginSessionRole(
     return "full_admin";
   }
   return "employee";
+}
+
+/**
+ * Email-only dev login may bind a matching employee-level row.
+ * Privileged identities (full_admin, HR flags, viewing roles) require
+ * ALLOW_DEV_ADMIN_IMPERSONATION. Does not enable that flag.
+ */
+export function isPrivilegedDevLoginIdentity(opts: {
+  accessLevel?: AccessLevel;
+  canManageUsers?: boolean | null;
+  canViewCompensation?: boolean | null;
+  canViewSensitivePersonalInfo?: boolean | null;
+}): boolean {
+  const accessLevel = opts.accessLevel;
+  if (
+    accessLevel === "full_admin" ||
+    accessLevel === "global_view" ||
+    accessLevel === "regional_view"
+  ) {
+    return true;
+  }
+  return (
+    opts.canManageUsers === true ||
+    opts.canViewCompensation === true ||
+    opts.canViewSensitivePersonalInfo === true
+  );
+}
+
+export function resolveDevLoginEmployeeBinding<
+  T extends {
+    id: number;
+    accessLevel?: AccessLevel;
+    canManageUsers?: boolean | null;
+    canViewCompensation?: boolean | null;
+    canViewSensitivePersonalInfo?: boolean | null;
+  },
+>(employee: T | null | undefined, env: NodeJS.ProcessEnv = process.env): T | null {
+  if (!employee) return null;
+  if (!isPrivilegedDevLoginIdentity(employee)) return employee;
+  return isDevAdminImpersonationEnabled(env) ? employee : null;
 }
 
 export function isCronAuthorized(

@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageTimeOffOperations, canViewTimeOffLedger } from "@/lib/authz";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 import { TimeOffAdjustmentForm } from "@/components/time-off-adjustment-form";
@@ -18,7 +18,7 @@ export default async function TimeOffBalancesPage() {
     redirect("/time-off");
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const [viewer] = await db
     .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)

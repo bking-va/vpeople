@@ -10,7 +10,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TimeOffActions } from "@/components/time-off-actions";
 import { CalendarFeeds } from "@/components/calendar-feeds";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { isFullAdmin } from "@/lib/authz";
 
 export default async function TimeOffPage() {
@@ -75,9 +75,7 @@ export default async function TimeOffPage() {
 
   const isManager = reportIds.length > 0;
   const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
-  const permissions = session.user.email
-    ? await getUserPermissions(session.user.email)
-    : null;
+  const permissions = await getSessionUserPermissions(session);
   const canViewAllBalances =
     Boolean(permissions?.canManageUsers) || isFullAdmin(employee.accessLevel);
 

@@ -3,8 +3,18 @@ export type HolidayDate = {
   isRecurring?: boolean | null;
 };
 
-/** Inclusive UTC date keys (YYYY-MM-DD) from date-only or timestamp strings. */
-export function eachUtcDateInclusive(startInput: string, endInput: string): string[] {
+/** Inclusive calendar-day cap for a single time-off request (leap year). */
+export const MAX_TIME_OFF_SPAN_DAYS = 366;
+
+export class TimeOffSpanError extends Error {
+  constructor(message = `Time-off request cannot exceed ${MAX_TIME_OFF_SPAN_DAYS} days`) {
+    super(message);
+    this.name = "TimeOffSpanError";
+  }
+}
+
+/** Inclusive UTC date count from date-only or timestamp strings. Does not allocate a day list. */
+export function inclusiveUtcDayCount(startInput: string, endInput: string): number {
   const start = toUtcDateOnly(startInput);
   const end = toUtcDateOnly(endInput);
   if (!start || !end) {
@@ -13,21 +23,30 @@ export function eachUtcDateInclusive(startInput: string, endInput: string): stri
   if (end.getTime() < start.getTime()) {
     throw new Error("End date must be on or after start date");
   }
-  const dates: string[] = [];
-  for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
-    dates.push(new Date(t).toISOString().slice(0, 10));
+  return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+}
+
+/** Reject oversized spans before holiday scans or per-day allocation. */
+export function assertTimeOffSpan(startInput: string, endInput: string): number {
+  const days = inclusiveUtcDayCount(startInput, endInput);
+  if (days > MAX_TIME_OFF_SPAN_DAYS) {
+    throw new TimeOffSpanError();
   }
-  return dates;
+  return days;
 }
 
 /** Inclusive calendar-day count from date-only or timestamp strings (UTC date parts). */
 export function calendarDaysInclusive(startInput: string, endInput: string): number {
-  return eachUtcDateInclusive(startInput, endInput).length;
+  return inclusiveUtcDayCount(startInput, endInput);
 }
 
 function holidayMonthDay(date: string): string | null {
   const key = String(date).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key.slice(5) : null;
+}
+
+function utcDateKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
 
 export function isCompanyHoliday(
@@ -46,17 +65,51 @@ export function isCompanyHoliday(
   return false;
 }
 
+/** Count distinct holiday dates in [startKey, endKey] without allocating every calendar day. */
+function holidayHitsInRange(
+  startKey: string,
+  endKey: string,
+  holidays: HolidayDate[]
+): number {
+  const hits = new Set<string>();
+  const startYear = Number(startKey.slice(0, 4));
+  const endYear = Number(endKey.slice(0, 4));
+  for (const holiday of holidays) {
+    const holidayKey = String(holiday.date).slice(0, 10);
+    if (holidayKey >= startKey && holidayKey <= endKey) {
+      hits.add(holidayKey);
+    }
+    if (!holiday.isRecurring) continue;
+    const monthDay = holidayMonthDay(holidayKey);
+    if (!monthDay) continue;
+    for (let year = startYear; year <= endYear; year++) {
+      const candidate = `${year}-${monthDay}`;
+      if (candidate >= startKey && candidate <= endKey) {
+        hits.add(candidate);
+      }
+    }
+  }
+  return hits.size;
+}
+
 /**
  * Pending/approved request day counts: inclusive calendar days minus company holidays.
  * Recurring holidays match on month-day. No weekend rule exists today.
+ * Caps the span before scanning holidays.
  */
 export function requestDaysExcludingHolidays(
   startInput: string,
   endInput: string,
   holidays: HolidayDate[]
 ): number {
-  const dates = eachUtcDateInclusive(startInput, endInput);
-  return dates.filter((date) => !isCompanyHoliday(date, holidays)).length;
+  const total = assertTimeOffSpan(startInput, endInput);
+  const start = toUtcDateOnly(startInput);
+  const end = toUtcDateOnly(endInput);
+  if (!start || !end) {
+    throw new Error("Invalid start or end date");
+  }
+  const hits = holidayHitsInRange(utcDateKey(start), utcDateKey(end), holidays);
+  return total - hits;
 }
 
 /** Days of an approved request that have already been taken as of `asOf`, clipped to `year`. */
@@ -77,7 +130,10 @@ export function takenDaysInYear(
   if (rangeEnd < rangeStart) return 0;
   try {
     return requestDaysExcludingHolidays(rangeStart, rangeEnd, holidays);
-  } catch {
+  } catch (error) {
+    if (error instanceof TimeOffSpanError) {
+      throw error;
+    }
     return 0;
   }
 }

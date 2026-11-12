@@ -194,6 +194,13 @@ describe("Bamboo parity API (Real Postgres)", () => {
       comment: "Resignation",
       terminationReasonId: resignationId,
     });
+    await db.insert(employmentStatusHistory).values({
+      employeeId: departed.id,
+      effectiveDate: "2023-12-01",
+      status: "terminated",
+      changeType: "status_change",
+      comment: "Laid off — confidential",
+    });
     await db.insert(documents).values({
       employeeId: employee.id,
       title: "NDA",
@@ -364,6 +371,11 @@ describe("Bamboo parity API (Real Postgres)", () => {
     expect(departedStatus.terminationReasonId).toBeNull();
     expect(departedStatus.terminationTypeId).toBeNull();
     expect(departedStatus.comment).toBe("");
+    const leakedLegacy = statuses.filter(
+      (row: { employeeId: string; comment?: string }) =>
+        row.employeeId === String(departed.id) && Boolean(row.comment)
+    );
+    expect(leakedLegacy).toEqual([]);
 
     const empStatusRes = await employmentStatus(
       new NextRequest("http://localhost/api/bamboo/v1/tables/employmentStatus", { headers: empHeaders })

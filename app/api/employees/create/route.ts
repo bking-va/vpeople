@@ -11,7 +11,7 @@ import {
 import { recordEmploymentStatusChange } from "@/lib/employment-status";
 import { eq, sql } from "drizzle-orm";
 import { sanitizePersonNameFields, UNSAFE_PERSON_NAME_MESSAGE } from "@/lib/person-name";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { hiringAccessForCandidate } from "@/lib/hiring-access";
 import {
   canOpenEmployeeCreate,
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const permissions = await getUserPermissions(session.user.email);
+    const permissions = await getSessionUserPermissions(session);
     const isHrOrAdmin =
       isFullAdmin(currentEmployee.accessLevel) || permissions.canManageUsers === true;
 

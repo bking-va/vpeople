@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { timesheets, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 
 export async function POST(
   request: NextRequest,
@@ -51,7 +51,7 @@ export async function POST(
       return NextResponse.json({ error: "Timesheet not found" }, { status: 404 });
     }
 
-    const permissions = await getUserPermissions(session.user.email);
+    const permissions = await getSessionUserPermissions(session);
     const [owner] = await db
       .select({ managerId: employees.managerId })
       .from(employees)

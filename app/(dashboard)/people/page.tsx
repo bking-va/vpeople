@@ -10,7 +10,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { PeopleViewSelector } from "@/components/people-view-selector";
 import { visibleDirectoryEmail } from "@/lib/authz";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export default async function PeoplePage({
@@ -19,14 +19,14 @@ export default async function PeoplePage({
   searchParams: Promise<{ view?: string }>;
 }) {
   const session = await auth();
-  if (!session?.user?.email) {
+  if (!session?.user?.employeeId) {
     redirect("/auth/signin");
   }
 
   const { view: selectedViewId } = await searchParams;
 
   const [employee] = await db.query.employees.findMany({
-    where: (employees, { eq }) => eq(employees.email, session.user.email),
+    where: (employees, { eq }) => eq(employees.id, session.user.employeeId!),
     limit: 1,
   });
 
@@ -39,7 +39,7 @@ export default async function PeoplePage({
     .from(peopleViews)
     .where(eq(peopleViews.userId, employee.id));
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const allowed = await scopedEmployeeIds({
     employeeId: employee.id,
     accessLevel: employee.accessLevel,

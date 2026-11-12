@@ -32,9 +32,10 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate, formatCurrency, calculateTenure } from "@/lib/utils";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import {
   canViewImmigrationNumbers,
+  canViewIssuedLetterBody,
   canViewPrivateDocuments,
   canViewTerminationDetails,
   canViewTimeOffLedger,
@@ -139,9 +140,7 @@ export default async function EmployeeProfilePage({
   if (!actor) {
     redirect("/auth/signin");
   }
-  const actorPermissions = session.user.email
-    ? await getUserPermissions(session.user.email)
-    : { canManageUsers: false };
+  const actorPermissions = await getSessionUserPermissions(session);
   const allowed = await scopedEmployeeIds({
     employeeId: actor.id,
     accessLevel: actor.accessLevel,
@@ -202,7 +201,7 @@ export default async function EmployeeProfilePage({
   const isManager = employee.managerId === session.user.employeeId;
 
   // Get DB-backed permissions
-  const permissions = await getUserPermissions(session.user.email!);
+  const permissions = await getSessionUserPermissions(session);
   
   // Allow viewing own data or use DB permissions
   const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
@@ -991,14 +990,20 @@ export default async function EmployeeProfilePage({
         <TabsContent value="documents" className="space-y-4">
           <ProfileDocuments
             employeeId={employeeId}
-            documents={employeeDocs.map(doc => ({
+            documents={employeeDocs.map((doc) => ({
               id: doc.id,
               title: doc.title,
               category: doc.category,
               status: doc.status,
               signedAt: doc.signedAt ? doc.signedAt.toISOString() : null,
               createdAt: doc.createdAt.toISOString(),
-              body: doc.body,
+              body: canViewIssuedLetterBody({
+                isRecipient: isViewingSelf,
+                containsCompensation: Boolean(doc.containsCompensation),
+                canViewCompensation: permissions.canViewCompensation === true,
+              })
+                ? doc.body
+                : null,
               fileUrl: doc.fileUrl,
             }))}
             canUpload={canViewCompensation}

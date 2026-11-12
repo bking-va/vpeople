@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { documents, auditLogs } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 
 export async function DELETE(
   request: NextRequest,
@@ -33,12 +33,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Document not found" }, { status: 404 });
     }
 
-    // Check permissions: must be owner, admin, or HR
-    if (!session.user.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const permissions = await getUserPermissions(session.user.email);
+    const permissions = await getSessionUserPermissions(session);
     const employeeId = session.user.employeeId;
     const isOwner = employeeId && document.employeeId === employeeId;
     const canDelete = isOwner || permissions.canManageUsers;

@@ -5,17 +5,17 @@ import { employees, departments, locations, peopleViews } from "@/lib/db/schema"
 import { eq } from "drizzle-orm";
 import { PeopleDirectoryTable } from "@/components/people-directory-table";
 import { visibleDirectoryEmail } from "@/lib/authz";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export default async function PeopleDirectoryPage() {
   const session = await auth();
-  if (!session?.user?.email) {
+  if (!session?.user?.employeeId) {
     redirect("/auth/signin");
   }
 
   const [employee] = await db.query.employees.findMany({
-    where: (employees, { eq }) => eq(employees.email, session.user.email),
+    where: (employees, { eq }) => eq(employees.id, session.user.employeeId!),
     limit: 1,
   });
 
@@ -28,7 +28,7 @@ export default async function PeopleDirectoryPage() {
     .from(peopleViews)
     .where(eq(peopleViews.userId, employee.id));
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const allowed = await scopedEmployeeIds({
     employeeId: employee.id,
     accessLevel: employee.accessLevel,

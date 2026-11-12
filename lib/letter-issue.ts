@@ -1,4 +1,8 @@
-import { LETTER_MERGE_FIELDS, applyMergeFields } from "@/lib/letter-merge";
+import {
+  LETTER_MERGE_FIELDS,
+  applyMergeFields,
+  letterTemplateContainsCompensation,
+} from "@/lib/letter-merge";
 import type { LetterMergeField } from "@/lib/letter-merge";
 
 export type LetterEmployeeSnapshot = {
@@ -56,6 +60,16 @@ export function renderLetter(template: { subject: string | null; body: string },
     subject: template.subject ? applyMergeFields(template.subject, values) : null,
     body: applyMergeFields(template.body, values),
   };
+}
+
+export function issuedLetterContainsCompensation(template: {
+  subject?: string | null;
+  body: string;
+}): boolean {
+  return (
+    letterTemplateContainsCompensation(template.body) ||
+    letterTemplateContainsCompensation(template.subject || "")
+  );
 }
 
 export { LETTER_MERGE_FIELDS };

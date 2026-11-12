@@ -303,4 +303,22 @@ describe("Time-off ops: ledger, holidays, holiday exclusion (Real Postgres)", ()
     expect(deleted.status).toBe(200);
     ids.holidays = ids.holidays.filter((id) => id !== holidayId);
   });
+
+  test("rejects oversized time-off spans before holiday expansion", async () => {
+    session({ email: worker.email, employeeId: worker.id, role: "employee" });
+    const res = await createSessionTimeOff(
+      new NextRequest("http://localhost/api/time-off/requests", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          policyId: policy.id,
+          startDate: "2020-01-01",
+          endDate: "2030-01-01",
+        }),
+      })
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/cannot exceed/i);
+  });
 });

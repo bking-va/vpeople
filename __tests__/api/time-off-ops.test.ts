@@ -2,6 +2,9 @@ import {
   requestDaysExcludingHolidays,
   calendarDaysInclusive,
   takenDaysInYear,
+  assertTimeOffSpan,
+  MAX_TIME_OFF_SPAN_DAYS,
+  TimeOffSpanError,
 } from "@/lib/calendar-days";
 import { parseAdjustmentAmount } from "@/lib/time-off-adjustments";
 import { canManageTimeOffOperations } from "@/lib/authz";
@@ -29,6 +32,17 @@ describe("time-off request days exclude company holidays", () => {
     expect(
       requestDaysExcludingHolidays("2026-12-25", "2026-12-26", holidays)
     ).toBe(0);
+  });
+
+  test("rejects oversized spans before counting days", () => {
+    expect(() => assertTimeOffSpan("2020-01-01", "2030-01-01")).toThrow(
+      TimeOffSpanError
+    );
+    expect(() =>
+      requestDaysExcludingHolidays("2020-01-01", "2030-01-01", holidays)
+    ).toThrow(TimeOffSpanError);
+    expect(assertTimeOffSpan("2026-01-01", "2026-01-02")).toBe(2);
+    expect(MAX_TIME_OFF_SPAN_DAYS).toBe(366);
   });
 
   test("Time Off Used elapsed days exclude the same holidays", () => {

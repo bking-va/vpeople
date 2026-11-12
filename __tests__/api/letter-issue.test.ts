@@ -1,9 +1,11 @@
 import {
   ISSUED_LETTER_STATUS,
   buildLetterMergeValues,
+  issuedLetterContainsCompensation,
   rejectClientMergeOverrides,
   renderLetter,
 } from "@/lib/letter-issue";
+import { letterTemplateContainsCompensation } from "@/lib/letter-merge";
 
 const employee = {
   firstName: "Ada",
@@ -61,5 +63,16 @@ describe("letter issuance helpers", () => {
     );
     expect(rendered.subject).toBe("Offer — Engineer");
     expect(rendered.body).toBe("Dear Ada {{unknown}}, pay ");
+  });
+
+  test("detects compensation merge fields in templates", () => {
+    expect(letterTemplateContainsCompensation("pay {{payRate}}")).toBe(true);
+    expect(letterTemplateContainsCompensation("Dear {{firstName}}")).toBe(false);
+    expect(
+      issuedLetterContainsCompensation({
+        subject: "Compensation increase effective {{effectiveDate}}",
+        body: "Your compensation as {{jobTitle}} will be {{payRate}}.",
+      })
+    ).toBe(true);
   });
 });

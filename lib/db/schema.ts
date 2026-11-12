@@ -989,6 +989,7 @@ export const documents = pgTable("documents", {
   letterTemplateId: integer("letter_template_id").references(
     () => letterTemplates.id
   ),
+  containsCompensation: boolean("contains_compensation").default(false).notNull(),
   signedAt: timestamp("signed_at"),
   signedBy: integer("signed_by").references(() => employees.id),
   uploadedBy: integer("uploaded_by")

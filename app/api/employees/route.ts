@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { visibleDirectoryEmail } from "@/lib/authz";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 
 export async function GET(request: NextRequest) {
@@ -30,9 +30,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const permissions = session.user.email
-      ? await getUserPermissions(session.user.email)
-      : null;
+    const permissions = await getSessionUserPermissions(session);
     const allowed = await scopedEmployeeIds({
       employeeId: actor.id,
       accessLevel: actor.accessLevel,

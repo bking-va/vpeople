@@ -4,7 +4,7 @@ import { put } from "@vercel/blob";
 import { db } from "@/lib/db";
 import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     const targetEmployeeId = parseInt(employeeId);
 
     // Permission check: Can only attach to self, direct reports, or if admin/HR
-    const permissions = await getUserPermissions(session.user.email);
+    const permissions = await getSessionUserPermissions(session);
     const isSelf = targetEmployeeId === employee.id;
 
     // Check if target employee reports to uploader

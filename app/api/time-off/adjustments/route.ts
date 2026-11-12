@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, timeOffBalanceAdjustments, timeOffBalances, timeOffPolicies } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageTimeOffOperations } from "@/lib/authz";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 import {
@@ -26,7 +26,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageTimeOffOperations({
       accessLevel: actor.accessLevel,
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageTimeOffOperations({
       accessLevel: actor.accessLevel,

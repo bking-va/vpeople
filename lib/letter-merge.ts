@@ -17,6 +17,14 @@ export const LETTER_MERGE_FIELDS = [
 
 export type LetterMergeField = (typeof LETTER_MERGE_FIELDS)[number];
 
+export const COMPENSATION_MERGE_FIELDS: LetterMergeField[] = ["payRate"];
+
+export function letterTemplateContainsCompensation(template: string): boolean {
+  return COMPENSATION_MERGE_FIELDS.some((field) =>
+    new RegExp(`\\{\\{\\s*${field}\\s*\\}\\}`, "i").test(template)
+  );
+}
+
 export function applyMergeFields(
   template: string,
   values: Partial<Record<LetterMergeField, string | number | null | undefined>>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { employees, holidays } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageTimeOffOperations } from "@/lib/authz";
 import { HolidayManager } from "@/components/holiday-manager";
 
@@ -22,7 +22,7 @@ export default async function HolidaysPage() {
         .where(eq(employees.id, session.user.employeeId))
         .limit(1)
     : [null];
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const canManage = canManageTimeOffOperations({
     accessLevel: actor?.accessLevel,
     canManageUsers: permissions.canManageUsers,

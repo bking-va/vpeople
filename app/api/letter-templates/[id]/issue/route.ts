@@ -11,7 +11,7 @@ import {
   compensationHistory,
 } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageAccessScopes } from "@/lib/access-scopes";
 import {
   employeeInScope,
@@ -20,6 +20,7 @@ import {
 import {
   ISSUED_LETTER_STATUS,
   buildLetterMergeValues,
+  issuedLetterContainsCompensation,
   rejectClientMergeOverrides,
   renderLetter,
 } from "@/lib/letter-issue";
@@ -62,7 +63,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageAccessScopes({
       employeeId: actor.id,
@@ -156,6 +157,7 @@ export async function POST(
     values
   );
 
+  const containsCompensation = issuedLetterContainsCompensation(template);
   const [document] = await db
     .insert(documents)
     .values({
@@ -165,6 +167,7 @@ export async function POST(
       status: ISSUED_LETTER_STATUS,
       body: rendered.body,
       letterTemplateId: template.id,
+      containsCompensation,
       uploadedBy: actor.id,
     })
     .returning();

@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, holidays } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageTimeOffOperations } from "@/lib/authz";
 
 async function requireHolidayAdmin() {
@@ -19,7 +19,7 @@ async function requireHolidayAdmin() {
   if (!actor) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageTimeOffOperations({
       accessLevel: actor.accessLevel,

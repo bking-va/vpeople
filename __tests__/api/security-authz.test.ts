@@ -1,6 +1,7 @@
 import {
   canViewCustomFieldValue,
   canViewImmigrationNumbers,
+  canViewIssuedLetterBody,
   canViewPersonalEmail,
   canViewPrivateDocuments,
   canViewTerminationDetails,
@@ -17,9 +18,12 @@ import {
   devLoginSessionRole,
   sessionRoleFromAccessLevel,
   isViewingAccessLevel,
+  isTerminationHistoryRow,
   redactTerminationDetails,
   redactVisaDocumentNumber,
+  resolveDevLoginEmployeeBinding,
 } from "@/lib/authz";
+import { emailMatchesReportSearch } from "@/lib/reports/custom";
 import { calendarDaysInclusive, takenDaysInYear } from "@/lib/calendar-days";
 import { formatGender } from "@/lib/utils/formatters";
 import { csvField, csvRow } from "@/lib/csv";
@@ -88,6 +92,86 @@ describe("field-level authz helpers", () => {
 
     const hireRow = { changeType: "hire", comment: "Hire" };
     expect(redactTerminationDetails(hireRow, false).comment).toBe("Hire");
+
+    const legacyTerminate = {
+      changeType: "status_change",
+      status: "terminated",
+      comment: "Laid off — confidential",
+      terminationReason: "Dismissal",
+    };
+    expect(isTerminationHistoryRow(legacyTerminate)).toBe(true);
+    expect(redactTerminationDetails(legacyTerminate, false).comment).toBeNull();
+    expect(redactTerminationDetails(legacyTerminate, false).terminationReason).toBeNull();
+    expect(redactTerminationDetails(legacyTerminate, true).comment).toBe(
+      "Laid off — confidential"
+    );
+  });
+
+  test("compensation letter bodies require recipient identity or canViewCompensation", () => {
+    expect(
+      canViewIssuedLetterBody({
+        isRecipient: false,
+        containsCompensation: true,
+        canViewCompensation: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewIssuedLetterBody({
+        isRecipient: false,
+        containsCompensation: true,
+        canViewCompensation: true,
+      })
+    ).toBe(true);
+    expect(
+      canViewIssuedLetterBody({
+        isRecipient: true,
+        containsCompensation: true,
+        canViewCompensation: false,
+      })
+    ).toBe(true);
+    expect(
+      canViewIssuedLetterBody({
+        isRecipient: false,
+        containsCompensation: false,
+        canViewCompensation: false,
+      })
+    ).toBe(true);
+  });
+
+  test("report search cannot infer personal emails without sensitive-info permission", () => {
+    const personal = "secret.personal@gmail.com";
+    expect(
+      emailMatchesReportSearch({
+        email: personal,
+        search: "secret.personal",
+        isSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      emailMatchesReportSearch({
+        email: personal,
+        search: "secret.personal",
+        isSelf: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(true);
+    expect(
+      emailMatchesReportSearch({
+        email: "worker@vendasta.com",
+        search: "worker@",
+        isSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(true);
+    expect(
+      emailMatchesReportSearch({
+        email: personal,
+        search: "secret.personal",
+        isSelf: false,
+        canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
   });
 
   test("compensation custom fields are hidden from coworkers without permission", () => {
@@ -295,6 +379,34 @@ describe("cron and dev login fail-closed", () => {
         VERCEL_ENV: "production",
       } as NodeJS.ProcessEnv)
     ).toBe(false);
+
+    const adminRow = {
+      id: 9,
+      accessLevel: "full_admin" as const,
+      canManageUsers: true,
+      canViewCompensation: true,
+    };
+    const hrRow = {
+      id: 10,
+      accessLevel: "employee" as const,
+      canManageUsers: true,
+      canViewCompensation: false,
+    };
+    const employeeRow = {
+      id: 11,
+      accessLevel: "employee" as const,
+      canManageUsers: false,
+      canViewCompensation: false,
+    };
+    expect(resolveDevLoginEmployeeBinding(adminRow, devEnv)).toBeNull();
+    expect(resolveDevLoginEmployeeBinding(hrRow, devEnv)).toBeNull();
+    expect(resolveDevLoginEmployeeBinding(employeeRow, devEnv)?.id).toBe(11);
+    expect(
+      resolveDevLoginEmployeeBinding(adminRow, {
+        ...devEnv,
+        ALLOW_DEV_ADMIN_IMPERSONATION: "true",
+      })?.id
+    ).toBe(9);
   });
 });
 

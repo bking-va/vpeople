@@ -9,26 +9,26 @@ import { documents, employees } from "@/lib/db/schema";
 import { eq, and, count, desc, sql } from "drizzle-orm";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewPrivateDocuments } from "@/lib/authz";
 
 export default async function FilesPage() {
   const session = await auth();
-  if (!session?.user?.email) {
+  if (!session?.user?.employeeId) {
     redirect("/auth/signin");
   }
 
   const [employee] = await db
     .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)
-    .where(eq(employees.email, session.user.email))
+    .where(eq(employees.id, session.user.employeeId))
     .limit(1);
 
   if (!employee) {
     redirect("/auth/signin");
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const canViewAllDocs = canViewPrivateDocuments({
     isViewingSelf: false,
     canManageUsers: permissions.canManageUsers,

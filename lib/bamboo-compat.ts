@@ -220,8 +220,12 @@ export async function bambooEmploymentStatusTable(request: NextRequest, employee
         {
           comment: row.comment || "",
           changeType: row.changeType,
+          status: row.employmentStatus,
           terminationReasonId: row.terminationReasonId ? String(row.terminationReasonId) : null,
-          terminationTypeId: row.changeType === "terminate" ? "termination" : null,
+          terminationTypeId:
+            row.changeType === "terminate" || row.employmentStatus === "terminated"
+              ? "termination"
+              : null,
         },
         allowed
       );

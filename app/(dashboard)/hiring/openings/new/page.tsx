@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { departments, locations, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { JobOpeningForm } from "@/components/job-opening-form";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { visibleProfileEmail } from "@/lib/authz";
 
 export default async function NewJobOpeningPage() {
@@ -15,9 +15,7 @@ export default async function NewJobOpeningPage() {
 
   const depts = await db.select().from(departments);
   const locs = await db.select().from(locations);
-  const permissions = session.user.email
-    ? await getUserPermissions(session.user.email)
-    : null;
+  const permissions = await getSessionUserPermissions(session);
   const managers = await db
     .select({
       id: employees.id,

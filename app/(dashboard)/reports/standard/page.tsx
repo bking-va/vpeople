@@ -22,7 +22,7 @@ import {
   getTimeOffScheduleReport,
   type PayGroupRow,
 } from "@/lib/reports/standard";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/utils";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
 
@@ -38,9 +38,7 @@ export default async function StandardReportsPage({
 
   const { type = "additions" } = await searchParams;
   const year = new Date().getUTCFullYear();
-  const permissions = session.user.email
-    ? await getUserPermissions(session.user.email)
-    : null;
+  const permissions = await getSessionUserPermissions(session);
 
   let title = "Standard Report";
   let body: ReactNode = null;
