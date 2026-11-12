@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { employees, timeOffRequests, timeOffBalances } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { authenticateApiKey } from "@/lib/api-auth";
-import { calendarDaysInclusive } from "@/lib/calendar-days";
+import { requestDaysExcludingHolidays } from "@/lib/calendar-days";
+import { loadCompanyHolidays } from "@/lib/holidays";
 import { isFullAdmin, isManagerAccessLevel, isViewingAccessLevel } from "@/lib/authz";
 import { attachConfiguredTimeOffApproval } from "@/lib/time-off-workflow";
 
@@ -48,9 +49,20 @@ export async function POST(request: NextRequest) {
 
     let days: number;
     try {
-      days = calendarDaysInclusive(String(data.start), String(data.end));
+      const companyHolidays = await loadCompanyHolidays();
+      days = requestDaysExcludingHolidays(
+        String(data.start),
+        String(data.end),
+        companyHolidays
+      );
     } catch {
       return NextResponse.json({ error: "Invalid start or end date" }, { status: 400 });
+    }
+    if (days < 1) {
+      return NextResponse.json(
+        { error: "Request does not include any working days" },
+        { status: 400 }
+      );
     }
 
     const [balance] = await db

@@ -613,24 +613,35 @@ export const jobOpenings = pgTable("job_openings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const candidates = pgTable("candidates", {
-  id: serial("id").primaryKey(),
-  jobOpeningId: integer("job_opening_id")
-    .notNull()
-    .references(() => jobOpenings.id, { onDelete: "cascade" }),
-  firstName: text("first_name").notNull(),
-  lastName: text("last_name").notNull(),
-  email: text("email").notNull(),
-  phone: text("phone"),
-  resumeUrl: text("resume_url"),
-  linkedinUrl: text("linkedin_url"),
-  source: candidateSourceEnum("source").default("other").notNull(),
-  stage: candidateStageEnum("stage").default("new").notNull(),
-  rating: integer("rating"), // 1-5 stars
-  appliedAt: timestamp("applied_at").defaultNow().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+export const candidates = pgTable(
+  "candidates",
+  {
+    id: serial("id").primaryKey(),
+    jobOpeningId: integer("job_opening_id")
+      .notNull()
+      .references(() => jobOpenings.id, { onDelete: "cascade" }),
+    employeeId: integer("employee_id").references(() => employees.id, {
+      onDelete: "set null",
+    }),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    resumeUrl: text("resume_url"),
+    linkedinUrl: text("linkedin_url"),
+    source: candidateSourceEnum("source").default("other").notNull(),
+    stage: candidateStageEnum("stage").default("new").notNull(),
+    rating: integer("rating"), // 1-5 stars
+    appliedAt: timestamp("applied_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    employeeIdUnique: uniqueIndex("candidates_employee_id_unique").on(
+      table.employeeId
+    ),
+  })
+);
 
 export const candidateNotes = pgTable("candidate_notes", {
   id: serial("id").primaryKey(),
@@ -679,6 +690,10 @@ export const candidatesRelations = relations(candidates, ({ one, many }) => ({
   jobOpening: one(jobOpenings, {
     fields: [candidates.jobOpeningId],
     references: [jobOpenings.id],
+  }),
+  employee: one(employees, {
+    fields: [candidates.employeeId],
+    references: [employees.id],
   }),
   notes: many(candidateNotes),
   offerLetter: one(offerLetters),

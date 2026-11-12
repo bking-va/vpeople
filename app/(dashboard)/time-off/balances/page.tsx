@@ -8,29 +8,44 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { getUserPermissions } from "@/lib/permissions";
-import { canViewTimeOffLedger } from "@/lib/authz";
+import { canManageTimeOffOperations, canViewTimeOffLedger } from "@/lib/authz";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
+import { TimeOffAdjustmentForm } from "@/components/time-off-adjustment-form";
 
 export default async function TimeOffBalancesPage() {
   const session = await auth();
-  if (!session?.user || (session.user.role !== "admin" && session.user.role !== "full_admin")) {
+  if (!session?.user?.email || !session.user.employeeId) {
     redirect("/time-off");
   }
 
-  const permissions = session.user.email
-    ? await getUserPermissions(session.user.email)
-    : null;
-  const [viewer] = session.user.employeeId
-    ? await db
-        .select({ accessLevel: employees.accessLevel })
-        .from(employees)
-        .where(eq(employees.id, session.user.employeeId))
-        .limit(1)
-    : [null];
+  const permissions = await getUserPermissions(session.user.email);
+  const [viewer] = await db
+    .select({ id: employees.id, accessLevel: employees.accessLevel })
+    .from(employees)
+    .where(eq(employees.id, session.user.employeeId))
+    .limit(1);
+  if (!viewer) {
+    redirect("/time-off");
+  }
+
+  const canManage = canManageTimeOffOperations({
+    accessLevel: viewer.accessLevel,
+    canManageUsers: permissions.canManageUsers,
+  });
+  if (!canManage) {
+    redirect("/time-off");
+  }
+
+  const allowed = await scopedEmployeeIds({
+    employeeId: viewer.id,
+    accessLevel: viewer.accessLevel,
+    canManageUsers: permissions.canManageUsers,
+  });
   const canViewHistory = canViewTimeOffLedger({
     isViewingSelf: false,
     isManager: false,
-    canManageUsers: Boolean(permissions?.canManageUsers),
-    accessLevel: viewer?.accessLevel,
+    canManageUsers: permissions.canManageUsers,
+    accessLevel: viewer.accessLevel,
   });
 
   const allBalances = await db
@@ -49,7 +64,10 @@ export default async function TimeOffBalancesPage() {
     .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
     .orderBy(employees.lastName, employees.firstName);
 
-  // Fetch all future requests to compute scheduled and pending days
+  const scopedBalances = allBalances.filter((item) =>
+    employeeInScope(item.balance.employeeId, allowed)
+  );
+
   const allFutureRequests = await db
     .select()
     .from(timeOffRequests)
@@ -57,11 +75,11 @@ export default async function TimeOffBalancesPage() {
       gte(timeOffRequests.startDate, new Date().toISOString().split("T")[0])
     );
 
-  // Compute scheduled and pending days per employee per policy
   const scheduledByEmployeePolicy = new Map<string, number>();
   const pendingByEmployeePolicy = new Map<string, number>();
 
   for (const request of allFutureRequests) {
+    if (!employeeInScope(request.employeeId, allowed)) continue;
     const days = parseFloat(request.daysRequested);
     const key = `${request.employeeId}-${request.policyId}`;
 
@@ -74,28 +92,29 @@ export default async function TimeOffBalancesPage() {
     }
   }
 
-  // Enhance balances with available, pending, and scheduled
-  // Note: stored balance already reflects approved deductions, so available = stored balance
   const recentAdjustments = canViewHistory
-    ? await db
-        .select({
-          id: timeOffBalanceAdjustments.id,
-          amount: timeOffBalanceAdjustments.amount,
-          reason: timeOffBalanceAdjustments.reason,
-          createdAt: timeOffBalanceAdjustments.createdAt,
-          firstName: employees.firstName,
-          lastName: employees.lastName,
-          policyName: timeOffPolicies.name,
-        })
-        .from(timeOffBalanceAdjustments)
-        .innerJoin(timeOffBalances, eq(timeOffBalanceAdjustments.balanceId, timeOffBalances.id))
-        .innerJoin(employees, eq(timeOffBalances.employeeId, employees.id))
-        .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
-        .orderBy(desc(timeOffBalanceAdjustments.createdAt))
-        .limit(50)
+    ? (
+        await db
+          .select({
+            id: timeOffBalanceAdjustments.id,
+            amount: timeOffBalanceAdjustments.amount,
+            reason: timeOffBalanceAdjustments.reason,
+            createdAt: timeOffBalanceAdjustments.createdAt,
+            employeeId: timeOffBalances.employeeId,
+            firstName: employees.firstName,
+            lastName: employees.lastName,
+            policyName: timeOffPolicies.name,
+          })
+          .from(timeOffBalanceAdjustments)
+          .innerJoin(timeOffBalances, eq(timeOffBalanceAdjustments.balanceId, timeOffBalances.id))
+          .innerJoin(employees, eq(timeOffBalances.employeeId, employees.id))
+          .leftJoin(timeOffPolicies, eq(timeOffBalances.policyId, timeOffPolicies.id))
+          .orderBy(desc(timeOffBalanceAdjustments.createdAt))
+          .limit(100)
+      ).filter((row) => employeeInScope(row.employeeId, allowed)).slice(0, 50)
     : [];
 
-  const balancesWithDetails = allBalances.map(item => {
+  const balancesWithDetails = scopedBalances.map((item) => {
     const key = `${item.balance.employeeId}-${item.balance.policyId}`;
     const totalBalance = parseFloat(item.balance.balance);
     const scheduled = scheduledByEmployeePolicy.get(key) || 0;
@@ -122,11 +141,19 @@ export default async function TimeOffBalancesPage() {
         </Button>
       </div>
 
+      <TimeOffAdjustmentForm
+        balances={balancesWithDetails.map((item) => ({
+          employeeId: item.balance.employeeId,
+          policyId: item.balance.policyId,
+          label: `${item.employee?.firstName || ""} ${item.employee?.lastName || ""} · ${item.policy?.name || "Policy"} (${item.availableBalance.toFixed(1)}d)`,
+        }))}
+      />
+
       <Card>
         <CardHeader>
-          <CardTitle>All Employee Balances</CardTitle>
+          <CardTitle>Employee balances</CardTitle>
           <CardDescription>
-            Current balances by employee and policy
+            Current balances by employee and policy (in-scope only)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -168,7 +195,7 @@ export default async function TimeOffBalancesPage() {
         <CardHeader>
           <CardTitle>Balance History</CardTitle>
           <CardDescription>
-            Accruals, carryover forfeits, and time off used
+            Accruals, carryover forfeits, used leave, and manual adjustments
           </CardDescription>
         </CardHeader>
         <CardContent>

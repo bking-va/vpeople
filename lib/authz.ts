@@ -153,6 +153,14 @@ export function canViewTimeOffLedger(opts: {
   );
 }
 
+/** Manual balance adjustments and holiday writes: HR (canManageUsers) or full_admin. */
+export function canManageTimeOffOperations(opts: {
+  accessLevel: AccessLevel;
+  canManageUsers?: boolean;
+}) {
+  return isFullAdmin(opts.accessLevel) || opts.canManageUsers === true;
+}
+
 export function canViewOfferSalary(opts: {
   canViewCompensation: boolean;
   accessLevel: AccessLevel;

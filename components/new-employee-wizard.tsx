@@ -23,6 +23,20 @@ interface NewEmployeeWizardProps {
   jobFamilies: Array<{ id: number; name: string }>;
   jobLevels: Array<{ id: number; code: string; name: string }>;
   managers: Array<{ id: number; firstName: string; lastName: string; jobTitle: string | null }>;
+  initialValues?: Partial<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    hireDate: string;
+    employmentStatus: string;
+    jobTitle: string;
+    departmentId: string;
+    locationId: string;
+    workPhone: string;
+    linkedInUrl: string;
+  }>;
+  candidateId?: number;
+  canSetAccessLevel?: boolean;
 }
 
 export function NewEmployeeWizard({
@@ -32,6 +46,9 @@ export function NewEmployeeWizard({
   jobFamilies,
   jobLevels,
   managers,
+  initialValues,
+  candidateId,
+  canSetAccessLevel = true,
 }: NewEmployeeWizardProps) {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -39,24 +56,25 @@ export function NewEmployeeWizard({
   
   const [formData, setFormData] = useState({
     // Step 1: Basic Info
-    firstName: "",
-    lastName: "",
-    email: "",
-    hireDate: "",
-    employmentStatus: "full_time",
+    firstName: initialValues?.firstName || "",
+    lastName: initialValues?.lastName || "",
+    email: initialValues?.email || "",
+    hireDate: initialValues?.hireDate || "",
+    employmentStatus: initialValues?.employmentStatus || "full_time",
     
     // Step 2: Job Info
-    jobTitle: "",
-    departmentId: "",
+    jobTitle: initialValues?.jobTitle || "",
+    departmentId: initialValues?.departmentId || "",
     divisionId: "",
-    locationId: "",
+    locationId: initialValues?.locationId || "",
     jobFamilyId: "",
     jobLevelId: "",
     
     // Step 3: Manager & Access
     managerId: "",
     accessLevel: "employee",
-    workPhone: "",
+    workPhone: initialValues?.workPhone || "",
+    linkedInUrl: initialValues?.linkedInUrl || "",
   });
 
   const updateField = (field: string, value: string) => {
@@ -93,7 +111,10 @@ export function NewEmployeeWizard({
       const response = await fetch("/api/employees/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          ...(candidateId ? { candidateId } : {}),
+        }),
       });
 
       if (response.ok) {
@@ -365,6 +386,7 @@ export function NewEmployeeWizard({
                 </Select>
               </div>
 
+              {canSetAccessLevel ? (
               <div className="space-y-2">
                 <Label htmlFor="accessLevel">Access Level</Label>
                 <Select
@@ -383,6 +405,11 @@ export function NewEmployeeWizard({
                   </SelectContent>
                 </Select>
               </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Access level is employee. Login is not provisioned from this flow.
+                </p>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="workPhone">Work Phone</Label>

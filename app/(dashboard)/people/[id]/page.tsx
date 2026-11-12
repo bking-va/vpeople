@@ -139,16 +139,16 @@ export default async function EmployeeProfilePage({
   if (!actor) {
     redirect("/auth/signin");
   }
-  if (actor.accessLevel === "regional_view") {
-    const actorPermissions = await getUserPermissions(session.user.email!);
-    const allowed = await scopedEmployeeIds({
-      employeeId: actor.id,
-      accessLevel: actor.accessLevel,
-      canManageUsers: actorPermissions.canManageUsers,
-    });
-    if (!employeeInScope(employeeId, allowed)) {
-      notFound();
-    }
+  const actorPermissions = session.user.email
+    ? await getUserPermissions(session.user.email)
+    : { canManageUsers: false };
+  const allowed = await scopedEmployeeIds({
+    employeeId: actor.id,
+    accessLevel: actor.accessLevel,
+    canManageUsers: actorPermissions.canManageUsers,
+  });
+  if (!employeeInScope(employeeId, allowed)) {
+    notFound();
   }
 
   const [dept, div, loc, family, level, manager] = await Promise.all([

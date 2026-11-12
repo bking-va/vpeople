@@ -67,6 +67,7 @@ export default async function CandidateDetailPage({
       source: candidates.source,
       stage: candidates.stage,
       rating: candidates.rating,
+      employeeId: candidates.employeeId,
       appliedAt: candidates.appliedAt,
       jobTitle: jobOpenings.title,
       jobDepartment: jobOpenings.departmentId,
@@ -139,6 +140,13 @@ export default async function CandidateDetailPage({
           </p>
         </div>
         <div className="flex gap-2">
+          {hiringAccess.allowed && candidate.stage === "hired" && !candidate.employeeId && (
+            <Button asChild>
+              <Link href={`/people/new?candidateId=${candidate.id}`}>
+                Create employee
+              </Link>
+            </Button>
+          )}
           {hiringAccess.allowed && (
             <Button asChild>
               <Link href={`/hiring/candidates/${candidate.id}/offer`}>

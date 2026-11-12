@@ -95,6 +95,9 @@ export default async function TimeOffPage() {
           <Button asChild variant="outline">
             <Link href="/time-off/calendar">Who&apos;s Out</Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href="/time-off/holidays">Holidays</Link>
+          </Button>
           {(isManager || isAdmin) && (
             <Button asChild variant="outline">
               <Link href="/time-off/approvals">View All Approvals</Link>

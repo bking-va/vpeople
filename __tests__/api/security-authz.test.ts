@@ -5,6 +5,7 @@ import {
   canViewPrivateDocuments,
   canViewTerminationDetails,
   canViewTimeOffLedger,
+  canManageTimeOffOperations,
   canWriteSettings,
   isVendastaWorkEmail,
   visibleDirectoryEmail,
@@ -164,6 +165,18 @@ describe("field-level authz helpers", () => {
         isManager: false,
         canManageUsers: true,
         accessLevel: "admin",
+      })
+    ).toBe(true);
+    expect(
+      canManageTimeOffOperations({
+        accessLevel: "manager",
+        canManageUsers: false,
+      })
+    ).toBe(false);
+    expect(
+      canManageTimeOffOperations({
+        accessLevel: "employee",
+        canManageUsers: true,
       })
     ).toBe(true);
   });

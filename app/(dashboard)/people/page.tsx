@@ -40,14 +40,11 @@ export default async function PeoplePage({
     .where(eq(peopleViews.userId, employee.id));
 
   const permissions = await getUserPermissions(session.user.email);
-  const allowed =
-    employee.accessLevel === "regional_view"
-      ? await scopedEmployeeIds({
-          employeeId: employee.id,
-          accessLevel: employee.accessLevel,
-          canManageUsers: permissions.canManageUsers,
-        })
-      : "all";
+  const allowed = await scopedEmployeeIds({
+    employeeId: employee.id,
+    accessLevel: employee.accessLevel,
+    canManageUsers: permissions.canManageUsers,
+  });
 
   const allEmployees = await db
     .select({
@@ -79,8 +76,8 @@ export default async function PeoplePage({
   const locMap = new Map(locs.map((l) => [l.id, l.name]));
 
   const directReportCounts = new Map<number, number>();
-  for (const emp of allEmployees) {
-    if (emp.managerId) {
+  for (const emp of visibleEmployees) {
+    if (emp.managerId && employeeInScope(emp.managerId, allowed)) {
       directReportCounts.set(
         emp.managerId,
         (directReportCounts.get(emp.managerId) || 0) + 1

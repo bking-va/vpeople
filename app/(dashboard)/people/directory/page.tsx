@@ -29,14 +29,11 @@ export default async function PeopleDirectoryPage() {
     .where(eq(peopleViews.userId, employee.id));
 
   const permissions = await getUserPermissions(session.user.email);
-  const allowed =
-    employee.accessLevel === "regional_view"
-      ? await scopedEmployeeIds({
-          employeeId: employee.id,
-          accessLevel: employee.accessLevel,
-          canManageUsers: permissions.canManageUsers,
-        })
-      : "all";
+  const allowed = await scopedEmployeeIds({
+    employeeId: employee.id,
+    accessLevel: employee.accessLevel,
+    canManageUsers: permissions.canManageUsers,
+  });
 
   const allEmployees = await db
     .select({
