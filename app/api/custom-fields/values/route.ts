@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { customFieldValues, customFields, employees } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewCustomFieldValue } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     }
 
     const targetEmployeeId = parseInt(entityId, 10);
-    const permissions = await getUserPermissions(session.user.email);
+    const permissions = await getSessionUserPermissions(session);
 
     // Check if user can view this employee's data
     const isViewingSelf = session.user.employeeId === targetEmployeeId;
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     const { customFieldId, entityId, value } = data;
 
     // Check permissions
-    const permissions = await getUserPermissions(session.user.email);
+    const permissions = await getSessionUserPermissions(session);
     
     const canEdit =
       entityId === session.user.employeeId || permissions.canManageUsers;

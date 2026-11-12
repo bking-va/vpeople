@@ -24,7 +24,8 @@ vPeople is Vendasta's internal HR management system, built to replace BambooHR. 
 - **Time Off Management**:
   - Multiple policies by country (Canada, US, India)
   - Accrual tracking
-  - Balance management
+  - Balance management and HR manual adjustments
+  - Company holiday CRUD (excluded from request day counts)
   - Request and approval workflow
 - **Onboarding/Offboarding**: Task management with templates and checklists
 - **Admin Panel**: Department, division, team, and location management
@@ -333,7 +334,7 @@ The following features are stubbed or partially implemented for future developme
 - **Document management** (upload/sign exist; Blob token not provisioned; letter issuance uses `documents.body`)
 - **Benefits enrollment** (basic structure exists)
 - **Training/LMS** (basic structure exists)
-- **Hiring embed widget** and hired→employee conversion (public careers page + apply form exist)
+- **Hiring embed widget** (public careers page + apply form exist; hired candidates can prefill `/people/new`, not auto-provisioned)
 - **Performance reviews** (VOS integration planned)
 - **Real-time VOS seat sync** (integration boundary created)
 - **BambooHR data import** (currently uses seed data only; import work is separate)

@@ -5,7 +5,7 @@ import { employees, letterTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LETTER_MERGE_FIELDS } from "@/lib/letter-merge";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageAccessScopes } from "@/lib/access-scopes";
 import { LetterIssueForm } from "@/components/letter-issue-form";
 
@@ -20,7 +20,7 @@ export default async function LetterTemplatesPage() {
     .where(eq(employees.id, session.user.employeeId))
     .limit(1);
   if (!currentEmployee) redirect("/settings");
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageAccessScopes({
       employeeId: currentEmployee.id,

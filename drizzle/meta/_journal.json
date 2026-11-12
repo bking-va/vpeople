@@ -197,6 +197,20 @@
       "when": 1794394062963,
       "tag": "0027_parity_first_round",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794472555493,
+      "tag": "0028_parity_second_round",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794475232811,
+      "tag": "0029_parity_security_fixes",
+      "breakpoints": true
     }
   ]
 }

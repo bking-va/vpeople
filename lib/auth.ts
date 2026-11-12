@@ -3,11 +3,12 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "./db";
-import { users, employees } from "./db/schema";
-import { eq } from "drizzle-orm";
+import { users, employees, accessLevels } from "./db/schema";
+import { eq, sql } from "drizzle-orm";
 import {
   devLoginSessionRole,
   isDevLoginEnabled,
+  resolveDevLoginEmployeeBinding,
   sessionRoleFromAccessLevel,
 } from "./authz";
 import {
@@ -71,13 +72,30 @@ const authConfig = {
                 return null;
               }
 
-              const [employee] = await db
-                .select()
+              const [matched] = await db
+                .select({
+                  id: employees.id,
+                  firstName: employees.firstName,
+                  lastName: employees.lastName,
+                  preferredName: employees.preferredName,
+                  accessLevel: employees.accessLevel,
+                  canManageUsers: accessLevels.canManageUsers,
+                  canViewCompensation: accessLevels.canViewCompensation,
+                  canViewSensitivePersonalInfo:
+                    accessLevels.canViewSensitivePersonalInfo,
+                })
                 .from(employees)
+                .leftJoin(
+                  accessLevels,
+                  sql`${employees.accessLevel}::text = ${accessLevels.code}`
+                )
                 .where(eq(employees.email, email))
                 .limit(1);
 
-              const sessionRole = devLoginSessionRole(employee?.accessLevel);
+              const employee = resolveDevLoginEmployeeBinding(matched);
+              const sessionRole = devLoginSessionRole(
+                employee?.accessLevel ?? "employee"
+              );
 
               let [user] = await db
                 .select()

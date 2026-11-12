@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, employeeAccessScopes, locations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageAccessScopes } from "@/lib/access-scopes";
 import { isFullAdmin } from "@/lib/authz";
 
@@ -20,7 +20,7 @@ async function requireScopeAdmin() {
   if (!actor) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageAccessScopes({
       employeeId: actor.id,

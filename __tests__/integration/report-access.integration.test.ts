@@ -126,6 +126,20 @@ describe("Custom report access and filters (Real Postgres)", () => {
     });
     expect(filtered.rows.every((row: any) => row.lastName !== "Manager")).toBe(true);
     expect(filtered.rows.some((row: any) => row.lastName === "Direct")).toBe(true);
+
+    const inferred = await runCustomEmployeeReport({
+      fields: ["lastName", "email"],
+      filters: { search: `rpt.direct.${runId}@gmail.com` },
+      viewer,
+    });
+    expect(inferred.rows.some((row: any) => row.lastName === "Direct")).toBe(false);
+
+    const workSearch = await runCustomEmployeeReport({
+      fields: ["lastName", "email"],
+      filters: { search: `rpt.mgr.${runId}@vendasta.com` },
+      viewer,
+    });
+    expect(workSearch.rows.some((row: any) => row.lastName === "Manager")).toBe(true);
   });
 
   test("preview API scopes results to the session employee", async () => {

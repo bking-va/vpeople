@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { employees, employeeAccessScopes, locations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canManageAccessScopes } from "@/lib/access-scopes";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccessScopeForm } from "@/components/access-scope-form";
@@ -18,7 +18,7 @@ export default async function AccessScopesPage() {
     .where(eq(employees.id, session.user.employeeId))
     .limit(1);
   if (!actor) redirect("/");
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   if (
     !canManageAccessScopes({
       employeeId: actor.id,

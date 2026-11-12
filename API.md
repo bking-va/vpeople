@@ -150,6 +150,10 @@ These are application routes, not `/api/gateway` or `/api/bamboo`:
 - `GET /api/hiring/candidates/{id}` — session; hiring team / HR / full_admin
 - `POST /api/letter-templates/{id}/issue` — session; HR / full_admin; creates a `pending_signature` document
 - `GET`/`PUT /api/settings/access-scopes` — session; HR / full_admin; per-employee location/country allowlists
+- `POST /api/employees/create` — session; HR / full_admin, or hiring-authorized with `candidateId` of a hired candidate; optional `candidateId` links the candidate; does not provision login
+- `POST /api/time-off/adjustments` — session; HR / full_admin; target must be in `scopedEmployeeIds`
+- `GET /api/holidays` — session; company-wide list
+- `POST /api/holidays` and `PATCH`/`DELETE /api/holidays/{id}` — session; HR / full_admin
 - iCal: `GET /api/calendar/{token}/time-off` and `.../celebrations` are scoped to the token owner's employee visibility (not org-wide)
 
 ## Not Yet Implemented
@@ -158,7 +162,7 @@ Still missing or partial relative to BambooHR:
 
 - Full Bamboo write-API parity (many POST/PUT/DELETE still 405)
 - Email alerts / scheduled report delivery
-- Hired → employee
+- Hired → employee auto-provision (prefill wizard exists; stage=hired does not create the employee or a login)
 - India-specific letter templates
 - Custom access-level builder (regional_view allowlists exist; No Access / post-employment / multi-level do not)
 - Careers embed widget

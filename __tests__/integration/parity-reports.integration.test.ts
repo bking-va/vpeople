@@ -19,10 +19,11 @@ jest.mock("@/lib/auth", () => ({
 }));
 jest.mock("@/lib/permissions", () => ({
   getUserPermissions: jest.fn(),
+  getSessionUserPermissions: jest.fn(),
 }));
 
 import { auth } from "@/lib/auth";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { runTimeOffCarryover } from "@/lib/time-off-carryover";
 import { runTimeOffAccruals } from "@/lib/time-off-accrual";
 import { recordEmploymentStatusChange } from "@/lib/employment-status";
@@ -36,14 +37,16 @@ import {
 } from "@/lib/reports/standard";
 
 const mockedAuth = auth as jest.MockedFunction<typeof auth>;
-const mockedPermissions = getUserPermissions as jest.MockedFunction<typeof getUserPermissions>;
+const mockedPermissions = getSessionUserPermissions as jest.MockedFunction<
+  typeof getSessionUserPermissions
+>;
 const cronSecret = process.env.CRON_SECRET || "parity-cron-secret";
 process.env.CRON_SECRET = cronSecret;
 const cronAuth = { authorization: `Bearer ${cronSecret}` };
 
 function grantCompensation(allowed: boolean) {
   mockedAuth.mockResolvedValue({
-    user: { email: "parity.hr@test.com", role: "admin" },
+    user: { email: "parity.hr@test.com", role: "admin", employeeId: 1 },
     expires: new Date(Date.now() + 3600_000).toISOString(),
   } as any);
   mockedPermissions.mockResolvedValue({ canViewCompensation: allowed } as any);
@@ -548,5 +551,36 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
     expect(hrRows.find(isTerminate)?.comment).toBe("Dismissal");
     expect(coworkerRows.find(isTerminate)?.comment).toBeNull();
     expect(selfRows.find(isTerminate)?.comment).toBe("Dismissal");
+
+    const [legacy] = await db
+      .insert(employmentStatusHistory)
+      .values({
+        employeeId: emp.id,
+        effectiveDate: "2025-12-15",
+        status: "terminated",
+        changeType: "status_change",
+        comment: "Laid off — confidential",
+      })
+      .returning();
+    ids.status.push(legacy.id);
+
+    const isLegacyTerminate = (row: {
+      employeeId: number;
+      changeType: string | null;
+      employmentStatus: string | null;
+    }) =>
+      row.employeeId === emp.id &&
+      row.changeType === "status_change" &&
+      row.employmentStatus === "terminated";
+    const coworkerLegacy = await getEmploymentStatusHistoryReport({
+      viewerId: 0,
+      canViewSensitivePersonalInfo: false,
+    });
+    const hrLegacy = await getEmploymentStatusHistoryReport({
+      viewerId: emp.id,
+      canViewSensitivePersonalInfo: true,
+    });
+    expect(coworkerLegacy.find(isLegacyTerminate)?.comment).toBeNull();
+    expect(hrLegacy.find(isLegacyTerminate)?.comment).toBe("Laid off — confidential");
   });
 });

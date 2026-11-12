@@ -41,6 +41,10 @@ import { GET as exportReport } from "@/app/api/reports/export/route";
 import { PATCH as patchAccessLevel } from "@/app/api/settings/access-levels/[code]/route";
 import { GET as getAccessScopes, PUT as putAccessScopes } from "@/app/api/settings/access-scopes/route";
 import { POST as issueLetter } from "@/app/api/letter-templates/[id]/issue/route";
+import { GET as getHolidays, POST as postHoliday } from "@/app/api/holidays/route";
+import { PATCH as patchHoliday, DELETE as deleteHoliday } from "@/app/api/holidays/[id]/route";
+import { POST as postTimeOffAdjustment } from "@/app/api/time-off/adjustments/route";
+import { POST as createEmployee } from "@/app/api/employees/create/route";
 import { PATCH as patchWorkflow } from "@/app/api/settings/workflows/[id]/route";
 import { GET as bambooDirectory } from "@/app/api/bamboo/v1/employees/directory/route";
 import { GET as bambooEmployee } from "@/app/api/bamboo/v1/employees/[id]/route";
@@ -169,6 +173,53 @@ describe("API Authentication Guards", () => {
         body: JSON.stringify({ employeeId: 1 }),
       });
       const res = await issueLetter(req, { params: Promise.resolve({ id: "1" }) });
+      expect(res.status).toBe(401);
+    });
+
+    test("GET /api/holidays returns 401 without session", async () => {
+      const res = await getHolidays();
+      expect(res.status).toBe(401);
+    });
+
+    test("POST /api/holidays returns 401 without session", async () => {
+      const req = createMockRequest("/api/holidays", {
+        method: "POST",
+        body: JSON.stringify({ name: "Test", date: "2026-12-25", country: "CA" }),
+      });
+      const res = await postHoliday(req);
+      expect(res.status).toBe(401);
+    });
+
+    test("PATCH /api/holidays/[id] returns 401 without session", async () => {
+      const req = createMockRequest("/api/holidays/1", {
+        method: "PATCH",
+        body: JSON.stringify({ name: "Updated" }),
+      });
+      const res = await patchHoliday(req, { params: Promise.resolve({ id: "1" }) });
+      expect(res.status).toBe(401);
+    });
+
+    test("DELETE /api/holidays/[id] returns 401 without session", async () => {
+      const req = createMockRequest("/api/holidays/1", { method: "DELETE" });
+      const res = await deleteHoliday(req, { params: Promise.resolve({ id: "1" }) });
+      expect(res.status).toBe(401);
+    });
+
+    test("POST /api/time-off/adjustments returns 401 without session", async () => {
+      const req = createMockRequest("/api/time-off/adjustments", {
+        method: "POST",
+        body: JSON.stringify({ employeeId: 1, policyId: 1, amount: 1, reason: "fix" }),
+      });
+      const res = await postTimeOffAdjustment(req);
+      expect(res.status).toBe(401);
+    });
+
+    test("POST /api/employees/create returns 401 without session", async () => {
+      const req = createMockRequest("/api/employees/create", {
+        method: "POST",
+        body: JSON.stringify({ firstName: "A", lastName: "B", email: "a@vendasta.com" }),
+      });
+      const res = await createEmployee(req);
       expect(res.status).toBe(401);
     });
 

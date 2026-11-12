@@ -198,7 +198,19 @@ describe("Letter issuance (Real Postgres)", () => {
     expect(body.document.body).toContain("Dear Ada");
     expect(body.document.body).toContain("125000");
     expect(body.document.body).not.toMatch(/India|GST|Shops and Establishments/i);
+    expect(body.document.containsCompensation).toBe(true);
     ids.documents.push(body.document.id);
+
+    const [stored] = await db
+      .select({
+        containsCompensation: documents.containsCompensation,
+        body: documents.body,
+      })
+      .from(documents)
+      .where(eq(documents.id, body.document.id))
+      .limit(1);
+    expect(stored.containsCompensation).toBe(true);
+    expect(stored.body).toContain("125000");
 
     const audits = await db
       .select()

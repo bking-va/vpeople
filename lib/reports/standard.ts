@@ -13,9 +13,10 @@ import {
 import { desc, eq, sql, and, gte, lte, or } from "drizzle-orm";
 import { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 import { takenDaysInYear } from "@/lib/calendar-days";
+import { loadCompanyHolidays } from "@/lib/holidays";
 import { formatGender } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewTerminationDetails, redactTerminationDetails } from "@/lib/authz";
 
 export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
@@ -95,6 +96,7 @@ export async function getTimeOffBalanceReport() {
 export async function getTimeOffUsedReport(year: number, asOf: Date = new Date()) {
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
+  const companyHolidays = await loadCompanyHolidays();
   const rows = await db
     .select({
       employeeId: employees.id,
@@ -119,7 +121,13 @@ export async function getTimeOffUsedReport(year: number, asOf: Date = new Date()
 
   return rows
     .map((row) => {
-      const daysUsed = takenDaysInYear(row.startDate, row.endDate, year, asOf);
+      const daysUsed = takenDaysInYear(
+        row.startDate,
+        row.endDate,
+        year,
+        asOf,
+        companyHolidays
+      );
       return { ...row, daysUsed: daysUsed.toString() };
     })
     .filter((row) => parseFloat(row.daysUsed) > 0);
@@ -247,8 +255,8 @@ export async function getJobHistoryReport() {
 
 async function sessionCanViewCompensation() {
   const session = await auth();
-  if (!session?.user?.email) return false;
-  const permissions = await getUserPermissions(session.user.email);
+  if (!session?.user?.employeeId) return false;
+  const permissions = await getSessionUserPermissions(session);
   return permissions.canViewCompensation === true;
 }
 

@@ -3,7 +3,12 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { employees, timeOffRequests, timeOffBalances } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { calendarDaysInclusive } from "@/lib/calendar-days";
+import {
+  assertTimeOffSpan,
+  requestDaysExcludingHolidays,
+  TimeOffSpanError,
+} from "@/lib/calendar-days";
+import { loadCompanyHolidays } from "@/lib/holidays";
 import { attachConfiguredTimeOffApproval } from "@/lib/time-off-workflow";
 
 export async function POST(request: NextRequest) {
@@ -17,10 +22,17 @@ export async function POST(request: NextRequest) {
     const { policyId, startDate, endDate, reason, notes } = data;
 
     // Get employee ID
+    if (!session.user.employeeId) {
+      return NextResponse.json(
+        { error: "Employee record not found" },
+        { status: 404 }
+      );
+    }
+
     const [employee] = await db
       .select({ id: employees.id, managerId: employees.managerId })
       .from(employees)
-      .where(eq(employees.email, session.user.email!))
+      .where(eq(employees.id, session.user.employeeId))
       .limit(1);
 
     if (!employee) {
@@ -51,10 +63,25 @@ export async function POST(request: NextRequest) {
 
     let days: number;
     try {
-      days = calendarDaysInclusive(String(startDate), String(endDate));
-    } catch {
+      assertTimeOffSpan(String(startDate), String(endDate));
+      const companyHolidays = await loadCompanyHolidays();
+      days = requestDaysExcludingHolidays(
+        String(startDate),
+        String(endDate),
+        companyHolidays
+      );
+    } catch (error) {
+      if (error instanceof TimeOffSpanError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
       return NextResponse.json(
         { error: "Invalid start or end date" },
+        { status: 400 }
+      );
+    }
+    if (days < 1) {
+      return NextResponse.json(
+        { error: "Request does not include any working days" },
         { status: 400 }
       );
     }

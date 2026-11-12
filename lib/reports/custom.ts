@@ -1,12 +1,13 @@
 import { db } from "@/lib/db";
 import { employees, departments, locations, divisions } from "@/lib/db/schema";
-import { and, eq, gte, lte, or, inArray, ilike, type SQL } from "drizzle-orm";
+import { and, eq, gte, lte, or, inArray, ilike, sql, type SQL } from "drizzle-orm";
 import {
   filterRowsByEmployeeScope,
   redactReportEmail,
   scopedEmployeeIds,
   type EmployeeScopeViewer,
 } from "@/lib/employee-scope";
+import { isVendastaWorkEmail, VENDASTA_WORK_EMAIL_DOMAIN } from "@/lib/authz";
 
 export const CUSTOM_REPORT_FIELDS = [
   "employeeNumber",
@@ -24,6 +25,35 @@ export const CUSTOM_REPORT_FIELDS = [
 ] as const;
 
 export type CustomReportField = (typeof CUSTOM_REPORT_FIELDS)[number];
+
+/** Email search uses the same visibility as returned values. */
+export function emailMatchesReportSearch(opts: {
+  email: string | null | undefined;
+  search: string;
+  isSelf: boolean;
+  canViewSensitivePersonalInfo: boolean;
+}): boolean {
+  if (!opts.email) return false;
+  const needle = opts.search.trim().toLowerCase();
+  if (!needle) return false;
+  if (!opts.email.toLowerCase().includes(needle)) return false;
+  if (opts.canViewSensitivePersonalInfo || opts.isSelf) return true;
+  return isVendastaWorkEmail(opts.email);
+}
+
+function emailSearchCondition(search: string, viewer: EmployeeScopeViewer): SQL {
+  const pattern = `%${search}%`;
+  if (viewer.canViewSensitivePersonalInfo) {
+    return ilike(employees.email, pattern);
+  }
+  return or(
+    and(
+      ilike(employees.email, pattern),
+      sql`lower(split_part(${employees.email}, '@', 2)) = ${VENDASTA_WORK_EMAIL_DOMAIN}`
+    ),
+    and(eq(employees.id, viewer.employeeId), ilike(employees.email, pattern))
+  )!;
+}
 
 export type CustomReportFilters = {
   departmentId?: number | null;
@@ -59,12 +89,13 @@ export async function runCustomEmployeeReport(opts: {
     conditions.push(lte(employees.hireDate, opts.filters.hireDateTo));
   }
   if (opts.filters?.search) {
-    const q = `%${opts.filters.search.trim()}%`;
+    const term = opts.filters.search.trim();
+    const q = `%${term}%`;
     conditions.push(
       or(
         ilike(employees.firstName, q),
         ilike(employees.lastName, q),
-        ilike(employees.email, q),
+        emailSearchCondition(term, opts.viewer),
         ilike(employees.jobTitle, q),
         ilike(employees.employeeNumber, q)
       )!

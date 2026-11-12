@@ -7,7 +7,10 @@
 import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getUserPermissions } from "@/lib/permissions";
+import {
+  getUserPermissions,
+  getSessionUserPermissions,
+} from "@/lib/permissions";
 
 // Mock database
 jest.mock("@/lib/db", () => ({
@@ -88,5 +91,14 @@ describe("Profile Access by Access Level", () => {
     // Should return default (no permissions)
     expect(permissions.canViewCompensation).toBe(false);
     expect(permissions.canManageUsers).toBe(false);
+  });
+
+  test("unbound sessions do not inherit privileges", async () => {
+    const permissions = await getSessionUserPermissions({
+      user: { employeeId: null },
+    });
+    expect(permissions.canManageUsers).toBe(false);
+    expect(permissions.canViewCompensation).toBe(false);
+    expect(permissions.canViewSensitivePersonalInfo).toBe(false);
   });
 });

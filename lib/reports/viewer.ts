@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -25,9 +25,7 @@ export async function getReportViewer() {
     return { session: null, viewer: null };
   }
 
-  const permissions = session.user.email
-    ? await getUserPermissions(session.user.email)
-    : null;
+  const permissions = await getSessionUserPermissions(session);
 
   return {
     session,

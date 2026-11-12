@@ -100,8 +100,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ## 3. People Views
 
-- [x] List view (basic) ✅ Done
-- [x] Directory with filters (department, location, search) ✅ Done (table view at /people/directory)
+- [x] List view (basic) ✅ Done (`/people` RSC uses `scopedEmployeeIds`, same as `GET /api/employees`)
+- [x] Directory with filters (department, location, search) ✅ Done (table view at /people/directory; same employee scope as the API)
 - [x] Export to CSV ✅ Done
 - [x] Org chart (basic) ✅ Done (redirect from /people/org-chart to /org-chart)
 - [x] Org chart export ✅ Done (GET /api/org-chart/export generates CSV with full reporting structure)
@@ -230,7 +230,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Categories
 - [x] Accrual rules that run on schedule ✅ Done (daily Vercel cron `/api/cron/accrue-time-off`; unique `(balanceId, periodKey)` so monthly/annual/biweekly apply once per period; skips terminated; caps at maxBalance)
 - [x] Carryover rules ✅ Done (year-start forfeit above `maxCarryover` before accrual; idempotent `carryover:YYYY` period key)
-- [ ] Manual balance adjustments with history
+- [x] Manual balance adjustments with history ✅ Done (`POST /api/time-off/adjustments`; durable `time_off_balance_adjustments` ledger; HR/`full_admin`; target in `scopedEmployeeIds`)
 - [ ] Multi-country policies
   - [ ] Canada
   - [ ] US
@@ -238,9 +238,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [ ] Netherlands
   - [ ] Mexico
   - [ ] Armenia
-- [ ] Holiday calendars per country
+- [ ] Holiday calendars per country (company-wide holiday CRUD exists; not per-country calendars)
 - [ ] Year views
-- [x] Employee request submission with balance check ✅ Done (POST /api/time-off/requests rejects insufficient balance)
+- [x] Employee request submission with balance check ✅ Done (POST /api/time-off/requests rejects insufficient balance; pending/approved `daysRequested` exclude company holidays)
 - [x] Manager approve/deny actions (basic)
 - [x] Balance history and audit trail ✅ Done (accrual, carryover, and used leave write `time_off_balance_adjustments`; profile Time Off tab + `/time-off/balances`)
 - [x] Who's-out calendar view ✅ Done (/time-off/calendar + dashboard widget)
@@ -322,7 +322,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Self-scheduling
 - [ ] Talent pools
 - [ ] Offer templates with e-sign
-- [ ] "Hired" → creates employee record
+- [x] "Hired" → employee prefill ✅ Done (`/people/new?candidateId=`; manager picker uses `scopedEmployeeIds`; no auto-create on stage change; no login provisioning)
 
 ---
 
@@ -410,7 +410,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Salary History ✅ Done (`/reports/standard?type=salary-history`; `canViewCompensation`)
 - [x] Time Off Balances ✅ Done (/reports/standard?type=time-off-balances)
 - [x] Time Off Schedule ✅ Done (`/reports/standard?type=time-off-schedule`; approved + pending overlapping the year)
-- [x] Time Off Used ✅ Done (/reports/standard?type=time-off-used)
+- [x] Time Off Used ✅ Done (/reports/standard?type=time-off-used; elapsed days exclude company holidays, same as request `daysRequested`)
 - [ ] Timesheet Hours
 - [ ] Project Hours
 - [ ] eNPS scores
@@ -517,14 +517,14 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 - [x] Vercel deployment configured ✅ Done
 - [x] Environment variables documented ✅ Done
-- [x] Database migrations ✅ Done (0000-0010 migrations complete)
+- [x] Database migrations ✅ Done (0000-0028; latest additive `0028_parity_second_round` for test/preview only)
 - [ ] Production monitoring - Missing
 - [ ] Backup strategy - Missing
 - [ ] Disaster recovery plan - Missing
 
 ---
 
-**Last Updated:** 2026-11-11  
+**Last Updated:** 2026-11-12  
 **Current Phase:** 
 - ✅ Multi-step approvals complete (time-off, comp, job info, employment status, promotion)
 - ✅ Terminate reasons + Canadian ROE mapping + rehire (original hire date preserved)
@@ -533,4 +533,5 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - ✅ Remaining BambooHR-compatible API tables/meta/files/ATS/who's out
 - ✅ Home announcements, celebrations calendar, seeded letter templates
 - ✅ First-round leftovers: public careers DTO, applicant PII reads, letter issuance, regional_view allowlists + scoped iCal
-- ❌ This round is **not** full BambooHR Core + T&A + Job Postings parity (email alerts, India letters, custom-level builder, hired→employee, T&A depth, embed still open)
+- ✅ Second round: hired→employee prefill (no auto-provision), time-off ledger + holiday CRUD, holiday-excluded request days, people directory RSC scope
+- ❌ This round is **not** full BambooHR Core + T&A + Job Postings parity (email alerts, India letters, custom-level builder, T&A depth, embed still open)
