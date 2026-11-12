@@ -42,6 +42,7 @@ import {
   redactVisaDocumentNumber,
   visibleProfileEmail,
 } from "@/lib/authz";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 import Link from "next/link";
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
@@ -125,6 +126,29 @@ export default async function EmployeeProfilePage({
 
   if (!employee) {
     notFound();
+  }
+
+  if (!session.user.employeeId) {
+    redirect("/auth/signin");
+  }
+  const [actor] = await db
+    .select({ id: employees.id, accessLevel: employees.accessLevel })
+    .from(employees)
+    .where(eq(employees.id, session.user.employeeId))
+    .limit(1);
+  if (!actor) {
+    redirect("/auth/signin");
+  }
+  if (actor.accessLevel === "regional_view") {
+    const actorPermissions = await getUserPermissions(session.user.email!);
+    const allowed = await scopedEmployeeIds({
+      employeeId: actor.id,
+      accessLevel: actor.accessLevel,
+      canManageUsers: actorPermissions.canManageUsers,
+    });
+    if (!employeeInScope(employeeId, allowed)) {
+      notFound();
+    }
   }
 
   const [dept, div, loc, family, level, manager] = await Promise.all([
@@ -974,6 +998,8 @@ export default async function EmployeeProfilePage({
               status: doc.status,
               signedAt: doc.signedAt ? doc.signedAt.toISOString() : null,
               createdAt: doc.createdAt.toISOString(),
+              body: doc.body,
+              fileUrl: doc.fileUrl,
             }))}
             canUpload={canViewCompensation}
           />

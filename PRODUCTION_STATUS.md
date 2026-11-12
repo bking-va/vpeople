@@ -1,4 +1,12 @@
-# Production Verification Status (Commit dbed588)
+# Production Verification Status
+
+**Base:** `main` `d0d8cf6` plus first-round parity slices (careers DTO, applicant PII reads, letter issuance, regional_view allowlists). This is **not** full BambooHR parity.
+
+Historical note: commit `dbed588` delivered earlier P0 user-resolution fixes, custom fields CRUD, calendar tokens, and workflow steps. Do not treat that SHA as current production HEAD.
+
+---
+
+# Production Verification Status (historical `dbed588`)
 
 ## ✅ FIXED - P0 Critical Bugs
 
@@ -137,5 +145,10 @@
 6. ✅ Audit logging verified for document deletion and compensation changes
 7. ✅ Green build with zero TypeScript errors
 
-**Remaining work:**
-- Route tests as requested by user
+**Remaining after 2026-11-11 first round:**
+- Email alerts / Resend, India letter templates, custom-level builder, hired→employee, T&A depth, careers embed
+- Do not migrate production from this work; additive `0027_parity_first_round` is for test/preview only
+- Sign-in / Vendasta OIDC and Bamboo employee import are separate tracks
+
+**Remaining work from dbed588 era (mostly landed since):**
+- Route tests as requested by user (unit + integration coverage now exists for approvals, custom fields, calendar, authz)

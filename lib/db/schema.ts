@@ -704,6 +704,29 @@ export const offerLettersRelations = relations(offerLetters, ({ one }) => ({
 
 // Access Control Tables
 
+export const employeeAccessScopes = pgTable(
+  "employee_access_scopes",
+  {
+    id: serial("id").primaryKey(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    locationId: integer("location_id").references(() => locations.id, {
+      onDelete: "cascade",
+    }),
+    country: text("country"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    employeeLocationCountry: uniqueIndex("employee_access_scopes_unique").on(
+      table.employeeId,
+      table.locationId,
+      table.country
+    ),
+  })
+);
+
 export const accessLevels = pgTable("access_levels", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
@@ -928,6 +951,7 @@ export const documentCategoryEnum = pgEnum("document_category", [
   "performance",
   "policy",
   "other",
+  "letter",
 ]);
 
 export const documentStatusEnum = pgEnum("document_status", [
@@ -946,6 +970,10 @@ export const documents = pgTable("documents", {
   category: documentCategoryEnum("category").notNull(),
   status: documentStatusEnum("status").default("draft").notNull(),
   fileUrl: text("file_url"),
+  body: text("body"),
+  letterTemplateId: integer("letter_template_id").references(
+    () => letterTemplates.id
+  ),
   signedAt: timestamp("signed_at"),
   signedBy: integer("signed_by").references(() => employees.id),
   uploadedBy: integer("uploaded_by")

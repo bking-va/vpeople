@@ -141,16 +141,27 @@ When using the `fields` query parameter, you can request any combination of:
 - `employmentStatus`
 - `photoUrl`
 
+## Session HTTP APIs (not Bamboo gateway)
+
+These are application routes, not `/api/gateway` or `/api/bamboo`:
+
+- `GET /api/careers/openings` and `GET /api/careers/openings/{id}` — public; open jobs only; explicit DTO (`id`, `title`, `employmentType`, `description`, `requirements`, `openDate`, `departmentName`, `locationName`)
+- `POST /api/hiring/candidates/apply` — public apply; success body `{ "success": true }` only
+- `GET /api/hiring/candidates/{id}` — session; hiring team / HR / full_admin
+- `POST /api/letter-templates/{id}/issue` — session; HR / full_admin; creates a `pending_signature` document
+- `GET`/`PUT /api/settings/access-scopes` — session; HR / full_admin; per-employee location/country allowlists
+- iCal: `GET /api/calendar/{token}/time-off` and `.../celebrations` are scoped to the token owner's employee visibility (not org-wide)
+
 ## Not Yet Implemented
 
-The following BambooHR API endpoints are stubbed but not fully implemented:
+Still missing or partial relative to BambooHR:
 
-- Time tracking endpoints
-- Time off request creation/approval
-- File/document upload
-- Webhook subscriptions
-- Custom field metadata
-- Organization chart API
+- Full Bamboo write-API parity (many POST/PUT/DELETE still 405)
+- Email alerts / scheduled report delivery
+- Hired → employee
+- India-specific letter templates
+- Custom access-level builder (regional_view allowlists exist; No Access / post-employment / multi-level do not)
+- Careers embed widget
 
 ## Migration Guide
 

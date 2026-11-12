@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { escapeIcalText } from "@/lib/ical";
+import {
+  employeeInScope,
+  scopedEmployeeIdsForEmployee,
+} from "@/lib/employee-scope";
 
 function icalDate(month: number, day: number, year: number) {
   return `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
@@ -32,6 +36,8 @@ export async function GET(
       return new NextResponse("Invalid calendar token", { status: 404 });
     }
 
+    const allowed = await scopedEmployeeIdsForEmployee(employee.id);
+
     const people = await db
       .select({
         id: employees.id,
@@ -48,6 +54,7 @@ export async function GET(
     const events: string[] = [];
 
     for (const person of people) {
+      if (!employeeInScope(person.id, allowed)) continue;
       const name = person.preferredName
         ? `${person.preferredName} ${person.lastName}`
         : `${person.firstName} ${person.lastName}`;

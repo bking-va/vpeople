@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect, notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { jobOpenings, candidates, candidateNotes, employees } from "@/lib/db/schema";
+import { jobOpenings, candidates } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Star, Mail, Phone, FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { clampCandidateRating } from "@/lib/authz";
+import { hiringAccessForEmail } from "@/lib/hiring-access";
 
 export default async function CandidatesListPage({
   params,
@@ -16,20 +17,31 @@ export default async function CandidatesListPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await auth();
-  if (!session?.user) {
+  if (!session?.user?.email) {
     redirect("/auth/signin");
   }
 
   const { id } = await params;
-  const openingId = parseInt(id);
+  const openingId = parseInt(id, 10);
+  if (!Number.isFinite(openingId)) {
+    notFound();
+  }
 
   const [opening] = await db
-    .select()
+    .select({
+      id: jobOpenings.id,
+      title: jobOpenings.title,
+    })
     .from(jobOpenings)
     .where(eq(jobOpenings.id, openingId));
 
   if (!opening) {
     notFound();
+  }
+
+  const hiringAccess = await hiringAccessForEmail(session.user.email, openingId);
+  if (!hiringAccess.allowed) {
+    redirect("/hiring");
   }
 
   const candidatesList = await db

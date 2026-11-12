@@ -3,6 +3,7 @@ import { jobOpenings, departments, locations } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ApplicationForm } from "@/components/application-form";
+import { toPublicCareerOpening } from "@/lib/careers-public";
 
 export default async function ApplyPage({
   params,
@@ -10,24 +11,33 @@ export default async function ApplyPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const openingId = parseInt(id);
+  const openingId = parseInt(id, 10);
+  if (!Number.isFinite(openingId)) {
+    notFound();
+  }
 
-  const [opening] = await db
+  const [row] = await db
     .select({
       id: jobOpenings.id,
       title: jobOpenings.title,
       employmentType: jobOpenings.employmentType,
-      department: departments.name,
-      location: locations.name,
+      description: jobOpenings.description,
+      requirements: jobOpenings.requirements,
+      openDate: jobOpenings.openDate,
+      departmentName: departments.name,
+      locationName: locations.name,
     })
     .from(jobOpenings)
     .leftJoin(departments, eq(jobOpenings.departmentId, departments.id))
     .leftJoin(locations, eq(jobOpenings.locationId, locations.id))
-    .where(and(eq(jobOpenings.id, openingId), eq(jobOpenings.status, "open")));
+    .where(and(eq(jobOpenings.id, openingId), eq(jobOpenings.status, "open")))
+    .limit(1);
 
-  if (!opening || opening.id === null) {
+  if (!row) {
     notFound();
   }
+
+  const opening = toPublicCareerOpening(row);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -35,7 +45,7 @@ export default async function ApplyPage({
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Apply for {opening.title}</h1>
           <p className="text-muted-foreground">
-            {opening.department} • {opening.location} • {opening.employmentType}
+            {opening.departmentName} • {opening.locationName} • {opening.employmentType}
           </p>
         </div>
 

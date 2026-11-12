@@ -151,6 +151,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Settings page UI - inspection view
 - [x] Access levels stored in DB
 - [x] Access levels editable via UI forms ✅ NEW
+- [x] regional_view location/country allowlists (fail closed; HR/full_admin only; empty = self) ✅ 2026-11-11
 - [ ] No Access level
 - [ ] Post-Employment level
 - [ ] Custom levels (scoped by region/department)
@@ -210,14 +211,14 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ### Integrations
 - [x] iCalendar feeds ✅ Complete (dbed588)
-  - [x] Who's out calendar (GET /api/calendar/[token]/time-off)
-  - [x] Holidays calendar (GET /api/calendar/[token]/holidays)
+  - [x] Who's out calendar (GET /api/calendar/[token]/time-off) — filtered to the token owner's `scopedEmployeeIds` (not org-wide)
+  - [x] Holidays calendar (GET /api/calendar/[token]/holidays) — company holidays, not employee PII
   - [x] Per-user secret calendar token schema (calendarToken field)
   - [x] Token generation UI ✅ Done (dbed588 - CalendarFeeds component)
   - [x] Token regeneration ✅ Done (dbed588 - POST /api/calendar/generate-token)
   - [x] Subscribe URLs display ✅ Done (dbed588 - shown on /time-off page)
   - [x] Vercel Authentication caveat documented ✅ Done (alert in CalendarFeeds)
-  - [x] Birthdays calendar ✅ Done (GET /api/calendar/[token]/celebrations — birthdays and anniversaries)
+  - [x] Birthdays calendar ✅ Done (GET /api/calendar/[token]/celebrations — birthdays and anniversaries; same token-owner scope as time-off)
 - [x] Outbound webhooks ✅ Done
 
 ---
@@ -271,7 +272,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Statuses: Draft, Open, On Hold, Filled, Canceled
   - [x] Hiring lead assignment
 - [x] Candidates
-  - [ ] Public application form
+  - [x] Public application form ✅ Done (`/careers/[id]/apply` + `POST /api/hiring/candidates/apply`; success body `{ success: true }` only)
   - [x] Pipeline stage moves (dropdown on candidate detail)
   - [x] Notes with author attribution
   - [x] 5-star ratings
@@ -287,9 +288,9 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
   - [x] Filled
   - [x] Canceled
 - [x] Hiring lead assignment
-- [ ] Public careers page
+- [x] Public careers page ✅ Done (`/careers` + `GET /api/careers/openings`; explicit public DTO, no employee/applicant/hiring-lead fields)
 - [ ] Embed code for careers page
-- [ ] Public application form
+- [x] Public application form ✅ Done
 
 ### Candidates
 - [x] Candidate management with detail pages
@@ -312,8 +313,8 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [ ] Other sources
 
 ### Candidate Tools
-- [ ] Star ratings
-- [ ] Notes
+- [x] Star ratings ✅ Done (candidate detail; hiring ACL on read and write)
+- [x] Notes ✅ Done (candidate detail; hiring ACL on read and write)
 - [ ] Comments
 - [ ] Email templates with merge fields
 - [ ] Auto-acknowledgement emails
@@ -330,6 +331,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - [x] Company file categories ✅ Done (documents.category enum)
 - [x] Employee folders ✅ Done (documents linked to employeeId)
   - [x] Signature templates with merge fields ✅ Done (`{{mergeField}}` helpers + seeded templates at /settings/letter-templates)
+  - [x] Issue into pending-signature workflow ✅ Done (`POST /api/letter-templates/[id]/issue`; `documents.body`; no India legal copy)
   - [x] Offer letter ✅ Done
   - [x] Merit/increase letter ✅ Done
   - [x] Promotion letter ✅ Done
@@ -522,7 +524,7 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 
 ---
 
-**Last Updated:** 2026-11-09  
+**Last Updated:** 2026-11-11  
 **Current Phase:** 
 - ✅ Multi-step approvals complete (time-off, comp, job info, employment status, promotion)
 - ✅ Terminate reasons + Canadian ROE mapping + rehire (original hire date preserved)
@@ -530,3 +532,5 @@ Full feature parity with Vendasta's BambooHR Core plan plus Time & Attendance an
 - ✅ Custom reports: backend filters + access-level scoping + email privacy
 - ✅ Remaining BambooHR-compatible API tables/meta/files/ATS/who's out
 - ✅ Home announcements, celebrations calendar, seeded letter templates
+- ✅ First-round leftovers: public careers DTO, applicant PII reads, letter issuance, regional_view allowlists + scoped iCal
+- ❌ This round is **not** full BambooHR Core + T&A + Job Postings parity (email alerts, India letters, custom-level builder, hired→employee, T&A depth, embed still open)

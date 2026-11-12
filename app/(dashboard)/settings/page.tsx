@@ -104,6 +104,10 @@ export default async function SettingsPage() {
                 <p className="font-medium">Letter templates</p>
                 <p className="text-sm text-muted-foreground">Offer, merit, promotion, title, commission, termination</p>
               </Link>
+              <Link href="/settings/access-scopes" className="block p-2 hover:bg-accent rounded">
+                <p className="font-medium">Regional access allowlists</p>
+                <p className="text-sm text-muted-foreground">Location and country scopes for regional_view (fail closed)</p>
+              </Link>
             </div>
           </CardContent>
         </Card>
