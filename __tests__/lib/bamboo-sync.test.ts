@@ -1369,4 +1369,18 @@ describe("CLI args and demo detection", () => {
       })
     ).toBe(false);
   });
+
+  it("can load the Postgres store before DATABASE_URL is set", async () => {
+    const previous = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    jest.resetModules();
+    try {
+      await expect(import("@/lib/bamboo-sync/store")).resolves.toEqual(
+        expect.objectContaining({ createBambooSyncStore: expect.any(Function) })
+      );
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous;
+    }
+  });
 });
