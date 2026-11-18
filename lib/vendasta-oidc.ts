@@ -108,7 +108,6 @@ function vendastaAccessDeniedDetails(
   profile: VendastaIdTokenClaims | undefined
 ) {
   const claims = profile ?? {};
-  const sub = isVendastaSubject(claims.sub) ? claims.sub.trim() : null;
   return {
     reason: decision.reason,
     claimKeys: claimKeyNames(claims),
@@ -119,8 +118,7 @@ function vendastaAccessDeniedDetails(
         ? claims.email_verified
         : null,
     emailDomain: emailDomainFromClaim(claims.email),
-    subIsVendastaSubject: sub !== null,
-    sub,
+    subIsVendastaSubject: isVendastaSubject(claims.sub),
   };
 }
 
