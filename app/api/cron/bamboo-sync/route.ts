@@ -35,9 +35,8 @@ export async function GET(request: NextRequest) {
       bambooIds: result.bambooIds,
       unmappedFields: result.unmappedFields,
     });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Bamboo sync failed";
+  } catch {
     console.error("Bamboo sync failed");
-    return NextResponse.json({ error: "Bamboo sync failed", message }, { status: 500 });
+    return NextResponse.json({ error: "Bamboo sync failed" }, { status: 500 });
   }
 }

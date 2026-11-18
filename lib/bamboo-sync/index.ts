@@ -1,6 +1,7 @@
 export {
   BambooHrClient,
   BambooHrHttpError,
+  assertSafeBambooSubdomain,
   createBambooHrClientFromEnv,
 } from "./client";
 export {

@@ -170,14 +170,18 @@ export function mapEmploymentStatus(input: {
 
 export const BAMBOO_HOURS_PER_WORKDAY = 8;
 
+export function isBambooHourUnit(units?: string | null): boolean {
+  const kind = (units || "").trim().toLowerCase();
+  return /^(hours?|hrs?|hourly)\b/.test(kind) || kind.startsWith("hour");
+}
+
 export function bambooBalanceToDays(
   value: string | number | null | undefined,
   units?: string | null
 ): string {
   const amount = Number.parseFloat(String(value ?? ""));
   if (!Number.isFinite(amount)) return "0.00";
-  const kind = (units || "days").trim().toLowerCase();
-  const days = kind.startsWith("hour") ? amount / BAMBOO_HOURS_PER_WORKDAY : amount;
+  const days = isBambooHourUnit(units) ? amount / BAMBOO_HOURS_PER_WORKDAY : amount;
   return days.toFixed(2);
 }
 

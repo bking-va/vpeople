@@ -13,6 +13,30 @@ export type BambooHrClientOptions = {
 };
 
 const EARLIEST_CHANGED = "2010-01-01T00:00:00Z";
+const SAFE_SUBDOMAIN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/i;
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
+const ALLOWED_TABLES = new Set([
+  "jobInfo",
+  "employmentStatus",
+  "compensation",
+  "emergencyContacts",
+]);
+
+export function assertSafeBambooSubdomain(subdomain: string): string {
+  const value = subdomain.trim();
+  if (!SAFE_SUBDOMAIN.test(value)) {
+    throw new Error("BAMBOOHR_SUBDOMAIN is invalid");
+  }
+  return value;
+}
+
+function pathSegment(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (!SAFE_PATH_SEGMENT.test(trimmed)) {
+    throw new Error(`Invalid BambooHR ${label}`);
+  }
+  return encodeURIComponent(trimmed);
+}
 
 export class BambooHrHttpError extends Error {
   readonly method: string;
@@ -75,7 +99,7 @@ export class BambooHrClient {
 
   constructor(opts: BambooHrClientOptions) {
     this.apiKey = opts.apiKey;
-    this.subdomain = opts.subdomain || "vendasta";
+    this.subdomain = assertSafeBambooSubdomain(opts.subdomain || "vendasta");
     this.fetchImpl = opts.fetch || fetch;
     this.baseUrl = `https://api.bamboohr.com/api/gateway.php/${this.subdomain}/v1`;
   }
@@ -99,6 +123,7 @@ export class BambooHrClient {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       ...init,
       method,
+      redirect: "error",
       headers: this.headers(init.headers as Record<string, string> | undefined),
     });
     if (!response.ok) {
@@ -151,6 +176,7 @@ export class BambooHrClient {
   }
 
   async fetchEmployeesByIds(ids: string[]): Promise<BambooEmployeeRecord[]> {
+    ids = ids.map((id) => id.trim()).filter((id) => SAFE_PATH_SEGMENT.test(id));
     if (ids.length === 0) return [];
     const payload = await this.request("/reports/custom?format=JSON", {
       method: "POST",
@@ -168,7 +194,9 @@ export class BambooHrClient {
     const fetched: BambooEmployeeRecord[] = [];
     for (const id of ids) {
       const fields = IMPORTED_EMPLOYEE_FIELDS.join(",");
-      const row = await this.request(`/employees/${id}?fields=${encodeURIComponent(fields)}`);
+      const row = await this.request(
+        `/employees/${pathSegment(id, "employee id")}?fields=${encodeURIComponent(fields)}`
+      );
       if (row && typeof row === "object") {
         fetched.push({ id, ...(row as object) } as BambooEmployeeRecord);
       }
@@ -180,8 +208,11 @@ export class BambooHrClient {
     table: string,
     since: string = EARLIEST_CHANGED
   ): Promise<Record<string, Array<Record<string, unknown>>>> {
+    if (!ALLOWED_TABLES.has(table)) {
+      throw new Error(`Invalid BambooHR table`);
+    }
     const payload = await this.request(
-      `/employees/changed/tables/${table}?since=${encodeURIComponent(since)}`
+      `/employees/changed/tables/${pathSegment(table, "table")}?since=${encodeURIComponent(since)}`
     );
     const root = asRecord(payload);
     const result: Record<string, Array<Record<string, unknown>>> = {};
@@ -228,17 +259,21 @@ export class BambooHrClient {
     unitsByName: Map<string, string> = new Map()
   ): Promise<Array<{ name: string; balance: string }>> {
     const payload = await this.request(
-      `/employees/${bambooId}/time_off/calculator?start=${asOf}&end=${asOf}`
+      `/employees/${pathSegment(bambooId, "employee id")}/time_off/calculator?start=${encodeURIComponent(asOf)}&end=${encodeURIComponent(asOf)}`
     );
     const list = Array.isArray(payload) ? payload : [];
     return list
       .map((row) => asRecord(row))
       .map((row) => {
         const name = String(row.name ?? row.timeOffType ?? "").trim();
-        const rowUnits =
-          typeof row.units === "string" && !/^\d/.test(row.units.trim())
+        const rawUnits =
+          (typeof row.units === "string" && !/^\d/.test(row.units.trim())
             ? row.units
-            : undefined;
+            : undefined) ||
+          (typeof row.unit === "string" && !/^\d/.test(row.unit.trim())
+            ? row.unit
+            : undefined);
+        const rowUnits = rawUnits;
         const units =
           rowUnits ||
           unitsByName.get(name) ||

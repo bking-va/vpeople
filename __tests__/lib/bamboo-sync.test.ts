@@ -238,6 +238,8 @@ describe("BambooHR field mapping", () => {
     expect(bambooBalanceToDays("12.5", "days")).toBe("12.50");
     expect(bambooBalanceToDays("3", "day")).toBe("3.00");
     expect(bambooBalanceToDays("not-a-number", "hours")).toBe("0.00");
+    expect(bambooBalanceToDays("16", "hrs")).toBe("2.00");
+    expect(bambooBalanceToDays("8", "hourly")).toBe("1.00");
   });
 
   it("parses compensation rates without exposing them via the mapper logs", () => {
@@ -587,7 +589,48 @@ describe("BambooHR client", () => {
       expect(auth).toBe(
         `Basic ${Buffer.from("super-secret-key:x").toString("base64")}`
       );
+      expect((init as RequestInit).redirect).toBe("error");
     }
+  });
+
+  it("rejects a subdomain that could change the BambooHR request URL", () => {
+    expect(
+      () =>
+        new BambooHrClient({
+          apiKey: "test-key",
+          subdomain: "vendasta/../../evil",
+        })
+    ).toThrow(/BAMBOOHR_SUBDOMAIN is invalid/);
+    expect(
+      () =>
+        new BambooHrClient({
+          apiKey: "test-key",
+          subdomain: "vendasta.example.com",
+        })
+    ).toThrow(/BAMBOOHR_SUBDOMAIN is invalid/);
+  });
+
+  it("does not interpolate unsafe employee ids into request paths", async () => {
+    const fetchMock = mockBambooFetch({
+      report: { employees: [] },
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    await client.fetchEmployeesByIds(["101", "1/../secret", "2?x=1"]);
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/\/employees\/101\?fields=/),
+      ])
+    );
+    expect(fetchMock.mock.calls.map((call) => String(call[0])).join("\n")).not.toContain(
+      "../"
+    );
+    expect(fetchMock.mock.calls.map((call) => String(call[0])).join("\n")).not.toContain(
+      "?x=1"
+    );
   });
 });
 
