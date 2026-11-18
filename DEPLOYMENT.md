@@ -122,12 +122,39 @@ AUTH_GOOGLE_ID=<google-oauth-client-id>
 AUTH_GOOGLE_SECRET=<google-oauth-client-secret>
 AUTH_URL=https://your-app.vercel.app
 
-# Bamboo API (comma-separated)
+# Bamboo API (comma-separated) — outbound compatibility shim
 BAMBOO_API_KEYS=key1,key2,key3
+
+# BambooHR inbound sync (read-only). Set in Vercel for the hourly cron.
+# Do not put the key in chat, logs, or the repo.
+BAMBOOHR_API_KEY=<bamboohr-api-key>
+BAMBOOHR_SUBDOMAIN=vendasta
+
+# Vercel Cron
+CRON_SECRET=<generate-a-long-random-string>
 
 # Optional: Dev auth bypass (set to "false" in production)
 ENABLE_DEV_AUTH=false
 ```
+
+### First BambooHR import (production)
+
+Do **not** run this until migration `0030_bamboo_hr_import` has been applied. Put the Neon URL in `/tmp/db_url.txt` (same as `scripts/migrate-production.ts`).
+
+```bash
+# 1. Apply migrations
+npx tsx scripts/migrate-production.ts
+
+# 2. Dry run — fetch and map only (counts + Bamboo ids, no writes)
+npx tsx scripts/bamboo-sync.ts --dry-run /tmp/db_url.txt
+
+# 3. Real import — delete seeded demo employees, then upsert from BambooHR
+npx tsx scripts/bamboo-sync.ts --replace-demo /tmp/db_url.txt
+```
+
+The real BambooHR record for `bking@vendasta.com` becomes `full_admin` and inherits E001's `vendasta_sub` so Vendasta SSO keeps working. Everyone else is imported as access level `employee`. Personal (non-`@vendasta.com`) work emails stay access-restricted. SIN/SSN and bank fields are never imported.
+
+Hourly cron: `GET /api/cron/bamboo-sync` on `0 * * * *`, authorized with `CRON_SECRET`. Without `BAMBOOHR_API_KEY` it is a logged no-op.
 
 ### Vercel One-Click Deploy
 

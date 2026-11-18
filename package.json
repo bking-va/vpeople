@@ -12,6 +12,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:studio": "drizzle-kit studio",
     "db:check": "tsx scripts/check-migrations.ts",
+    "bamboo:sync": "tsx scripts/bamboo-sync.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:integration": "jest --config=jest.integration.config.js"

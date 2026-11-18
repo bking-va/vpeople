@@ -211,6 +211,13 @@
       "when": 1794475232811,
       "tag": "0029_parity_security_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795037785834,
+      "tag": "0030_bamboo_hr_import",
+      "breakpoints": true
     }
   ]
 }

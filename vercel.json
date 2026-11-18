@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/accrue-time-off",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/bamboo-sync",
+      "schedule": "0 * * * *"
     }
   ]
 }

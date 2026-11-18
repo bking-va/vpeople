@@ -202,6 +202,7 @@ export const seatsRelations = relations(seats, ({ one }) => ({
 export const employees = pgTable("employees", {
   id: serial("id").primaryKey(),
   employeeNumber: text("employee_number").unique(),
+  bambooId: text("bamboo_id").unique(),
   userId: text("user_id").references(() => users.id),
   vendastaSub: text("vendasta_sub").unique(),
   firstName: text("first_name").notNull(),
@@ -1192,6 +1193,22 @@ export const letterTemplates = pgTable("letter_templates", {
   requiresSignature: boolean("requires_signature").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const bambooSyncRuns = pgTable("bamboo_sync_runs", {
+  id: serial("id").primaryKey(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+  mode: text("mode").notNull(),
+  status: text("status").notNull(),
+  employeesFetched: integer("employees_fetched").default(0).notNull(),
+  employeesCreated: integer("employees_created").default(0).notNull(),
+  employeesUpdated: integer("employees_updated").default(0).notNull(),
+  demoRemoved: integer("demo_removed").default(0).notNull(),
+  latestChanged: text("latest_changed"),
+  unmappedFields: jsonb("unmapped_fields").$type<string[]>(),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const scheduledReports = pgTable("scheduled_reports", {
