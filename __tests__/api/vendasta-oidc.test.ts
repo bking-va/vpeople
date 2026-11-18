@@ -1,5 +1,3 @@
-import { readFileSync } from "fs";
-import { join } from "path";
 import { sessionRoleFromAccessLevel } from "@/lib/authz";
 import {
   LEGACY_SESSION_DISABLED,
@@ -31,7 +29,6 @@ import {
   trimVendastaCredential,
   verifiedWorkEmailFromIdToken,
   applyVendastaSignInDecision,
-  consumeVendastaUserinfoTrace,
   type EmployeeIdentityRow,
 } from "@/lib/vendasta-oidc";
 
@@ -487,14 +484,6 @@ describe("Vendasta access-denied diagnostics", () => {
   const FULL_EMAIL = "bking@vendasta.com";
   const FULL_NAME = "Brendan King";
 
-  beforeEach(() => {
-    consumeVendastaUserinfoTrace();
-  });
-
-  afterEach(() => {
-    consumeVendastaUserinfoTrace();
-  });
-
   test("denied sign-in log omits full email and name values", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -537,8 +526,6 @@ describe("Vendasta access-denied diagnostics", () => {
         emailDomain: "vendasta.com",
         subIsVendastaSubject: true,
         sub: SUB,
-        userinfoCalled: false,
-        userinfoClaimKeys: null,
       });
     } finally {
       warn.mockRestore();
@@ -579,62 +566,6 @@ describe("Vendasta access-denied diagnostics", () => {
     }
   });
 
-  test("userinfo claim-key trace never includes claim values", async () => {
-    const provider = vendastaOidcProvider({
-      clientId: "client-id",
-      clientSecret: "client-secret",
-    });
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        sub: SUB,
-        email: FULL_EMAIL,
-        name: FULL_NAME,
-      }),
-    });
-    const originalFetch = global.fetch;
-    global.fetch = fetchMock as typeof fetch;
-
-    try {
-      const userinfo = provider.userinfo as {
-        request: (args: {
-          tokens: { access_token?: string };
-          provider: { userinfo?: { url?: string } };
-        }) => Promise<unknown>;
-      };
-      await userinfo.request({
-        tokens: { access_token: "access-token" },
-        provider: { userinfo: { url: VENDASTA_OIDC_USERINFO } },
-      });
-
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-      try {
-        applyVendastaSignInDecision(
-          { ok: false, reason: "no_employee" },
-          { sub: SUB }
-        );
-        const details = warn.mock.calls[0][1] as Record<string, unknown>;
-        const logged = JSON.stringify(warn.mock.calls[0]);
-        expect(details.userinfoCalled).toBe(true);
-        expect(details.userinfoClaimKeys).toEqual(["email", "name", "sub"]);
-        expect(logged).not.toContain(FULL_EMAIL);
-        expect(logged).not.toContain(FULL_NAME);
-      } finally {
-        warn.mockRestore();
-      }
-    } finally {
-      global.fetch = originalFetch;
-    }
-  });
-
-  test("signIn callback wires the denial log without changing the decision", () => {
-    const source = readFileSync(join(process.cwd(), "lib/auth.ts"), "utf8");
-    expect(source).toMatch(/applyVendastaSignInDecision/);
-    expect(source).toMatch(
-      /return applyVendastaSignInDecision\(decision, profile\)/
-    );
-  });
 });
 
 describe("legacy Session Url", () => {

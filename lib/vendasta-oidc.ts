@@ -86,17 +86,7 @@ export type VendastaAccessDecision =
       reason: "invalid_sub" | "no_employee" | "terminated" | "sub_mismatch";
     };
 
-type VendastaUserinfoTrace = {
-  called: boolean;
-  claimKeys: string[] | null;
-};
-
 const VENDASTA_ACCESS_DENIED_LOG = "[vendasta-sso] access denied";
-
-let lastUserinfoTrace: VendastaUserinfoTrace = {
-  called: false,
-  claimKeys: null,
-};
 
 function claimKeyNames(value: unknown): string[] {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -113,23 +103,9 @@ function emailDomainFromClaim(email: unknown): string | null {
   return trimmed.slice(at + 1).toLowerCase();
 }
 
-function recordVendastaUserinfoProfile(profile: unknown): void {
-  lastUserinfoTrace = {
-    called: true,
-    claimKeys: claimKeyNames(profile),
-  };
-}
-
-export function consumeVendastaUserinfoTrace(): VendastaUserinfoTrace {
-  const current = lastUserinfoTrace;
-  lastUserinfoTrace = { called: false, claimKeys: null };
-  return current;
-}
-
 function vendastaAccessDeniedDetails(
   decision: Extract<VendastaAccessDecision, { ok: false }>,
-  profile: VendastaIdTokenClaims | undefined,
-  userinfo: VendastaUserinfoTrace
+  profile: VendastaIdTokenClaims | undefined
 ) {
   const claims = profile ?? {};
   const sub = isVendastaSubject(claims.sub) ? claims.sub.trim() : null;
@@ -145,8 +121,6 @@ function vendastaAccessDeniedDetails(
     emailDomain: emailDomainFromClaim(claims.email),
     subIsVendastaSubject: sub !== null,
     sub,
-    userinfoCalled: userinfo.called,
-    userinfoClaimKeys: userinfo.called ? userinfo.claimKeys : null,
   };
 }
 
@@ -155,11 +129,10 @@ export function applyVendastaSignInDecision(
   decision: VendastaAccessDecision,
   profile: VendastaIdTokenClaims | undefined
 ): boolean {
-  const userinfo = consumeVendastaUserinfoTrace();
   if (!decision.ok) {
     console.warn(
       VENDASTA_ACCESS_DENIED_LOG,
-      vendastaAccessDeniedDetails(decision, profile, userinfo)
+      vendastaAccessDeniedDetails(decision, profile)
     );
   }
   return decision.ok;
@@ -397,10 +370,7 @@ export function vendastaOidcProvider(options: {
             `Vendasta userinfo request failed with HTTP ${response.status}`
           );
         }
-        const body = await response.json();
-        // Auth.js v5 skips this request when type is oidc and idToken is true.
-        recordVendastaUserinfoProfile(body);
-        return body;
+        return await response.json();
       },
     },
     checks: ["pkce", "state", "nonce"],
