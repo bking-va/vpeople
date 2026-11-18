@@ -484,7 +484,7 @@ describe("Vendasta access-denied diagnostics", () => {
   const FULL_EMAIL = "bking@vendasta.com";
   const FULL_NAME = "Brendan King";
 
-  test("denied sign-in log omits full email and name values", () => {
+  test("denied sign-in log omits full email, name, and raw OIDC sub", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const allowed = applyVendastaSignInDecision(
@@ -510,6 +510,8 @@ describe("Vendasta access-denied diagnostics", () => {
       expect(logged).not.toContain(FULL_NAME);
       expect(logged).not.toContain("Brendan");
       expect(logged).not.toContain("King");
+      expect(logged).not.toContain(SUB);
+      expect(details).not.toHaveProperty("sub");
       expect(details).toEqual({
         reason: "no_employee",
         claimKeys: [
@@ -525,7 +527,6 @@ describe("Vendasta access-denied diagnostics", () => {
         emailVerified: false,
         emailDomain: "vendasta.com",
         subIsVendastaSubject: true,
-        sub: SUB,
       });
     } finally {
       warn.mockRestore();
@@ -557,10 +558,11 @@ describe("Vendasta access-denied diagnostics", () => {
       const logged = JSON.stringify(warn.mock.calls[0]);
       expect(logged).not.toContain(FULL_EMAIL);
       expect(logged).not.toContain(FULL_NAME);
+      expect(logged).not.toContain(SUB);
       const details = warn.mock.calls[0][1] as Record<string, unknown>;
       expect(details.reason).toBe("invalid_sub");
       expect(details.subIsVendastaSubject).toBe(false);
-      expect(details.sub).toBeNull();
+      expect(details).not.toHaveProperty("sub");
     } finally {
       warn.mockRestore();
     }
