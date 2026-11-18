@@ -1,10 +1,13 @@
 import NextAuth, { DefaultSession } from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
-import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "./db";
 import { users, employees, accessLevels } from "./db/schema";
 import { eq, sql } from "drizzle-orm";
+import {
+  authPersistence,
+  createDrizzleAuthAdapter,
+} from "./auth-adapter";
 import {
   devLoginSessionRole,
   isDevLoginEnabled,
@@ -41,10 +44,13 @@ declare module "next-auth" {
 }
 
 const ENABLE_DEV_AUTH = isDevLoginEnabled();
+const persistence = authPersistence(ENABLE_DEV_AUTH);
 
 const authConfig = {
   trustHost: true,
-  adapter: ENABLE_DEV_AUTH ? undefined : DrizzleAdapter(db),
+  adapter: persistence.useDrizzleAdapter
+    ? createDrizzleAuthAdapter(db)
+    : undefined,
   providers: [
     ...(isVendastaOidcConfigured()
       ? [
@@ -157,7 +163,7 @@ const authConfig = {
     }),
   ],
   session: {
-    strategy: ENABLE_DEV_AUTH ? ("jwt" as const) : ("database" as const),
+    strategy: persistence.strategy,
   },
   callbacks: {
     async signIn({

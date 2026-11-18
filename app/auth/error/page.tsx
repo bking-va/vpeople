@@ -7,6 +7,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { authErrorDescription } from "@/lib/auth-error-message";
+import { isVendastaOidcConfigured } from "@/lib/vendasta-oidc";
 
 export default async function AuthErrorPage({
   searchParams,
@@ -14,6 +16,9 @@ export default async function AuthErrorPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  const description = authErrorDescription(error, {
+    vendastaConfigured: isVendastaOidcConfigured(),
+  });
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
@@ -22,13 +27,7 @@ export default async function AuthErrorPage({
           <CardTitle className="text-2xl font-bold text-destructive">
             Authentication Error
           </CardTitle>
-          <CardDescription>
-            {error === "AccessDenied"
-              ? "This Vendasta identity is not authorized for vPeople."
-              : error === "Configuration"
-                ? "Vendasta SSO is not configured in this environment."
-                : "There was a problem signing you in. Please try again."}
-          </CardDescription>
+          <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild className="w-full">

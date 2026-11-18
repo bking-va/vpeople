@@ -66,7 +66,7 @@ export const users = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name"),
   email: text("email").unique().notNull(),
-  emailVerified: timestamp("email_verified"),
+  emailVerified: timestamp("email_verified", { mode: "date" }),
   image: text("image"),
   role: userRoleEnum("role").default("employee").notNull(),
   employeeId: integer("employee_id"),
@@ -77,7 +77,7 @@ export const sessions = pgTable("sessions", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  expires: timestamp("expires").notNull(),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
 export const accounts = pgTable(
@@ -109,7 +109,7 @@ export const verificationTokens = pgTable(
   {
     identifier: text("identifier").notNull(),
     token: text("token").notNull(),
-    expires: timestamp("expires").notNull(),
+    expires: timestamp("expires", { mode: "date" }).notNull(),
   },
   (vt) => ({
     compoundKey: primaryKey({ columns: [vt.identifier, vt.token] }),
