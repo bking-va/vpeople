@@ -8,7 +8,7 @@ async function captureScreenshots() {
   try {
     console.log("1. Signing in...");
     await page.goto("http://localhost:3001/auth/signin");
-    await page.fill('input[type="email"]', "brendan.king@vendasta.com");
+    await page.fill('input[type="email"]', "bking@vendasta.com");
     await page.click('button:has-text("Dev Login")');
     await page.waitForURL((url) => url.pathname.includes('/people'), { timeout: 10000 });
     console.log("✅ Logged in successfully");

@@ -648,11 +648,25 @@ export async function runSeed(options: { reset?: boolean } = {}) {
 
   console.log("Creating CEO...");
 
+  const ceoEmployeeNumber = "E001";
+  const ceoEmail = `bking@${VENDASTA_DOMAIN}`;
+  const legacyCeoEmail = `brendan.king@${VENDASTA_DOMAIN}`;
+
+  await db
+    .update(schema.employees)
+    .set({ email: ceoEmail, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.employees.employeeNumber, ceoEmployeeNumber),
+        eq(schema.employees.email, legacyCeoEmail)
+      )
+    );
+
   const ceoValue = {
-    employeeNumber: "E001",
+    employeeNumber: ceoEmployeeNumber,
     firstName: "Brendan",
     lastName: "King",
-    email: `brendan.king@${VENDASTA_DOMAIN}`,
+    email: ceoEmail,
     jobTitle: "Chief Executive Officer",
     departmentId: seniorLeadership.id,
     divisionId: executiveDiv.id,
@@ -671,7 +685,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   const [ceo] = await db
     .select()
     .from(schema.employees)
-    .where(eq(schema.employees.email, `brendan.king@${VENDASTA_DOMAIN}`))
+    .where(eq(schema.employees.employeeNumber, ceoEmployeeNumber))
     .limit(1);
 
   console.log("Creating C-suite and department heads (6 direct reports to CEO)...");

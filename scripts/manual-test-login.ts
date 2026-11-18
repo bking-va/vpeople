@@ -9,7 +9,7 @@ async function manualTest() {
   await page.goto("http://localhost:3001/auth/signin");
 
   console.log("Filling email...");
-  await page.fill('input[type="email"]', "brendan.king@vendasta.com");
+  await page.fill('input[type="email"]', "bking@vendasta.com");
 
   console.log("Clicking Dev Login...");
   await page.click('button:has-text("Dev Login")');

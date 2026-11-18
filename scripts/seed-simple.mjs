@@ -43,6 +43,11 @@ async function seed() {
     `);
     
     console.log('Creating CEO...');
+    await client.query(`
+      UPDATE employees
+      SET email = 'bking@vendasta.com', updated_at = now()
+      WHERE employee_number = 'E001' AND email = 'brendan.king@vendasta.com'
+    `);
     const ceoRes = await client.query(`
       INSERT INTO employees (
         employee_number, first_name, last_name, email, job_title,
@@ -50,7 +55,7 @@ async function seed() {
         job_family_id, job_level_id, access_level, work_phone, extension
       )
       SELECT
-        'E001', 'Brendan', 'King', 'brendan.king@vendasta.com', 'Chief Executive Officer',
+        'E001', 'Brendan', 'King', 'bking@vendasta.com', 'Chief Executive Officer',
         d.id, l.id, '2008-03-15', 'full_time',
         jf.id, jl.id, 'full_admin', '+1-306-955-5512', '101'
       FROM departments d, locations l, job_families jf, job_levels jl
@@ -86,7 +91,7 @@ async function seedMore() {
       )
       SELECT
         'E002', 'Sarah', 'Martinez', 'sarah.martinez@vendasta.com', 'Senior Developer',
-        d.id, l.id, (SELECT id FROM employees WHERE email = 'brendan.king@vendasta.com'), '2020-05-15', 'full_time',
+        d.id, l.id, (SELECT id FROM employees WHERE employee_number = 'E001'), '2020-05-15', 'full_time',
         jf.id, jl.id, 'employee', '+1-306-555-0100', '102'
       FROM departments d, locations l, job_families jf, job_levels jl
       WHERE d.name = 'Technology' AND l.name = 'Saskatoon HQ'
@@ -108,7 +113,7 @@ async function seedMore() {
       INSERT INTO time_off_balances (employee_id, policy_id, balance)
       SELECT e.id, p.id, 15.5
       FROM employees e, time_off_policies p
-      WHERE e.email IN ('brendan.king@vendasta.com', 'sarah.martinez@vendasta.com')
+      WHERE e.email IN ('bking@vendasta.com', 'sarah.martinez@vendasta.com')
         AND p.name = 'Canada - Vacation'
       ON CONFLICT DO NOTHING;
     `);
@@ -140,7 +145,7 @@ async function seedMore() {
         '["Overall company strategy and vision","Board relations and investor management","Executive team leadership"]'::jsonb,
         id,
         false
-      FROM employees WHERE email = 'brendan.king@vendasta.com'
+      FROM employees WHERE employee_number = 'E001'
       ON CONFLICT DO NOTHING;
     `);
     

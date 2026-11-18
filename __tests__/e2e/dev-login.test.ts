@@ -11,7 +11,7 @@ test.describe("Dev Login", () => {
     const emailInput = page.locator('input[type="email"]');
     await expect(emailInput).toBeVisible();
 
-    await emailInput.fill("brendan.king@vendasta.com");
+    await emailInput.fill("bking@vendasta.com");
 
     const devLoginButton = page.locator('button:has-text("Dev Login")');
     await devLoginButton.click();
