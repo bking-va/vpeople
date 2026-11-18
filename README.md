@@ -30,6 +30,7 @@ vPeople is Vendasta's internal HR management system, built to replace BambooHR. 
 - **Onboarding/Offboarding**: Task management with templates and checklists
 - **Admin Panel**: Department, division, team, and location management
 - **BambooHR-Compatible API**: Read-only API shim for legacy integrations
+- **BambooHR inbound sync**: One-way, read-only import of real Vendasta employees from BambooHR into vPeople
 
 ## Tech Stack
 
@@ -337,7 +338,6 @@ The following features are stubbed or partially implemented for future developme
 - **Hiring embed widget** (public careers page + apply form exist; hired candidates can prefill `/people/new`, not auto-provisioned)
 - **Performance reviews** (VOS integration planned)
 - **Real-time VOS seat sync** (integration boundary created)
-- **BambooHR data import** (currently uses seed data only; import work is separate)
 - **Email alerts / Resend** and scheduled report delivery
 - **India-specific letter templates** and full custom access-level builder
 
@@ -354,8 +354,37 @@ The following features are stubbed or partially implemented for future developme
 | `AUTH_GOOGLE_SECRET` | No | Leftover Google provider; not the vPeople SSO path |
 | `AUTH_URL` | Yes (prod) | Public app URL |
 | `ENABLE_DEV_AUTH` | No | Set to `true` to enable dev login bypass |
-| `BAMBOO_API_KEYS` | Yes | Comma-separated list of valid API keys |
+| `CRON_SECRET` | Yes (prod) | Bearer token for Vercel Cron routes; fail-closed if unset |
+| `BAMBOO_API_KEYS` | Yes | Comma-separated list of valid API keys for the *outbound* Bamboo-compatible API |
+| `BAMBOOHR_API_KEY` | Yes (import) | BambooHR REST API key (username; password is `x`). Cron no-ops if unset |
+| `BAMBOOHR_SUBDOMAIN` | No | BambooHR company subdomain (default `vendasta`) |
 | `SEED_TOKEN` | No | Secret token for `/api/admin/seed` endpoint (disables endpoint if unset) |
+
+## BambooHR → vPeople import
+
+vPeople can pull employees from BambooHR (GET-only; the custom report endpoint is a read). It never writes back to BambooHR, never logs PII, and does not send email or webhooks.
+
+Apply migrations through `drizzle/0031_bamboo_sync_security.sql` first (`npm run db:migrate`).
+
+Dry run (fetch + map, print counts and Bamboo ids, write nothing):
+
+```bash
+npx tsx scripts/bamboo-sync.ts --dry-run /tmp/db_url.txt
+```
+
+First production import (removes seeded demo employees, then upserts real records). Keep `bking@vendasta.com` as Admin and carry over E001's `vendasta_sub`:
+
+```bash
+npx tsx scripts/bamboo-sync.ts --replace-demo /tmp/db_url.txt
+```
+
+`DATABASE_URL` can also come from the environment instead of a file path. Do not print the API key or employee PII; the CLI logs counts and Bamboo ids only.
+
+Hourly incremental sync is `GET /api/cron/bamboo-sync` (Vercel Cron `0 * * * *`, `Authorization: Bearer $CRON_SECRET`). It uses BambooHR `employees/changed` since the last successful run. If `BAMBOOHR_API_KEY` is unset the route logs a skip and records a `skipped` row in `bamboo_sync_runs`.
+
+Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, job/status/compensation history, emergency contacts, time-off types and current balances. Hourly Bamboo balances are converted to days at 8 hours/day before they are stored, matching vPeople’s day-based deductions. Bamboo remains the system of record for entitlement: the imported amount is stored as `source_balance`, and spendable credit is that source plus local usage/manual adjustments so an hourly re-sync cannot restore already-approved leave. If a changed employee’s new supervisor is not in vPeople yet, the former `managerId` is cleared (so they lose leave-approval and manager-scoped access) and the link is retried once that supervisor exists.
+
+Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, time-off *request* history (avoids approval side effects), custom Bamboo fields, FLSA/payroll flags. Compensation is stored but never printed.
 
 ## Contributing
 

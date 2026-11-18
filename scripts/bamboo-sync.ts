@@ -1,0 +1,64 @@
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { Pool as PgPool } from "pg";
+import ws from "ws";
+import * as schema from "../lib/db/schema";
+import { createBambooHrClientFromEnv } from "../lib/bamboo-sync/client";
+import { parseBambooSyncArgs, readDatabaseUrl } from "../lib/bamboo-sync/cli";
+import { createBambooSyncStore } from "../lib/bamboo-sync/store";
+import { formatSyncSummary, runBambooSync } from "../lib/bamboo-sync/sync";
+
+function createDb(databaseUrl: string) {
+  const isNeonUrl = databaseUrl.includes("neon.tech");
+  if (isNeonUrl) {
+    if (typeof WebSocket === "undefined") {
+      neonConfig.webSocketConstructor = ws;
+    }
+    const pool = new NeonPool({ connectionString: databaseUrl });
+    return {
+      db: drizzleNeon(pool, { schema }),
+      end: () => pool.end(),
+    };
+  }
+  const pool = new PgPool({ connectionString: databaseUrl });
+  return {
+    db: drizzlePg(pool, { schema }),
+    end: () => pool.end(),
+  };
+}
+
+async function main() {
+  const args = parseBambooSyncArgs(process.argv.slice(2));
+  const databaseUrl = readDatabaseUrl({ dbUrlFile: args.dbUrlFile });
+  process.env.DATABASE_URL = databaseUrl;
+
+  const { db, end } = createDb(databaseUrl);
+  const store = createBambooSyncStore(db);
+  const client = createBambooHrClientFromEnv();
+
+  try {
+    const result = await runBambooSync({
+      client,
+      store,
+      mode: args.incremental ? "incremental" : "full",
+      dryRun: args.dryRun,
+      replaceDemo: args.replaceDemo,
+      log: (message) => {
+        console.log(message);
+      },
+    });
+    console.log(formatSyncSummary(result));
+    if (result.status === "failed") {
+      process.exitCode = 1;
+    }
+  } finally {
+    await end();
+  }
+}
+
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : "Bamboo sync failed";
+  console.error(message);
+  process.exit(1);
+});

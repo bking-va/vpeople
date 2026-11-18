@@ -131,6 +131,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     await db.execute(sql`TRUNCATE TABLE scheduled_reports CASCADE`);
     await db.execute(sql`TRUNCATE TABLE holidays CASCADE`);
     await db.execute(sql`TRUNCATE TABLE audit_logs CASCADE`);
+    await db.execute(sql`TRUNCATE TABLE bamboo_sync_runs CASCADE`);
     await db.execute(sql`TRUNCATE TABLE rate_limits CASCADE`);
     await db.execute(sql`TRUNCATE TABLE webhooks CASCADE`);
     await db.execute(sql`TRUNCATE TABLE announcements CASCADE`);

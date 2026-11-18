@@ -15,6 +15,11 @@ import {
 import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { createAuditLog } from "@/lib/audit";
 import { isApproverBlockedFromActing } from "@/lib/approval-errors";
+import {
+  canActOnApprovalStep,
+  hasUnresolvedSupervisor,
+  resolveManagerRoleStep,
+} from "@/lib/approval-manager-step";
 import { recordTimeOffUsageAdjustment } from "@/lib/time-off-adjustments";
 
 export { isApproverBlockedFromActing } from "@/lib/approval-errors";
@@ -74,6 +79,7 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
   const employeeManagerFields = {
     id: employees.id,
     managerId: employees.managerId,
+    pendingSupervisorBambooId: employees.pendingSupervisorBambooId,
   };
 
   // Fetch requester to determine manager — never pull SIN/SSN/compensation.
@@ -120,31 +126,28 @@ export async function createApprovalRequest(params: CreateApprovalRequestParams)
     let stepStatus: "pending" | "approved" | "rejected" | "skipped" = "pending";
 
     // Determine approver based on role
-    if (step.approverRole === "manager") {
-      if (affectedEmployee.managerId) {
-        approverId = affectedEmployee.managerId;
-      } else {
-        // No manager (e.g., CEO) - auto-approve this step
-        stepStatus = "approved";
-      }
-    } else if (step.approverRole === "manager_manager") {
-      if (affectedEmployee.managerId) {
-        // Get manager's manager
+    if (step.approverRole === "manager" || step.approverRole === "manager_manager") {
+      let skipLevelManagerId: number | null | undefined;
+      if (
+        step.approverRole === "manager_manager" &&
+        affectedEmployee.managerId &&
+        !hasUnresolvedSupervisor(affectedEmployee.pendingSupervisorBambooId)
+      ) {
         const [manager] = await db
           .select({ managerId: employees.managerId })
           .from(employees)
           .where(eq(employees.id, affectedEmployee.managerId))
           .limit(1);
-        if (manager && manager.managerId) {
-          approverId = manager.managerId;
-        } else {
-          // Manager has no manager - auto-approve this step
-          stepStatus = "approved";
-        }
-      } else {
-        // No manager - auto-approve this step
-        stepStatus = "approved";
+        skipLevelManagerId = manager?.managerId ?? null;
       }
+      const resolved = resolveManagerRoleStep({
+        role: step.approverRole,
+        managerId: affectedEmployee.managerId,
+        skipLevelManagerId,
+        pendingSupervisorBambooId: affectedEmployee.pendingSupervisorBambooId,
+      });
+      approverId = resolved.approverId;
+      stepStatus = resolved.status;
     } else if (step.approverRole === "admin" || step.approverRole === "hr" || step.approverRole === "full_admin") {
       // For admin/HR/full_admin, leave null - shown to all with that access level
       approverId = null;
@@ -287,12 +290,14 @@ export async function approveStep(
     throw new Error("You cannot give final approval to a request you submitted");
   }
 
-  // Check authorization: approver must be the assigned approver OR a full_admin for admin steps
-  const isAssignedApprover = step.approverId === approverId;
-  const isFullAdmin = approver.accessLevel === "full_admin";
-  const isAdminStepWithFullAdmin = workflowStep.approverRole === "full_admin" && isFullAdmin;
-
-  if (!isAssignedApprover && !isAdminStepWithFullAdmin) {
+  if (
+    !canActOnApprovalStep({
+      assignedApproverId: step.approverId,
+      actorId: approverId,
+      actorAccessLevel: approver.accessLevel,
+      approverRole: workflowStep.approverRole,
+    })
+  ) {
     throw new Error("You are not authorized to approve this step");
   }
 
@@ -707,12 +712,14 @@ export async function rejectStep(
     throw new Error("You cannot reject a request you submitted");
   }
 
-  // Check authorization
-  const isAssignedApprover = step.approverId === approverId;
-  const isFullAdmin = approver.accessLevel === "full_admin";
-  const isAdminStepWithFullAdmin = workflowStep.approverRole === "full_admin" && isFullAdmin;
-
-  if (!isAssignedApprover && !isAdminStepWithFullAdmin) {
+  if (
+    !canActOnApprovalStep({
+      assignedApproverId: step.approverId,
+      actorId: approverId,
+      actorAccessLevel: approver.accessLevel,
+      approverRole: workflowStep.approverRole,
+    })
+  ) {
     throw new Error("You are not authorized to reject this step");
   }
 
@@ -879,4 +886,99 @@ export async function getApprovalRequestForEntity(
     request,
     steps,
   };
+}
+
+const MANAGER_ROLE_STEP_ROLES = ["manager", "manager_manager"] as const;
+const REQUESTER_OWNED_ENTITY_TYPES = ["time_off_request", "timesheet"] as const;
+
+/** Drizzle connection or transaction used for manager-step rebinding. */
+export type ApprovalQueryExecutor = {
+  select: (...args: any[]) => any;
+  update: (...args: any[]) => any;
+};
+
+async function pendingManagerRoleStepsForEmployee(
+  employeeId: number,
+  executor: ApprovalQueryExecutor
+) {
+  return executor
+    .select({
+      step: approvalRequestSteps,
+      request: approvalRequests,
+      workflowStep: approvalWorkflowSteps,
+    })
+    .from(approvalRequestSteps)
+    .innerJoin(
+      approvalRequests,
+      eq(approvalRequestSteps.approvalRequestId, approvalRequests.id)
+    )
+    .innerJoin(
+      approvalWorkflowSteps,
+      and(
+        eq(approvalWorkflowSteps.workflowId, approvalRequests.workflowId),
+        eq(approvalWorkflowSteps.stepOrder, approvalRequestSteps.stepOrder)
+      )
+    )
+    .where(
+      and(
+        eq(approvalRequests.status, "pending"),
+        eq(approvalRequestSteps.status, "pending"),
+        inArray(approvalWorkflowSteps.approverRole, [...MANAGER_ROLE_STEP_ROLES]),
+        or(
+          and(
+            inArray(approvalRequests.entityType, [...REQUESTER_OWNED_ENTITY_TYPES]),
+            eq(approvalRequests.requesterId, employeeId)
+          ),
+          and(
+            inArray(approvalRequests.entityType, AFFECTED_EMPLOYEE_ENTITY_TYPES),
+            eq(approvalRequests.entityId, employeeId)
+          )
+        )
+      )
+    );
+}
+
+/** Drop the former manager from still-pending manager-role steps. Never auto-approve. */
+export async function unassignPendingManagerApprovals(
+  employeeId: number,
+  executor: ApprovalQueryExecutor = db
+) {
+  const rows = await pendingManagerRoleStepsForEmployee(employeeId, executor);
+  for (const row of rows) {
+    await executor
+      .update(approvalRequestSteps)
+      .set({ approverId: null })
+      .where(eq(approvalRequestSteps.id, row.step.id));
+  }
+}
+
+/** Point still-pending manager-role steps at the newly resolved supervisor. */
+export async function rebindPendingManagerApprovals(
+  employeeId: number,
+  managerId: number,
+  executor: ApprovalQueryExecutor = db
+) {
+  const rows = await pendingManagerRoleStepsForEmployee(employeeId, executor);
+  let skipLevelManagerId: number | null | undefined;
+
+  for (const row of rows) {
+    const role = row.workflowStep.approverRole;
+    if (role !== "manager" && role !== "manager_manager") continue;
+
+    if (role === "manager_manager" && skipLevelManagerId === undefined) {
+      const [manager] = await executor
+        .select({ managerId: employees.managerId })
+        .from(employees)
+        .where(eq(employees.id, managerId))
+        .limit(1);
+      skipLevelManagerId = manager?.managerId ?? null;
+    }
+
+    const nextApproverId =
+      role === "manager" ? managerId : skipLevelManagerId ?? null;
+    await executor
+      .update(approvalRequestSteps)
+      .set({ approverId: nextApproverId })
+      .where(eq(approvalRequestSteps.id, row.step.id));
+  }
 }
