@@ -70,6 +70,11 @@ async function seed() {
     
     console.log('Creating CEO...');
     await client.query(`
+      UPDATE employees
+      SET email = 'bking@vendasta.com', updated_at = now()
+      WHERE employee_number = 'E001' AND email = 'brendan.king@vendasta.com'
+    `);
+    await client.query(`
       INSERT INTO employees (
         employee_number, first_name, last_name, email, job_title,
         department_id, location_id, hire_date, employment_status,
@@ -88,7 +93,7 @@ async function seed() {
     `);
     
     console.log('Creating more employees...');
-    const ceoId = (await client.query("SELECT id FROM employees WHERE email = 'bking@vendasta.com'")).rows[0].id;
+    const ceoId = (await client.query("SELECT id FROM employees WHERE employee_number = 'E001'")).rows[0].id;
     
     await client.query(`
       INSERT INTO employees (

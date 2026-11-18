@@ -43,6 +43,11 @@ async function seed() {
     `);
     
     console.log('Creating CEO...');
+    await client.query(`
+      UPDATE employees
+      SET email = 'bking@vendasta.com', updated_at = now()
+      WHERE employee_number = 'E001' AND email = 'brendan.king@vendasta.com'
+    `);
     const ceoRes = await client.query(`
       INSERT INTO employees (
         employee_number, first_name, last_name, email, job_title,
@@ -86,7 +91,7 @@ async function seedMore() {
       )
       SELECT
         'E002', 'Sarah', 'Martinez', 'sarah.martinez@vendasta.com', 'Senior Developer',
-        d.id, l.id, (SELECT id FROM employees WHERE email = 'bking@vendasta.com'), '2020-05-15', 'full_time',
+        d.id, l.id, (SELECT id FROM employees WHERE employee_number = 'E001'), '2020-05-15', 'full_time',
         jf.id, jl.id, 'employee', '+1-306-555-0100', '102'
       FROM departments d, locations l, job_families jf, job_levels jl
       WHERE d.name = 'Technology' AND l.name = 'Saskatoon HQ'
@@ -140,7 +145,7 @@ async function seedMore() {
         '["Overall company strategy and vision","Board relations and investor management","Executive team leadership"]'::jsonb,
         id,
         false
-      FROM employees WHERE email = 'bking@vendasta.com'
+      FROM employees WHERE employee_number = 'E001'
       ON CONFLICT DO NOTHING;
     `);
     
