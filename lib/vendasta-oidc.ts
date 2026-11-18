@@ -17,8 +17,8 @@ export const VENDASTA_OIDC_JWKS =
 export const VENDASTA_OIDC_END_SESSION =
   "https://sso-api-prod.apigateway.co/oauth2/logout";
 
-/** Discovery scopes_supported is openid,profile. email exists but is restricted. */
-export const VENDASTA_OIDC_SCOPES = "openid profile";
+/** Admin Center lists a standard `email` scope ("View Email") with no restriction flag, plus openid and profile. */
+export const VENDASTA_OIDC_SCOPES = "openid profile email";
 
 export const VENDASTA_ENTRY_PATH = "/auth/vendasta";
 export const VENDASTA_CALLBACK_PATH = "/api/auth/callback/vendasta";
@@ -85,6 +85,58 @@ export type VendastaAccessDecision =
       ok: false;
       reason: "invalid_sub" | "no_employee" | "terminated" | "sub_mismatch";
     };
+
+const VENDASTA_ACCESS_DENIED_LOG = "[vendasta-sso] access denied";
+
+function claimKeyNames(value: unknown): string[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  return Object.keys(value).sort();
+}
+
+function emailDomainFromClaim(email: unknown): string | null {
+  if (typeof email !== "string") return null;
+  const trimmed = email.trim();
+  const at = trimmed.lastIndexOf("@");
+  if (at <= 0 || at === trimmed.length - 1) return null;
+  return trimmed.slice(at + 1).toLowerCase();
+}
+
+function vendastaAccessDeniedDetails(
+  decision: Extract<VendastaAccessDecision, { ok: false }>,
+  profile: VendastaIdTokenClaims | undefined
+) {
+  const claims = profile ?? {};
+  const sub = isVendastaSubject(claims.sub) ? claims.sub.trim() : null;
+  return {
+    reason: decision.reason,
+    claimKeys: claimKeyNames(claims),
+    emailType: typeof claims.email,
+    emailVerifiedType: typeof claims.email_verified,
+    emailVerified:
+      typeof claims.email_verified === "boolean"
+        ? claims.email_verified
+        : null,
+    emailDomain: emailDomainFromClaim(claims.email),
+    subIsVendastaSubject: sub !== null,
+    sub,
+  };
+}
+
+/** Logs one structured denial line. Does not change the authorization decision. */
+export function applyVendastaSignInDecision(
+  decision: VendastaAccessDecision,
+  profile: VendastaIdTokenClaims | undefined
+): boolean {
+  if (!decision.ok) {
+    console.warn(
+      VENDASTA_ACCESS_DENIED_LOG,
+      vendastaAccessDeniedDetails(decision, profile)
+    );
+  }
+  return decision.ok;
+}
 
 /** Trim env credentials; whitespace/newlines on the secret cause invalid_client. */
 export function trimVendastaCredential(

@@ -28,6 +28,7 @@ import {
   vendastaSignInAuthorizationParams,
   trimVendastaCredential,
   verifiedWorkEmailFromIdToken,
+  applyVendastaSignInDecision,
   type EmployeeIdentityRow,
 } from "@/lib/vendasta-oidc";
 
@@ -78,8 +79,8 @@ describe("Vendasta OIDC provider", () => {
         },
       })
     );
-    expect(VENDASTA_OIDC_SCOPES).toBe("openid profile");
-    expect(VENDASTA_OIDC_SCOPES.split(" ")).not.toContain("email");
+    expect(VENDASTA_OIDC_SCOPES).toBe("openid profile email");
+    expect(VENDASTA_OIDC_SCOPES.split(" ")).toContain("email");
     expect(provider.checks).toEqual(["pkce", "state", "nonce"]);
     expect(VENDASTA_TOKEN_ENDPOINT_AUTH_METHOD).toBe("client_secret_post");
     expect(provider.client).toEqual({
@@ -477,6 +478,94 @@ describe("Vendasta SSO entry URL", () => {
     ).toBe(false);
     expect(isVendastaOidcConfigured({ AUTH_VENDASTA_ID: "id" })).toBe(false);
   });
+});
+
+describe("Vendasta access-denied diagnostics", () => {
+  const FULL_EMAIL = "bking@vendasta.com";
+  const FULL_NAME = "Brendan King";
+
+  test("denied sign-in log omits full email and name values", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const allowed = applyVendastaSignInDecision(
+        { ok: false, reason: "no_employee" },
+        {
+          sub: SUB,
+          email: FULL_EMAIL,
+          email_verified: false,
+          name: FULL_NAME,
+          given_name: "Brendan",
+          family_name: "King",
+        }
+      );
+
+      expect(allowed).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toBe("[vendasta-sso] access denied");
+
+      const details = warn.mock.calls[0][1] as Record<string, unknown>;
+      const logged = JSON.stringify(warn.mock.calls[0]);
+      expect(logged).not.toContain(FULL_EMAIL);
+      expect(logged).not.toContain("bking@");
+      expect(logged).not.toContain(FULL_NAME);
+      expect(logged).not.toContain("Brendan");
+      expect(logged).not.toContain("King");
+      expect(details).toEqual({
+        reason: "no_employee",
+        claimKeys: [
+          "email",
+          "email_verified",
+          "family_name",
+          "given_name",
+          "name",
+          "sub",
+        ],
+        emailType: "string",
+        emailVerifiedType: "boolean",
+        emailVerified: false,
+        emailDomain: "vendasta.com",
+        subIsVendastaSubject: true,
+        sub: SUB,
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("does not log an email-shaped sub and does not warn on allow", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        applyVendastaSignInDecision(
+          {
+            ok: true,
+            employeeId: 1,
+            bindSub: false,
+            sessionRole: "employee",
+          },
+          { sub: SUB, email: FULL_EMAIL, name: FULL_NAME }
+        )
+      ).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+
+      expect(
+        applyVendastaSignInDecision(
+          { ok: false, reason: "invalid_sub" },
+          { sub: FULL_EMAIL, name: FULL_NAME }
+        )
+      ).toBe(false);
+      const logged = JSON.stringify(warn.mock.calls[0]);
+      expect(logged).not.toContain(FULL_EMAIL);
+      expect(logged).not.toContain(FULL_NAME);
+      const details = warn.mock.calls[0][1] as Record<string, unknown>;
+      expect(details.reason).toBe("invalid_sub");
+      expect(details.subIsVendastaSubject).toBe(false);
+      expect(details.sub).toBeNull();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
 });
 
 describe("legacy Session Url", () => {
