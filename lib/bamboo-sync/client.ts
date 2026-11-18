@@ -14,6 +14,20 @@ export type BambooHrClientOptions = {
 
 const EARLIEST_CHANGED = "2010-01-01T00:00:00Z";
 
+export class BambooHrHttpError extends Error {
+  readonly method: string;
+  readonly path: string;
+  readonly status: number;
+
+  constructor(method: string, path: string, status: number) {
+    super(`BambooHR ${method} ${path} failed with ${status}`);
+    this.name = "BambooHrHttpError";
+    this.method = method;
+    this.path = path;
+    this.status = status;
+  }
+}
+
 function basicAuth(apiKey: string): string {
   return `Basic ${Buffer.from(`${apiKey}:x`).toString("base64")}`;
 }
@@ -88,7 +102,7 @@ export class BambooHrClient {
       headers: this.headers(init.headers as Record<string, string> | undefined),
     });
     if (!response.ok) {
-      throw new Error(`BambooHR ${method} ${path} failed with ${response.status}`);
+      throw new BambooHrHttpError(method, path, response.status);
     }
     if (response.status === 204) return null;
     const text = await response.text();

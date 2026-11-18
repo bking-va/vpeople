@@ -1,4 +1,8 @@
-export { BambooHrClient, createBambooHrClientFromEnv } from "./client";
+export {
+  BambooHrClient,
+  BambooHrHttpError,
+  createBambooHrClientFromEnv,
+} from "./client";
 export {
   BRENDAN_WORK_EMAILS,
   EXCLUDED_BAMBOO_FIELDS,

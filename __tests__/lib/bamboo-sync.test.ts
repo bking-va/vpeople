@@ -278,6 +278,7 @@ type MemoryEmployee = SyncEmployeeRow & {
   departmentName?: string | null;
   divisionName?: string | null;
   locationName?: string | null;
+  employmentStatus?: string | null;
 };
 
 class MemoryStore implements BambooSyncStore {
@@ -374,6 +375,12 @@ class MemoryStore implements BambooSyncStore {
     this.writes += 1;
     const row = this.employees.find((emp) => emp.id === employeeId);
     if (row) row.managerId = managerId;
+  }
+
+  async markTerminated(bambooId: string): Promise<void> {
+    this.writes += 1;
+    const row = this.employees.find((emp) => emp.bambooId === bambooId);
+    if (row) row.employmentStatus = "terminated";
   }
 
   async replaceJobHistory(
@@ -494,6 +501,7 @@ function mockBambooFetch(handlers: {
   report?: unknown;
   changed?: unknown;
   tables?: Record<string, unknown>;
+  tableStatus?: Record<string, number>;
   timeOffTypes?: unknown;
   balances?: Record<string, unknown>;
 }): jest.Mock {
@@ -501,13 +509,23 @@ function mockBambooFetch(handlers: {
     const url = String(input);
     const method = (init?.method || "GET").toUpperCase();
     if (url.includes("/reports/custom") && method === "POST") {
-      return jsonResponse(handlers.report ?? { employees: [] });
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const all = (handlers.report as { employees?: BambooEmployeeRecord[] })?.employees ?? [];
+      const ids: string[] = Array.isArray(body?.filters?.employeeIds)
+        ? body.filters.employeeIds.map(String)
+        : [];
+      const employees = ids.length > 0 ? all.filter((row) => ids.includes(String(row.id))) : all;
+      return jsonResponse({ employees });
     }
     if (url.includes("/employees/directory")) {
       return jsonResponse(handlers.directory ?? { employees: [] });
     }
     if (url.includes("/employees/changed/tables/")) {
       const table = url.split("/tables/")[1]?.split("?")[0] ?? "";
+      const status = handlers.tableStatus?.[table];
+      if (status && status >= 400) {
+        return jsonResponse({ error: "unavailable" }, status);
+      }
       return jsonResponse(handlers.tables?.[table] ?? {});
     }
     if (url.includes("/employees/changed")) {
@@ -797,6 +815,176 @@ describe("runBambooSync", () => {
     await runBambooSync({ client: clientFor([ceo]), store, mode: "full" });
     expect(store.webhookCalls).toBe(0);
     expect(store.emailsSent).toBe(0);
+  });
+
+  it("fails the run instead of wiping job history when a table fetch errors", async () => {
+    const store = new MemoryStore();
+    await runBambooSync({ client: clientFor([ceo, report]), store, mode: "full" });
+    expect(store.jobHistory.length).toBeGreaterThan(0);
+    const historyBefore = store.jobHistory.length;
+
+    const failing = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [ceo, report] },
+        tableStatus: { jobInfo: 500 },
+        tables: {
+          employmentStatus: { "101": [{ date: "2020-01-15", employmentStatus: "Full-Time" }] },
+          compensation: {},
+        },
+        timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation" }] },
+      }),
+    });
+    const result = await runBambooSync({ client: failing, store, mode: "full" });
+    expect(result.status).toBe("failed");
+    expect(store.jobHistory).toHaveLength(historyBefore);
+    expect(store.syncRuns.at(-1)).toMatchObject({ status: "failed" });
+  });
+
+  it("resolves incremental reports-to against employees outside the changed batch", async () => {
+    const store = new MemoryStore();
+    store.employees.push(
+      {
+        id: 10,
+        bambooId: "100",
+        email: "bking@vendasta.com",
+        employeeNumber: "V-100",
+        firstName: "Brendan",
+        lastName: "King",
+        accessLevel: "full_admin",
+        vendastaSub: null,
+        userId: null,
+        managerId: null,
+      },
+      {
+        id: 11,
+        bambooId: "101",
+        email: "ada.lovelace@vendasta.com",
+        employeeNumber: "V-101",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        accessLevel: "employee",
+        vendastaSub: null,
+        userId: null,
+        managerId: 10,
+      }
+    );
+    store.nextId = 12;
+    store.syncRuns.push({
+      status: "success",
+      latestChanged: "2026-11-01T00:00:00Z",
+    });
+
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [report] },
+        changed: {
+          latest: "2026-11-18T00:00:00Z",
+          employees: {
+            "101": { id: "101", action: "Updated", lastChanged: "2026-11-18T00:00:00Z" },
+          },
+        },
+        tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+        timeOffTypes: { timeOffTypes: [] },
+      }),
+    });
+    await runBambooSync({ client, store, mode: "incremental" });
+    const ada = store.employees.find((row) => row.bambooId === "101");
+    expect(ada?.managerId).toBe(10);
+  });
+
+  it("marks deleted Bamboo employees terminated without wiping retained profile fields", async () => {
+    const store = new MemoryStore();
+    store.employees.push({
+      id: 11,
+      bambooId: "101",
+      email: "ada.lovelace@vendasta.com",
+      employeeNumber: "V-101",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      accessLevel: "employee",
+      vendastaSub: null,
+      userId: null,
+      managerId: 10,
+      departmentName: "Technology",
+      employmentStatus: "full_time",
+    });
+    store.nextId = 12;
+    store.syncRuns.push({
+      status: "success",
+      latestChanged: "2026-11-01T00:00:00Z",
+    });
+
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [] },
+        changed: {
+          latest: "2026-11-18T00:00:00Z",
+          employees: {
+            "101": { id: "101", action: "Deleted", lastChanged: "2026-11-18T00:00:00Z" },
+          },
+        },
+        tables: {},
+        timeOffTypes: { timeOffTypes: [] },
+      }),
+    });
+    await runBambooSync({ client, store, mode: "incremental" });
+    const ada = store.employees.find((row) => row.bambooId === "101");
+    expect(ada).toMatchObject({
+      employeeNumber: "V-101",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ada.lovelace@vendasta.com",
+      departmentName: "Technology",
+      managerId: 10,
+      employmentStatus: "terminated",
+    });
+  });
+
+  it("refreshes time-off balances for imported employees that did not change", async () => {
+    const store = new MemoryStore();
+    store.employees.push({
+      id: 11,
+      bambooId: "101",
+      email: "ada.lovelace@vendasta.com",
+      employeeNumber: "V-101",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      accessLevel: "employee",
+      vendastaSub: null,
+      userId: null,
+      managerId: null,
+    });
+    store.nextId = 12;
+    store.syncRuns.push({
+      status: "success",
+      latestChanged: "2026-11-01T00:00:00Z",
+    });
+    store.timeOffPolicies.push({ id: 1, name: "Vacation", policyType: "Vacation" });
+    store.timeOffBalances.push({ employeeId: 11, policyId: 1, balance: "1.0" });
+
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [] },
+        changed: { latest: "2026-11-18T00:00:00Z", employees: {} },
+        tables: {},
+        timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation" }] },
+        balances: {
+          "101": [{ name: "Vacation", balance: "12.0" }],
+        },
+      }),
+    });
+    await runBambooSync({ client, store, mode: "incremental" });
+    expect(store.timeOffBalances).toEqual([
+      { employeeId: 11, policyId: 1, balance: "12.0" },
+    ]);
   });
 });
 

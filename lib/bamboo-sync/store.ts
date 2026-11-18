@@ -346,6 +346,16 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         .where(eq(employees.id, employeeId));
     },
 
+    async markTerminated(bambooId) {
+      await db
+        .update(employees)
+        .set({
+          employmentStatus: "terminated",
+          updatedAt: new Date(),
+        })
+        .where(eq(employees.bambooId, bambooId));
+    },
+
     async replaceJobHistory(employeeId, rows) {
       await db.delete(jobHistory).where(eq(jobHistory.employeeId, employeeId));
       const values = [];

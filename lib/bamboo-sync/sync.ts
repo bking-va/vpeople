@@ -1,4 +1,4 @@
-import { BambooHrClient } from "./client";
+import { BambooHrClient, BambooHrHttpError } from "./client";
 import {
   blankToNull,
   isBrendanWorkEmail,
@@ -14,6 +14,7 @@ import type {
   BambooSyncResult,
   BrendanSnapshot,
   MappedEmployee,
+  MappedEmployeeBundle,
   SyncEmployeeRow,
 } from "./types";
 
@@ -34,6 +35,7 @@ export interface BambooSyncStore {
     employee: MappedEmployee
   ): Promise<{ id: number; created: boolean }>;
   setManager(employeeId: number, managerId: number | null): Promise<void>;
+  markTerminated(bambooId: string): Promise<void>;
   replaceJobHistory(
     employeeId: number,
     rows: Array<Record<string, unknown>>
@@ -109,6 +111,33 @@ async function inStoreTransaction<T>(
 ): Promise<T> {
   if (store.transaction) return store.transaction(fn);
   return fn(store);
+}
+
+type TableRows = Record<string, Array<Record<string, unknown>>>;
+
+async function fetchOptionalTable(
+  client: BambooHrClient,
+  table: string,
+  since: string
+): Promise<TableRows | null> {
+  try {
+    return await client.fetchTableRows(table, since);
+  } catch (error) {
+    if (error instanceof BambooHrHttpError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+function tableRowsForEmployee(
+  table: TableRows | null,
+  bambooId: string,
+  mode: BambooSyncMode
+): { replace: boolean; rows: Array<Record<string, unknown>> } {
+  if (table == null) return { replace: false, rows: [] };
+  if (mode === "incremental" && !Object.prototype.hasOwnProperty.call(table, bambooId)) {
+    return { replace: false, rows: [] };
+  }
+  return { replace: true, rows: table[bambooId] || [] };
 }
 
 async function loadEmployees(
@@ -189,16 +218,21 @@ export async function runBambooSync(
     };
   }
 
+  let mapped: MappedEmployeeBundle[] = [];
+  let bambooIds: string[] = [];
+  let unmappedFields: string[] = [];
+
+  try {
   const { employees, latestChanged, deletedBambooIds } = await loadEmployees(
     opts.client,
     opts.store,
     opts.mode
   );
-  const mapped = employees
+  mapped = employees
     .map((row) => mapEmployeeRecord(row))
     .filter((row) => row.bambooId);
-  const bambooIds = uniqueSorted(mapped.map((row) => row.bambooId));
-  const unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
+  bambooIds = uniqueSorted(mapped.map((row) => row.bambooId));
+  unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
   const existing = await opts.store.listEmployees();
   const existingByBambooId = new Map(
     existing
@@ -255,32 +289,31 @@ export async function runBambooSync(
     opts.mode === "incremental"
       ? (await opts.store.lastSuccessfulIncrementalCursor()) || "2010-01-01T00:00:00Z"
       : "2010-01-01T00:00:00Z";
-  const emptyTables: Record<string, Array<Record<string, unknown>>> = {};
-  const jobInfo =
-    (await opts.client.fetchTableRows("jobInfo", tablesSince).catch(() => emptyTables)) ||
-    emptyTables;
-  const statusInfo =
-    (await opts.client
-      .fetchTableRows("employmentStatus", tablesSince)
-      .catch(() => emptyTables)) || emptyTables;
-  const compensation =
-    (await opts.client.fetchTableRows("compensation", tablesSince).catch(() => emptyTables)) ||
-    emptyTables;
-  const contacts =
-    (await opts.client
-      .fetchTableRows("emergencyContacts", tablesSince)
-      .catch(() => emptyTables)) || emptyTables;
+  const jobInfo = await opts.client.fetchTableRows("jobInfo", tablesSince);
+  const statusInfo = await opts.client.fetchTableRows("employmentStatus", tablesSince);
+  const compensation = await opts.client.fetchTableRows("compensation", tablesSince);
+  const contacts = await fetchOptionalTable(
+    opts.client,
+    "emergencyContacts",
+    tablesSince
+  );
   const timeOffTypes = await opts.client.fetchTimeOffTypes().catch(() => []);
   const asOf = (opts.now ?? new Date()).toISOString().slice(0, 10);
+  const balanceTargets = uniqueSorted([
+    ...mapped.map((row) => row.bambooId),
+    ...existing
+      .map((row) => row.bambooId)
+      .filter((id): id is string => Boolean(id)),
+  ]);
   const balancesByBambooId = new Map<string, Array<{ name: string; balance: string }>>();
-  for (const bundle of mapped) {
+  for (const bambooId of balanceTargets) {
     const balances = await opts.client
-      .fetchTimeOffBalances(bundle.bambooId, asOf)
+      .fetchTimeOffBalances(bambooId, asOf)
       .catch(() => []);
-    balancesByBambooId.set(bundle.bambooId, balances);
+    balancesByBambooId.set(bambooId, balances);
   }
 
-  return inStoreTransaction(opts.store, async (store) => {
+  return await inStoreTransaction(opts.store, async (store) => {
     let demoRemoved = 0;
     let appliedSnapshot = snapshot;
     if (opts.replaceDemo) {
@@ -295,7 +328,9 @@ export async function runBambooSync(
       }
     }
 
-    const idByBambooId = new Map<string, number>();
+    const idByBambooId = new Map<string, number>(
+      [...existingByBambooId.entries()].map(([bambooId, row]) => [bambooId, row.id])
+    );
     let created = 0;
     let updated = 0;
     const policyIds = new Map<string, number>();
@@ -326,64 +361,91 @@ export async function runBambooSync(
     for (const bundle of mapped) {
       const employeeId = idByBambooId.get(bundle.bambooId);
       if (!employeeId) continue;
-      const managerId = bundle.supervisorBambooId
-        ? idByBambooId.get(bundle.supervisorBambooId) ?? null
-        : null;
-      await store.setManager(employeeId, managerId ?? null);
-      if (managerId) reportsToResolved += 1;
+      if (!bundle.supervisorBambooId) {
+        await store.setManager(employeeId, null);
+        continue;
+      }
+      const managerId = idByBambooId.get(bundle.supervisorBambooId);
+      if (managerId === undefined) continue;
+      await store.setManager(employeeId, managerId);
+      reportsToResolved += 1;
     }
 
     for (const bundle of mapped) {
       const employeeId = idByBambooId.get(bundle.bambooId);
       if (!employeeId) continue;
-      const jobs = (jobInfo[bundle.bambooId] || []).map((row) => ({
-        effectiveDate: tableRowDate(row),
-        jobTitle: blankToNull(row.jobTitle),
-        departmentName: blankToNull(row.department),
-        divisionName: blankToNull(row.division),
-        locationName: blankToNull(row.location),
-        comment: blankToNull(row.comment),
-      }));
-      await store.replaceJobHistory(employeeId, jobs);
-
-      const statuses = (statusInfo[bundle.bambooId] || []).map((row) => {
-        const status = mapEmploymentStatus({
-          employmentHistoryStatus: blankToNull(row.employmentStatus),
-          employmentStatus: blankToNull(row.employmentStatus),
-          terminationDate: blankToNull(row.terminationDate),
-        });
-        return {
-          effectiveDate: tableRowDate(row),
-          status,
-          changeType: status === "terminated" ? "terminate" : "status_change",
-          comment: blankToNull(row.comment),
-          terminationType: blankToNull(row.terminationTypeId) || blankToNull(row.terminationType),
-        };
-      });
-      await store.replaceEmploymentStatusHistory(employeeId, statuses);
-
-      const payRows = (compensation[bundle.bambooId] || []).map((row) => {
-        const parsed = parsePayRate(
-          (row.rate as string | number | null) ?? (row.payRate as string | number | null)
+      const jobs = tableRowsForEmployee(jobInfo, bundle.bambooId, opts.mode);
+      if (jobs.replace) {
+        await store.replaceJobHistory(
+          employeeId,
+          jobs.rows.map((row) => ({
+            effectiveDate: tableRowDate(row),
+            jobTitle: blankToNull(row.jobTitle),
+            departmentName: blankToNull(row.department),
+            divisionName: blankToNull(row.division),
+            locationName: blankToNull(row.location),
+            comment: blankToNull(row.comment),
+          }))
         );
-        return {
-          effectiveDate: tableRowDate(row),
-          payRate: parsed.amount,
-          payType: blankToNull(row.type) || blankToNull(row.paidPer),
-          paySchedule: blankToNull(row.paySchedule),
-          currency: parsed.currency || blankToNull(row.currency) || "CAD",
-          changeReason: blankToNull(row.reason),
-          comment: blankToNull(row.comment),
-        };
-      });
-      await store.replaceCompensationHistory(employeeId, payRows);
+      }
 
-      const emergency = (contacts[bundle.bambooId] || [])
-        .map((row) => mapEmergencyContact(row))
-        .filter((row): row is NonNullable<typeof row> => Boolean(row));
-      await store.replaceEmergencyContacts(employeeId, emergency);
+      const statuses = tableRowsForEmployee(statusInfo, bundle.bambooId, opts.mode);
+      if (statuses.replace) {
+        await store.replaceEmploymentStatusHistory(
+          employeeId,
+          statuses.rows.map((row) => {
+            const status = mapEmploymentStatus({
+              employmentHistoryStatus: blankToNull(row.employmentStatus),
+              employmentStatus: blankToNull(row.employmentStatus),
+              terminationDate: blankToNull(row.terminationDate),
+            });
+            return {
+              effectiveDate: tableRowDate(row),
+              status,
+              changeType: status === "terminated" ? "terminate" : "status_change",
+              comment: blankToNull(row.comment),
+              terminationType:
+                blankToNull(row.terminationTypeId) || blankToNull(row.terminationType),
+            };
+          })
+        );
+      }
 
-      const balances = balancesByBambooId.get(bundle.bambooId) || [];
+      const pay = tableRowsForEmployee(compensation, bundle.bambooId, opts.mode);
+      if (pay.replace) {
+        await store.replaceCompensationHistory(
+          employeeId,
+          pay.rows.map((row) => {
+            const parsed = parsePayRate(
+              (row.rate as string | number | null) ?? (row.payRate as string | number | null)
+            );
+            return {
+              effectiveDate: tableRowDate(row),
+              payRate: parsed.amount,
+              payType: blankToNull(row.type) || blankToNull(row.paidPer),
+              paySchedule: blankToNull(row.paySchedule),
+              currency: parsed.currency || blankToNull(row.currency) || "CAD",
+              changeReason: blankToNull(row.reason),
+              comment: blankToNull(row.comment),
+            };
+          })
+        );
+      }
+
+      const emergency = tableRowsForEmployee(contacts, bundle.bambooId, opts.mode);
+      if (emergency.replace) {
+        await store.replaceEmergencyContacts(
+          employeeId,
+          emergency.rows
+            .map((row) => mapEmergencyContact(row))
+            .filter((row): row is NonNullable<typeof row> => Boolean(row))
+        );
+      }
+    }
+
+    for (const [bambooId, balances] of balancesByBambooId) {
+      const employeeId = idByBambooId.get(bambooId);
+      if (!employeeId) continue;
       for (const balance of balances) {
         const policyId =
           policyIds.get(balance.name) ??
@@ -394,19 +456,8 @@ export async function runBambooSync(
     }
 
     for (const deletedId of deletedBambooIds) {
-      const existingRow = existingByBambooId.get(deletedId);
-      if (!existingRow) continue;
-      await store.upsertEmployee(deletedId, {
-        ...mapEmployeeRecord({
-          id: deletedId,
-          firstName: existingRow.firstName,
-          lastName: existingRow.lastName,
-          workEmail: existingRow.email,
-          status: "Inactive",
-          employmentHistoryStatus: "Terminated",
-        }).employee,
-        employmentStatus: "terminated",
-      });
+      if (!existingByBambooId.has(deletedId)) continue;
+      await store.markTerminated(deletedId);
     }
 
     const brendanAdminBound = await store.applyBrendanCarryOver({
@@ -445,21 +496,24 @@ export async function runBambooSync(
       writes: created + updated + demoRemoved + 1,
       latestChanged,
     };
-  }).catch(async (error: unknown) => {
+  });
+  } catch (error: unknown) {
     const message = safeErrorMessage(
       error instanceof Error ? error.message : "Bamboo sync failed"
     );
     log(`Bamboo sync failed: ${message}`);
-    await opts.store.recordSyncRun({
-      mode: opts.mode,
-      status: "failed",
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      errorMessage: message,
-    });
+    if (!dryRun) {
+      await opts.store.recordSyncRun({
+        mode: opts.mode,
+        status: "failed",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        errorMessage: message,
+      });
+    }
     return {
       status: "failed" as const,
-      dryRun: false,
+      dryRun,
       fetched: mapped.length,
       created: 0,
       updated: 0,
@@ -468,11 +522,11 @@ export async function runBambooSync(
       brendanAdminBound: false,
       unmappedFields,
       bambooIds,
-      writes: 1,
-      latestChanged,
+      writes: dryRun ? 0 : 1,
+      latestChanged: null,
       errorMessage: message,
     };
-  });
+  }
 }
 
 export function formatSyncSummary(result: BambooSyncResult): string {
