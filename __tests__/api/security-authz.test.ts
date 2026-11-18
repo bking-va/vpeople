@@ -266,8 +266,8 @@ describe("field-level authz helpers", () => {
   });
 
   test("@vendasta.com work emails stay visible; personal addresses are restricted", () => {
-    expect(isVendastaWorkEmail("brendan.king@vendasta.com")).toBe(true);
-    expect(isVendastaWorkEmail("Brendan.King@Vendasta.COM")).toBe(true);
+    expect(isVendastaWorkEmail("bking@vendasta.com")).toBe(true);
+    expect(isVendastaWorkEmail("Bking@Vendasta.COM")).toBe(true);
     expect(isVendastaWorkEmail("brendan@gmail.com")).toBe(false);
     expect(isVendastaWorkEmail("notvendasta.com")).toBe(false);
     expect(isVendastaWorkEmail("user@notvendasta.com")).toBe(false);

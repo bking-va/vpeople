@@ -77,7 +77,7 @@ async function seed() {
         birth_date, gender
       )
       SELECT
-        'E001', 'Brendan', 'King', 'brendan.king@vendasta.com', 'Chief Executive Officer',
+        'E001', 'Brendan', 'King', 'bking@vendasta.com', 'Chief Executive Officer',
         d.id, l.id, '2008-03-15', 'full_time',
         jf.id, jl.id, 'full_admin', '+1-306-955-5512', '101',
         '1975-03-10', 'male'
@@ -88,7 +88,7 @@ async function seed() {
     `);
     
     console.log('Creating more employees...');
-    const ceoId = (await client.query("SELECT id FROM employees WHERE email = 'brendan.king@vendasta.com'")).rows[0].id;
+    const ceoId = (await client.query("SELECT id FROM employees WHERE email = 'bking@vendasta.com'")).rows[0].id;
     
     await client.query(`
       INSERT INTO employees (
@@ -171,7 +171,7 @@ async function seed() {
         END
       FROM employees e
       CROSS JOIN time_off_policies p
-      WHERE e.email IN ('brendan.king@vendasta.com', 'sarah.martinez@vendasta.com', 'david.chen@vendasta.com', 'emily.johnson@vendasta.com')
+      WHERE e.email IN ('bking@vendasta.com', 'sarah.martinez@vendasta.com', 'david.chen@vendasta.com', 'emily.johnson@vendasta.com')
         AND p.country IN ('Canada', NULL)
       ON CONFLICT DO NOTHING;
     `);
@@ -202,7 +202,7 @@ async function seed() {
       INSERT INTO compensation_history (employee_id, effective_date, pay_rate, pay_type, pay_schedule, currency, change_reason)
       SELECT e.id, e.hire_date,
         CASE 
-          WHEN e.email = 'brendan.king@vendasta.com' THEN 250000
+          WHEN e.email = 'bking@vendasta.com' THEN 250000
           WHEN e.email = 'sarah.martinez@vendasta.com' THEN 120000
           WHEN e.email = 'david.chen@vendasta.com' THEN 95000
           WHEN e.email = 'emily.johnson@vendasta.com' THEN 75000
@@ -210,7 +210,7 @@ async function seed() {
         END,
         'Salary', 'Semi-Monthly', 'CAD', 'New Employee'
       FROM employees e
-      WHERE e.email IN ('brendan.king@vendasta.com', 'sarah.martinez@vendasta.com', 'david.chen@vendasta.com', 'emily.johnson@vendasta.com')
+      WHERE e.email IN ('bking@vendasta.com', 'sarah.martinez@vendasta.com', 'david.chen@vendasta.com', 'emily.johnson@vendasta.com')
       ON CONFLICT DO NOTHING;
     `);
     
@@ -222,7 +222,7 @@ async function seed() {
         '["Overall company strategy and vision","Board relations and investor management","Executive team leadership"]'::jsonb,
         e.id,
         false
-      FROM employees e WHERE e.email = 'brendan.king@vendasta.com'
+      FROM employees e WHERE e.email = 'bking@vendasta.com'
       ON CONFLICT DO NOTHING;
     `);
     
@@ -249,7 +249,7 @@ async function seed() {
       FROM employees e, departments d, locations l, employees m
       WHERE e.email = 'sarah.martinez@vendasta.com'
         AND d.name = 'Technology' AND l.name = 'Saskatoon HQ'
-        AND m.email = 'brendan.king@vendasta.com'
+        AND m.email = 'bking@vendasta.com'
       ON CONFLICT DO NOTHING;
     `);
     

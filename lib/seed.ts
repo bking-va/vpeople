@@ -652,7 +652,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
     employeeNumber: "E001",
     firstName: "Brendan",
     lastName: "King",
-    email: `brendan.king@${VENDASTA_DOMAIN}`,
+    email: `bking@${VENDASTA_DOMAIN}`,
     jobTitle: "Chief Executive Officer",
     departmentId: seniorLeadership.id,
     divisionId: executiveDiv.id,
@@ -671,7 +671,7 @@ export async function runSeed(options: { reset?: boolean } = {}) {
   const [ceo] = await db
     .select()
     .from(schema.employees)
-    .where(eq(schema.employees.email, `brendan.king@${VENDASTA_DOMAIN}`))
+    .where(eq(schema.employees.email, `bking@${VENDASTA_DOMAIN}`))
     .limit(1);
 
   console.log("Creating C-suite and department heads (6 direct reports to CEO)...");

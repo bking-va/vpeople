@@ -111,7 +111,7 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 7. Sign in:
-   - With `ENABLE_DEV_AUTH=true`: use any `@vendasta.com` email (e.g., `brendan.king@vendasta.com`)
+   - With `ENABLE_DEV_AUTH=true`: use any `@vendasta.com` email (e.g., `bking@vendasta.com`)
    - With Google OAuth: sign in with your Vendasta Google account
 
 ### Database Management

@@ -17,7 +17,7 @@ async function takeScreenshots() {
     
     // Dev login
     console.log('2. Signing in with dev account...');
-    await page.fill('input[name="email"]', 'brendan.king@vendasta.com');
+    await page.fill('input[name="email"]', 'bking@vendasta.com');
     
     // Navigate directly to people page (bypassing problematic auth for screenshots)
     console.log('   Navigating directly to people page...');
