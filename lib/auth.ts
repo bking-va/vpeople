@@ -20,6 +20,7 @@ import {
 } from "./vendasta-identity";
 import {
   VENDASTA_PROVIDER_ID,
+  applyVendastaSignInDecision,
   isVendastaOidcConfigured,
   vendastaOidcProvider,
   type VendastaIdTokenClaims,
@@ -175,7 +176,7 @@ const authConfig = {
     }) {
       if (account?.provider === VENDASTA_PROVIDER_ID) {
         const decision = await resolveVendastaEmployee(profile);
-        return decision.ok;
+        return applyVendastaSignInDecision(decision, profile);
       }
       // Vendasta OIDC is the SSO path. Do not authorize Google by email suffix.
       if (account?.provider === "google") {
