@@ -344,6 +344,10 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         .update(employees)
         .set({ managerId, updatedAt: new Date() })
         .where(eq(employees.id, employeeId));
+      if (managerId != null) {
+        const { rebindPendingManagerApprovals } = await import("@/lib/approvals");
+        await rebindPendingManagerApprovals(employeeId, managerId);
+      }
     },
 
     async setUnresolvedSupervisor(employeeId, supervisorBambooId) {
@@ -354,6 +358,12 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
           updatedAt: new Date(),
         })
         .where(eq(employees.id, employeeId));
+      if (supervisorBambooId) {
+        const { unassignPendingManagerApprovals } = await import(
+          "@/lib/approvals"
+        );
+        await unassignPendingManagerApprovals(employeeId);
+      }
     },
 
     async listUnresolvedSupervisors() {
