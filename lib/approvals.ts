@@ -891,8 +891,17 @@ export async function getApprovalRequestForEntity(
 const MANAGER_ROLE_STEP_ROLES = ["manager", "manager_manager"] as const;
 const REQUESTER_OWNED_ENTITY_TYPES = ["time_off_request", "timesheet"] as const;
 
-async function pendingManagerRoleStepsForEmployee(employeeId: number) {
-  return db
+/** Drizzle connection or transaction used for manager-step rebinding. */
+export type ApprovalQueryExecutor = {
+  select: (...args: any[]) => any;
+  update: (...args: any[]) => any;
+};
+
+async function pendingManagerRoleStepsForEmployee(
+  employeeId: number,
+  executor: ApprovalQueryExecutor
+) {
+  return executor
     .select({
       step: approvalRequestSteps,
       request: approvalRequests,
@@ -930,10 +939,13 @@ async function pendingManagerRoleStepsForEmployee(employeeId: number) {
 }
 
 /** Drop the former manager from still-pending manager-role steps. Never auto-approve. */
-export async function unassignPendingManagerApprovals(employeeId: number) {
-  const rows = await pendingManagerRoleStepsForEmployee(employeeId);
+export async function unassignPendingManagerApprovals(
+  employeeId: number,
+  executor: ApprovalQueryExecutor = db
+) {
+  const rows = await pendingManagerRoleStepsForEmployee(employeeId, executor);
   for (const row of rows) {
-    await db
+    await executor
       .update(approvalRequestSteps)
       .set({ approverId: null })
       .where(eq(approvalRequestSteps.id, row.step.id));
@@ -943,9 +955,10 @@ export async function unassignPendingManagerApprovals(employeeId: number) {
 /** Point still-pending manager-role steps at the newly resolved supervisor. */
 export async function rebindPendingManagerApprovals(
   employeeId: number,
-  managerId: number
+  managerId: number,
+  executor: ApprovalQueryExecutor = db
 ) {
-  const rows = await pendingManagerRoleStepsForEmployee(employeeId);
+  const rows = await pendingManagerRoleStepsForEmployee(employeeId, executor);
   let skipLevelManagerId: number | null | undefined;
 
   for (const row of rows) {
@@ -953,7 +966,7 @@ export async function rebindPendingManagerApprovals(
     if (role !== "manager" && role !== "manager_manager") continue;
 
     if (role === "manager_manager" && skipLevelManagerId === undefined) {
-      const [manager] = await db
+      const [manager] = await executor
         .select({ managerId: employees.managerId })
         .from(employees)
         .where(eq(employees.id, managerId))
@@ -963,7 +976,7 @@ export async function rebindPendingManagerApprovals(
 
     const nextApproverId =
       role === "manager" ? managerId : skipLevelManagerId ?? null;
-    await db
+    await executor
       .update(approvalRequestSteps)
       .set({ approverId: nextApproverId })
       .where(eq(approvalRequestSteps.id, row.step.id));

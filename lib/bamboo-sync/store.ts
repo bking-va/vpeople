@@ -27,6 +27,10 @@ import {
   timeOffRequests,
   timesheets,
 } from "@/lib/db/schema";
+import {
+  rebindPendingManagerApprovals,
+  unassignPendingManagerApprovals,
+} from "@/lib/approvals";
 import { isBrendanWorkEmail } from "./map";
 import { DEMO_SEED_EMAILS, isDemoEmployee } from "./demo";
 import type { BambooSyncStore } from "./sync";
@@ -345,8 +349,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         .set({ managerId, updatedAt: new Date() })
         .where(eq(employees.id, employeeId));
       if (managerId != null) {
-        const { rebindPendingManagerApprovals } = await import("@/lib/approvals");
-        await rebindPendingManagerApprovals(employeeId, managerId);
+        await rebindPendingManagerApprovals(employeeId, managerId, db);
       }
     },
 
@@ -359,10 +362,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         })
         .where(eq(employees.id, employeeId));
       if (supervisorBambooId) {
-        const { unassignPendingManagerApprovals } = await import(
-          "@/lib/approvals"
-        );
-        await unassignPendingManagerApprovals(employeeId);
+        await unassignPendingManagerApprovals(employeeId, db);
       }
     },
 

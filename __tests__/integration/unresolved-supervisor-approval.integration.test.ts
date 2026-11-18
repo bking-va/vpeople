@@ -17,6 +17,46 @@ import {
 import { eq } from "drizzle-orm";
 import { createApprovalRequest, approveStep } from "@/lib/approvals";
 import { createBambooSyncStore } from "@/lib/bamboo-sync/store";
+import type { MappedEmployee } from "@/lib/bamboo-sync/types";
+
+function mappedEmployee(
+  overrides: Partial<MappedEmployee> &
+    Pick<MappedEmployee, "firstName" | "lastName" | "email">
+): MappedEmployee {
+  return {
+    employeeNumber: null,
+    middleName: null,
+    preferredName: null,
+    personalEmail: null,
+    workPhone: null,
+    extension: null,
+    mobilePhone: null,
+    homePhone: null,
+    jobTitle: null,
+    departmentName: null,
+    divisionName: null,
+    locationName: null,
+    hireDate: "2020-01-01",
+    originalHireDate: null,
+    terminationDate: null,
+    employmentStatus: "full_time",
+    accessLevel: "employee",
+    gender: null,
+    birthDate: null,
+    maritalStatus: null,
+    nationality: null,
+    citizenship: null,
+    addressStreet1: null,
+    addressStreet2: null,
+    addressCity: null,
+    addressProvince: null,
+    addressPostalCode: null,
+    addressCountry: null,
+    linkedInUrl: null,
+    twitterUrl: null,
+    ...overrides,
+  };
+}
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required for integration tests");
@@ -48,6 +88,7 @@ describe("Unresolved supervisor leave approval (Real Postgres)", () => {
   let newSupervisor: any;
   let testWorkflow: any;
   let pendingBambooId: string;
+  const extraEmployeeIds: number[] = [];
 
   beforeAll(async () => {
     const testRunId = Date.now();
@@ -150,6 +191,7 @@ describe("Unresolved supervisor leave approval (Real Postgres)", () => {
         formerManager?.id,
         testAdmin?.id,
         newSupervisor?.id,
+        ...extraEmployeeIds,
       ].filter(Boolean);
       for (const id of actorIds) {
         await db.delete(auditLogs).where(eq(auditLogs.employeeId, id));
@@ -164,6 +206,11 @@ describe("Unresolved supervisor leave approval (Real Postgres)", () => {
           .delete(approvalWorkflowSteps)
           .where(eq(approvalWorkflowSteps.workflowId, testWorkflow.id));
         await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, testWorkflow.id));
+      }
+      for (const id of extraEmployeeIds) {
+        await db.delete(timeOffBalances).where(eq(timeOffBalances.employeeId, id));
+        await db.delete(timeOffRequests).where(eq(timeOffRequests.employeeId, id));
+        await db.delete(employees).where(eq(employees.id, id));
       }
       if (testEmployee?.id) await db.delete(employees).where(eq(employees.id, testEmployee.id));
       if (formerManager?.id) await db.delete(employees).where(eq(employees.id, formerManager.id));
@@ -380,5 +427,105 @@ describe("Unresolved supervisor leave approval (Real Postgres)", () => {
     await db.delete(timeOffRequests).where(eq(timeOffRequests.employeeId, ceo.id));
     await db.delete(timeOffBalances).where(eq(timeOffBalances.employeeId, ceo.id));
     await db.delete(employees).where(eq(employees.id, ceo.id));
+  });
+
+  test("imports a new supervisor in the sync transaction while leave is pending", async () => {
+    const runId = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const supervisorBambooId = `TX_SUP_${runId}`;
+
+    const [subordinate] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `TX_EMP_${runId}`,
+        firstName: "Transactional",
+        lastName: "Report",
+        email: `tx.report.${runId}@test.com`,
+        hireDate: "2020-01-01",
+        employmentStatus: "full_time",
+        managerId: formerManager.id,
+        bambooId: `TX_EMP_${runId}`,
+      })
+      .returning();
+    extraEmployeeIds.push(subordinate.id);
+
+    await db.insert(timeOffBalances).values({
+      employeeId: subordinate.id,
+      policyId: testPolicy.id,
+      balance: "12.0",
+    });
+
+    const store = createBambooSyncStore(db);
+    expect(typeof (db as { transaction?: unknown }).transaction).toBe(
+      "function"
+    );
+    expect(typeof store.transaction).toBe("function");
+
+    await store.setManager(subordinate.id, null);
+    await store.setUnresolvedSupervisor(subordinate.id, supervisorBambooId);
+
+    const [request] = await db
+      .insert(timeOffRequests)
+      .values({
+        employeeId: subordinate.id,
+        policyId: testPolicy.id,
+        startDate: "2027-10-01",
+        endDate: "2027-10-01",
+        daysRequested: "1",
+        status: "pending",
+      })
+      .returning();
+
+    const approvalResult = await createApprovalRequest({
+      workflowId: testWorkflow.id,
+      entityType: "time_off_request",
+      entityId: request.id,
+      requesterId: subordinate.id,
+    });
+    expect(approvalResult.success).toBe(true);
+    const requestId = approvalResult.requestId!;
+
+    const [managerStepBefore] = await db
+      .select()
+      .from(approvalRequestSteps)
+      .where(eq(approvalRequestSteps.approvalRequestId, requestId))
+      .then((rows) => rows.filter((step) => step.stepOrder === 1));
+    expect(managerStepBefore.status).toBe("pending");
+    expect(managerStepBefore.approverId).toBeNull();
+
+    await store.transaction!(async (txStore) => {
+      const created = await txStore.upsertEmployee(
+        supervisorBambooId,
+        mappedEmployee({
+          firstName: "Imported",
+          lastName: "Supervisor",
+          email: `tx.supervisor.${runId}@test.com`,
+          employeeNumber: `TX_SUP_${runId}`,
+        })
+      );
+      await txStore.setManager(subordinate.id, created.id);
+      await txStore.setUnresolvedSupervisor(subordinate.id, null);
+    });
+
+    const [imported] = await db
+      .select()
+      .from(employees)
+      .where(eq(employees.bambooId, supervisorBambooId));
+    expect(imported).toBeDefined();
+    extraEmployeeIds.push(imported.id);
+
+    const [subordinateAfter] = await db
+      .select()
+      .from(employees)
+      .where(eq(employees.id, subordinate.id));
+    expect(subordinateAfter.managerId).toBe(imported.id);
+    expect(subordinateAfter.pendingSupervisorBambooId).toBeNull();
+
+    const [managerStepAfter] = await db
+      .select()
+      .from(approvalRequestSteps)
+      .where(eq(approvalRequestSteps.approvalRequestId, requestId))
+      .then((rows) => rows.filter((step) => step.stepOrder === 1));
+    expect(managerStepAfter.status).toBe("pending");
+    expect(managerStepAfter.approverId).toBe(imported.id);
   });
 });
