@@ -1,4 +1,4 @@
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import {
   announcements,
   approvalRequestSteps,
@@ -27,7 +27,7 @@ import {
   timeOffRequests,
   timesheets,
 } from "@/lib/db/schema";
-import { isBrendanWorkEmail } from "./map";
+import { isBrendanWorkEmail, reconcileImportedTimeOffBalance } from "./map";
 import { DEMO_SEED_EMAILS, isDemoEmployee } from "./demo";
 import type { BambooSyncStore } from "./sync";
 import type {
@@ -346,6 +346,39 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         .where(eq(employees.id, employeeId));
     },
 
+    async setUnresolvedSupervisor(employeeId, supervisorBambooId) {
+      await db
+        .update(employees)
+        .set({
+          pendingSupervisorBambooId: supervisorBambooId,
+          updatedAt: new Date(),
+        })
+        .where(eq(employees.id, employeeId));
+    },
+
+    async listUnresolvedSupervisors() {
+      const rows: Array<{
+        employeeId: number;
+        supervisorBambooId: string | null;
+      }> = await db
+        .select({
+          employeeId: employees.id,
+          supervisorBambooId: employees.pendingSupervisorBambooId,
+        })
+        .from(employees)
+        .where(isNotNull(employees.pendingSupervisorBambooId));
+      return rows.flatMap((row) =>
+        row.supervisorBambooId
+          ? [
+              {
+                employeeId: row.employeeId,
+                supervisorBambooId: row.supervisorBambooId,
+              },
+            ]
+          : []
+      );
+    },
+
     async markTerminated(bambooId) {
       await db
         .update(employees)
@@ -462,7 +495,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       return created.id;
     },
 
-    async upsertTimeOffBalance(employeeId, policyId, balance) {
+    async upsertTimeOffBalance(employeeId, policyId, sourceBalance) {
       const [existing] = await db
         .select({ id: timeOffBalances.id })
         .from(timeOffBalances)
@@ -473,18 +506,35 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
           )
         )
         .limit(1);
-      if (existing) {
-        await db
-          .update(timeOffBalances)
-          .set({ balance, updatedAt: new Date() })
-          .where(eq(timeOffBalances.id, existing.id));
+      if (!existing) {
+        await db.insert(timeOffBalances).values({
+          employeeId,
+          policyId,
+          sourceBalance,
+          balance: sourceBalance,
+        });
         return;
       }
-      await db.insert(timeOffBalances).values({
-        employeeId,
-        policyId,
-        balance,
-      });
+
+      const adjustments = await db
+        .select({
+          amount: timeOffBalanceAdjustments.amount,
+          reason: timeOffBalanceAdjustments.reason,
+        })
+        .from(timeOffBalanceAdjustments)
+        .where(eq(timeOffBalanceAdjustments.balanceId, existing.id));
+      const spendable = reconcileImportedTimeOffBalance(
+        sourceBalance,
+        adjustments
+      );
+      await db
+        .update(timeOffBalances)
+        .set({
+          sourceBalance,
+          balance: spendable,
+          updatedAt: new Date(),
+        })
+        .where(eq(timeOffBalances.id, existing.id));
     },
 
     async applyBrendanCarryOver(opts) {

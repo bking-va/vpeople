@@ -218,6 +218,13 @@
       "when": 1795037785834,
       "tag": "0030_bamboo_hr_import",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795041196316,
+      "tag": "0031_bamboo_sync_security",
+      "breakpoints": true
     }
   ]
 }

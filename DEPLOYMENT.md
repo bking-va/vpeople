@@ -154,7 +154,7 @@ npx tsx scripts/bamboo-sync.ts --replace-demo /tmp/db_url.txt
 
 The real BambooHR record for `bking@vendasta.com` becomes `full_admin` and inherits E001's `vendasta_sub` so Vendasta SSO keeps working. Everyone else is imported as access level `employee`. Personal (non-`@vendasta.com`) work emails stay access-restricted. SIN/SSN and bank fields are never imported.
 
-Hourly cron: `GET /api/cron/bamboo-sync` on `0 * * * *`, authorized with `CRON_SECRET`. Without `BAMBOOHR_API_KEY` it is a logged no-op. Bamboo time-off balances in hours are stored as days (8 hours = 1 day) so they match vPeople deductions.
+Hourly cron: `GET /api/cron/bamboo-sync` on `0 * * * *`, authorized with `CRON_SECRET`. Without `BAMBOOHR_API_KEY` it is a logged no-op. Bamboo time-off balances in hours are stored as days (8 hours = 1 day) so they match vPeople deductions. Spendable leave is Bamboo’s imported `source_balance` plus local usage/manual adjustments, so re-sync cannot restore already-spent credit. Unresolved replacement supervisors clear the old manager link until the new supervisor is imported. Apply `drizzle/0031_bamboo_sync_security.sql` with the rest of the migrations.
 
 ### Vercel One-Click Deploy
 

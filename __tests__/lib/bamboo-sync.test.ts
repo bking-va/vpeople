@@ -10,6 +10,7 @@ import {
   mapEmploymentStatus,
   mapGender,
   parsePayRate,
+  reconcileImportedTimeOffBalance,
   resolveLoginEmails,
 } from "@/lib/bamboo-sync/map";
 import { BambooHrClient } from "@/lib/bamboo-sync/client";
@@ -242,6 +243,26 @@ describe("BambooHR field mapping", () => {
     expect(bambooBalanceToDays("8", "hourly")).toBe("1.00");
   });
 
+  it("reconciles local usage against the imported Bamboo source balance", () => {
+    expect(
+      reconcileImportedTimeOffBalance("10.00", [
+        { amount: "-3.00", reason: "used:99" },
+      ])
+    ).toBe("7.00");
+    expect(
+      reconcileImportedTimeOffBalance("10.00", [
+        { amount: "1.25", reason: "accrual:2026-11" },
+        { amount: "-2.00", reason: "carryover:2026" },
+      ])
+    ).toBe("10.00");
+    expect(
+      reconcileImportedTimeOffBalance("10.00", [
+        { amount: "-1.00", reason: "used:12" },
+        { amount: "0.50", reason: "manual correction" },
+      ])
+    ).toBe("9.50");
+  });
+
   it("parses compensation rates without exposing them via the mapper logs", () => {
     expect(parsePayRate("$72,000.00 USD")).toEqual({
       amount: "72000.00",
@@ -292,6 +313,7 @@ type MemoryEmployee = SyncEmployeeRow & {
   divisionName?: string | null;
   locationName?: string | null;
   employmentStatus?: string | null;
+  pendingSupervisorBambooId?: string | null;
 };
 
 class MemoryStore implements BambooSyncStore {
@@ -305,6 +327,13 @@ class MemoryStore implements BambooSyncStore {
     employeeId: number;
     policyId: number;
     balance: string;
+    sourceBalance: string;
+  }> = [];
+  timeOffAdjustments: Array<{
+    employeeId: number;
+    policyId: number;
+    amount: string;
+    reason: string;
   }> = [];
   syncRuns: Array<Record<string, unknown>> = [];
   writes = 0;
@@ -344,6 +373,7 @@ class MemoryStore implements BambooSyncStore {
     this.compensation = [];
     this.emergencyContacts = [];
     this.timeOffBalances = [];
+    this.timeOffAdjustments = [];
     return { removed, brendanSnapshot: snapshot };
   }
 
@@ -388,6 +418,30 @@ class MemoryStore implements BambooSyncStore {
     this.writes += 1;
     const row = this.employees.find((emp) => emp.id === employeeId);
     if (row) row.managerId = managerId;
+  }
+
+  async setUnresolvedSupervisor(
+    employeeId: number,
+    supervisorBambooId: string | null
+  ): Promise<void> {
+    this.writes += 1;
+    const row = this.employees.find((emp) => emp.id === employeeId);
+    if (row) row.pendingSupervisorBambooId = supervisorBambooId;
+  }
+
+  async listUnresolvedSupervisors(): Promise<
+    Array<{ employeeId: number; supervisorBambooId: string }>
+  > {
+    return this.employees.flatMap((row) =>
+      row.pendingSupervisorBambooId
+        ? [
+            {
+              employeeId: row.id,
+              supervisorBambooId: row.pendingSupervisorBambooId,
+            },
+          ]
+        : []
+    );
   }
 
   async markTerminated(bambooId: string): Promise<void> {
@@ -450,17 +504,27 @@ class MemoryStore implements BambooSyncStore {
   async upsertTimeOffBalance(
     employeeId: number,
     policyId: number,
-    balance: string
+    sourceBalance: string
   ): Promise<void> {
     this.writes += 1;
+    const adjustments = this.timeOffAdjustments.filter(
+      (row) => row.employeeId === employeeId && row.policyId === policyId
+    );
+    const spendable = reconcileImportedTimeOffBalance(sourceBalance, adjustments);
     const existing = this.timeOffBalances.find(
       (row) => row.employeeId === employeeId && row.policyId === policyId
     );
     if (existing) {
-      existing.balance = balance;
+      existing.sourceBalance = sourceBalance;
+      existing.balance = spendable;
       return;
     }
-    this.timeOffBalances.push({ employeeId, policyId, balance });
+    this.timeOffBalances.push({
+      employeeId,
+      policyId,
+      sourceBalance,
+      balance: spendable,
+    });
   }
 
   async applyBrendanCarryOver(opts: {
@@ -950,6 +1014,102 @@ describe("runBambooSync", () => {
     expect(ada?.managerId).toBe(10);
   });
 
+  it("clears the former manager when the replacement supervisor is missing and retries later", async () => {
+    const store = new MemoryStore();
+    store.employees.push(
+      {
+        id: 10,
+        bambooId: "100",
+        email: "bking@vendasta.com",
+        employeeNumber: "V-100",
+        firstName: "Brendan",
+        lastName: "King",
+        accessLevel: "full_admin",
+        vendastaSub: null,
+        userId: null,
+        managerId: null,
+      },
+      {
+        id: 11,
+        bambooId: "101",
+        email: "ada.lovelace@vendasta.com",
+        employeeNumber: "V-101",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        accessLevel: "employee",
+        vendastaSub: null,
+        userId: null,
+        managerId: 10,
+      }
+    );
+    store.nextId = 12;
+    store.syncRuns.push({
+      status: "success",
+      latestChanged: "2026-11-01T00:00:00Z",
+    });
+
+    const reassigned = bambooEmployee({
+      id: "101",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      workEmail: "ada.lovelace@vendasta.com",
+      supervisorEId: "200",
+      department: "Technology",
+      jobTitle: "Engineer",
+      employmentHistoryStatus: "Full-Time",
+      status: "Active",
+    });
+    const first = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [reassigned] },
+        changed: {
+          latest: "2026-11-18T00:00:00Z",
+          employees: {
+            "101": { id: "101", action: "Updated", lastChanged: "2026-11-18T00:00:00Z" },
+          },
+        },
+        tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+        timeOffTypes: { timeOffTypes: [] },
+      }),
+    });
+    await runBambooSync({ client: first, store, mode: "incremental" });
+
+    const adaAfterClear = store.employees.find((row) => row.bambooId === "101");
+    expect(adaAfterClear?.managerId).toBeNull();
+    expect(adaAfterClear?.pendingSupervisorBambooId).toBe("200");
+
+    const newBoss = bambooEmployee({
+      id: "200",
+      firstName: "Grace",
+      lastName: "Hopper",
+      workEmail: "grace.hopper@vendasta.com",
+    });
+    const second = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [newBoss] },
+        changed: {
+          latest: "2026-11-18T01:00:00Z",
+          employees: {
+            "200": { id: "200", action: "Inserted", lastChanged: "2026-11-18T01:00:00Z" },
+          },
+        },
+        tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+        timeOffTypes: { timeOffTypes: [] },
+      }),
+    });
+    await runBambooSync({ client: second, store, mode: "incremental" });
+
+    const grace = store.employees.find((row) => row.bambooId === "200");
+    const adaAfterRetry = store.employees.find((row) => row.bambooId === "101");
+    expect(grace).toBeDefined();
+    expect(adaAfterRetry?.managerId).toBe(grace?.id);
+    expect(adaAfterRetry?.pendingSupervisorBambooId).toBeNull();
+  });
+
   it("marks deleted Bamboo employees terminated without wiping retained profile fields", async () => {
     const store = new MemoryStore();
     store.employees.push({
@@ -1016,7 +1176,7 @@ describe("runBambooSync", () => {
     });
     await runBambooSync({ client, store, mode: "full" });
     expect(store.timeOffBalances).toEqual([
-      expect.objectContaining({ balance: "5.00" }),
+      expect.objectContaining({ balance: "5.00", sourceBalance: "5.00" }),
     ]);
   });
 
@@ -1040,7 +1200,12 @@ describe("runBambooSync", () => {
       latestChanged: "2026-11-01T00:00:00Z",
     });
     store.timeOffPolicies.push({ id: 1, name: "Vacation", policyType: "Vacation" });
-    store.timeOffBalances.push({ employeeId: 11, policyId: 1, balance: "1.0" });
+    store.timeOffBalances.push({
+      employeeId: 11,
+      policyId: 1,
+      sourceBalance: "1.0",
+      balance: "1.0",
+    });
 
     const client = new BambooHrClient({
       apiKey: "test-key",
@@ -1057,7 +1222,61 @@ describe("runBambooSync", () => {
     });
     await runBambooSync({ client, store, mode: "incremental" });
     expect(store.timeOffBalances).toEqual([
-      { employeeId: 11, policyId: 1, balance: "12.00" },
+      {
+        employeeId: 11,
+        policyId: 1,
+        sourceBalance: "12.00",
+        balance: "12.00",
+      },
+    ]);
+  });
+
+  it("does not restore locally spent leave when Bamboo still reports the pre-approval balance", async () => {
+    const store = new MemoryStore();
+    const client = clientFor([report]);
+    await runBambooSync({ client, store, mode: "full" });
+    const ada = store.employees.find((row) => row.bambooId === "101");
+    expect(ada).toBeDefined();
+    expect(store.timeOffBalances).toEqual([
+      expect.objectContaining({
+        employeeId: ada?.id,
+        sourceBalance: "10.50",
+        balance: "10.50",
+      }),
+    ]);
+
+    store.timeOffAdjustments.push({
+      employeeId: ada!.id,
+      policyId: store.timeOffBalances[0]!.policyId,
+      amount: "-2.00",
+      reason: "used:501",
+    });
+    store.timeOffBalances[0]!.balance = "8.50";
+    store.syncRuns.push({
+      status: "success",
+      latestChanged: "2026-11-18T00:00:00Z",
+    });
+
+    const refresh = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [] },
+        changed: { latest: "2026-11-18T01:00:00Z", employees: {} },
+        tables: {},
+        timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation" }] },
+        balances: {
+          "101": [{ name: "Vacation", balance: "10.5" }],
+        },
+      }),
+    });
+    await runBambooSync({ client: refresh, store, mode: "incremental" });
+    expect(store.timeOffBalances).toEqual([
+      expect.objectContaining({
+        employeeId: ada?.id,
+        sourceBalance: "10.50",
+        balance: "8.50",
+      }),
     ]);
   });
 });

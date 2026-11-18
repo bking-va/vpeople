@@ -12,6 +12,8 @@ export {
   UNMAPPED_KNOWN_BAMBOO_FIELDS,
   bambooBalanceToDays,
   collectUnmappedFieldNames,
+  isBambooSystemOfRecordAdjustment,
+  reconcileImportedTimeOffBalance,
   isBrendanWorkEmail,
   mapEmergencyContact,
   mapEmployeeRecord,

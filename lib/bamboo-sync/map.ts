@@ -185,6 +185,25 @@ export function bambooBalanceToDays(
   return days.toFixed(2);
 }
 
+export function isBambooSystemOfRecordAdjustment(reason?: string | null): boolean {
+  const kind = (reason || "").trim().toLowerCase();
+  return kind.startsWith("accrual:") || kind.startsWith("carryover:");
+}
+
+export function reconcileImportedTimeOffBalance(
+  sourceBalance: string,
+  adjustments: Array<{ amount: string | number; reason?: string | null }>
+): string {
+  const source = Number.parseFloat(sourceBalance);
+  const base = Number.isFinite(source) ? source : 0;
+  const delta = adjustments.reduce((sum, row) => {
+    if (isBambooSystemOfRecordAdjustment(row.reason)) return sum;
+    const amount = Number.parseFloat(String(row.amount));
+    return Number.isFinite(amount) ? sum + amount : sum;
+  }, 0);
+  return (base + delta).toFixed(2);
+}
+
 export function parsePayRate(
   value: string | number | null | undefined
 ): { amount: string | null; currency: string | null } {

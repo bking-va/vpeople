@@ -236,6 +236,7 @@ export const employees = pgTable("employees", {
   divisionId: integer("division_id").references(() => divisions.id),
   locationId: integer("location_id").references(() => locations.id),
   managerId: integer("manager_id"),
+  pendingSupervisorBambooId: text("pending_supervisor_bamboo_id"),
   hireDate: date("hire_date"),
   originalHireDate: date("original_hire_date"),
   terminationDate: date("termination_date"),
@@ -436,6 +437,9 @@ export const timeOffBalances = pgTable("time_off_balances", {
     .notNull()
     .references(() => timeOffPolicies.id, { onDelete: "cascade" }),
   balance: decimal("balance", { precision: 10, scale: 2 }).default("0").notNull(),
+  sourceBalance: decimal("source_balance", { precision: 10, scale: 2 })
+    .default("0")
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

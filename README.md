@@ -364,7 +364,7 @@ The following features are stubbed or partially implemented for future developme
 
 vPeople can pull employees from BambooHR (GET-only; the custom report endpoint is a read). It never writes back to BambooHR, never logs PII, and does not send email or webhooks.
 
-Apply migration `drizzle/0030_bamboo_hr_import.sql` first (`npm run db:migrate`).
+Apply migrations through `drizzle/0031_bamboo_sync_security.sql` first (`npm run db:migrate`).
 
 Dry run (fetch + map, print counts and Bamboo ids, write nothing):
 
@@ -382,7 +382,7 @@ npx tsx scripts/bamboo-sync.ts --replace-demo /tmp/db_url.txt
 
 Hourly incremental sync is `GET /api/cron/bamboo-sync` (Vercel Cron `0 * * * *`, `Authorization: Bearer $CRON_SECRET`). It uses BambooHR `employees/changed` since the last successful run. If `BAMBOOHR_API_KEY` is unset the route logs a skip and records a `skipped` row in `bamboo_sync_runs`.
 
-Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, job/status/compensation history, emergency contacts, time-off types and current balances. Hourly Bamboo balances are converted to days at 8 hours/day before they are stored, matching vPeople’s day-based deductions.
+Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, job/status/compensation history, emergency contacts, time-off types and current balances. Hourly Bamboo balances are converted to days at 8 hours/day before they are stored, matching vPeople’s day-based deductions. Bamboo remains the system of record for entitlement: the imported amount is stored as `source_balance`, and spendable credit is that source plus local usage/manual adjustments so an hourly re-sync cannot restore already-approved leave. If a changed employee’s new supervisor is not in vPeople yet, the former `managerId` is cleared (so they lose leave-approval and manager-scoped access) and the link is retried once that supervisor exists.
 
 Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, time-off *request* history (avoids approval side effects), custom Bamboo fields, FLSA/payroll flags. Compensation is stored but never printed.
 

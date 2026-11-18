@@ -35,6 +35,13 @@ export interface BambooSyncStore {
     employee: MappedEmployee
   ): Promise<{ id: number; created: boolean }>;
   setManager(employeeId: number, managerId: number | null): Promise<void>;
+  setUnresolvedSupervisor(
+    employeeId: number,
+    supervisorBambooId: string | null
+  ): Promise<void>;
+  listUnresolvedSupervisors(): Promise<
+    Array<{ employeeId: number; supervisorBambooId: string }>
+  >;
   markTerminated(bambooId: string): Promise<void>;
   replaceJobHistory(
     employeeId: number,
@@ -369,11 +376,28 @@ export async function runBambooSync(
       if (!employeeId) continue;
       if (!bundle.supervisorBambooId) {
         await store.setManager(employeeId, null);
+        await store.setUnresolvedSupervisor(employeeId, null);
         continue;
       }
       const managerId = idByBambooId.get(bundle.supervisorBambooId);
-      if (managerId === undefined) continue;
+      if (managerId === undefined) {
+        await store.setManager(employeeId, null);
+        await store.setUnresolvedSupervisor(
+          employeeId,
+          bundle.supervisorBambooId
+        );
+        continue;
+      }
       await store.setManager(employeeId, managerId);
+      await store.setUnresolvedSupervisor(employeeId, null);
+      reportsToResolved += 1;
+    }
+
+    for (const pending of await store.listUnresolvedSupervisors()) {
+      const managerId = idByBambooId.get(pending.supervisorBambooId);
+      if (managerId === undefined) continue;
+      await store.setManager(pending.employeeId, managerId);
+      await store.setUnresolvedSupervisor(pending.employeeId, null);
       reportsToResolved += 1;
     }
 

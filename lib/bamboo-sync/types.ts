@@ -163,6 +163,7 @@ export type SyncEmployeeRow = {
   vendastaSub: string | null;
   userId: string | null;
   managerId: number | null;
+  pendingSupervisorBambooId?: string | null;
 };
 
 export type BrendanSnapshot = {
