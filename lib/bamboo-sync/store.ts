@@ -27,7 +27,7 @@ import {
   timeOffRequests,
   timesheets,
 } from "@/lib/db/schema";
-import { isBrendanWorkEmail, reconcileImportedTimeOffBalance } from "./map";
+import { isBrendanWorkEmail } from "./map";
 import { DEMO_SEED_EMAILS, isDemoEmployee } from "./demo";
 import type { BambooSyncStore } from "./sync";
 import type {
@@ -516,17 +516,15 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         return;
       }
 
-      const adjustments = await db
-        .select({
-          amount: timeOffBalanceAdjustments.amount,
-          reason: timeOffBalanceAdjustments.reason,
-        })
-        .from(timeOffBalanceAdjustments)
-        .where(eq(timeOffBalanceAdjustments.balanceId, existing.id));
-      const spendable = reconcileImportedTimeOffBalance(
-        sourceBalance,
-        adjustments
-      );
+      // One UPDATE so a concurrent approval cannot insert a `used:` row
+      // after we read the ledger and then have its deduction overwritten.
+      const spendable = sql`${sourceBalance}::numeric + coalesce((
+        select sum(${timeOffBalanceAdjustments.amount}::numeric)
+        from ${timeOffBalanceAdjustments}
+        where ${timeOffBalanceAdjustments.balanceId} = ${timeOffBalances.id}
+          and lower(${timeOffBalanceAdjustments.reason}) not like 'accrual:%'
+          and lower(${timeOffBalanceAdjustments.reason}) not like 'carryover:%'
+      ), 0)`;
       await db
         .update(timeOffBalances)
         .set({

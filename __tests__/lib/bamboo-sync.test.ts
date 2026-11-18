@@ -1279,6 +1279,66 @@ describe("runBambooSync", () => {
       }),
     ]);
   });
+
+  it("includes a used adjustment that lands before the spendable write", async () => {
+    const store = new MemoryStore();
+    store.employees.push({
+      id: 11,
+      bambooId: "101",
+      email: "ada.lovelace@vendasta.com",
+      employeeNumber: "V-101",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      accessLevel: "employee",
+      vendastaSub: null,
+      userId: null,
+      managerId: null,
+    });
+    store.nextId = 12;
+    store.syncRuns.push({
+      status: "success",
+      latestChanged: "2026-11-01T00:00:00Z",
+    });
+    store.timeOffPolicies.push({ id: 1, name: "Vacation", policyType: "Vacation" });
+    store.timeOffBalances.push({
+      employeeId: 11,
+      policyId: 1,
+      sourceBalance: "10.50",
+      balance: "10.50",
+    });
+    const original = store.upsertTimeOffBalance.bind(store);
+    store.upsertTimeOffBalance = async (employeeId, policyId, sourceBalance) => {
+      store.timeOffAdjustments.push({
+        employeeId,
+        policyId,
+        amount: "-2.00",
+        reason: "used:777",
+      });
+      return original(employeeId, policyId, sourceBalance);
+    };
+
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [] },
+        changed: { latest: "2026-11-18T00:00:00Z", employees: {} },
+        tables: {},
+        timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation" }] },
+        balances: {
+          "101": [{ name: "Vacation", balance: "10.5" }],
+        },
+      }),
+    });
+    await runBambooSync({ client, store, mode: "incremental" });
+    expect(store.timeOffBalances).toEqual([
+      expect.objectContaining({
+        employeeId: 11,
+        sourceBalance: "10.50",
+        balance: "8.50",
+      }),
+    ]);
+  });
 });
 
 describe("CLI args and demo detection", () => {
