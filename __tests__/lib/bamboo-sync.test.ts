@@ -1,6 +1,8 @@
 import {
+  BAMBOO_HOURS_PER_WORKDAY,
   BRENDAN_WORK_EMAILS,
   EXCLUDED_BAMBOO_FIELDS,
+  bambooBalanceToDays,
   collectUnmappedFieldNames,
   isBrendanWorkEmail,
   mapEmergencyContact,
@@ -227,6 +229,15 @@ describe("BambooHR field mapping", () => {
     );
     expect(unmapped).not.toContain("firstName");
     expect(unmapped).not.toContain("ssn");
+  });
+
+  it("converts hourly Bamboo time-off balances into days", () => {
+    expect(BAMBOO_HOURS_PER_WORKDAY).toBe(8);
+    expect(bambooBalanceToDays("40", "hours")).toBe("5.00");
+    expect(bambooBalanceToDays("8", "Hours")).toBe("1.00");
+    expect(bambooBalanceToDays("12.5", "days")).toBe("12.50");
+    expect(bambooBalanceToDays("3", "day")).toBe("3.00");
+    expect(bambooBalanceToDays("not-a-number", "hours")).toBe("0.00");
   });
 
   it("parses compensation rates without exposing them via the mapper logs", () => {
@@ -946,6 +957,26 @@ describe("runBambooSync", () => {
     });
   });
 
+  it("imports hourly calculator balances as days so deductions stay day-based", async () => {
+    const store = new MemoryStore();
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [report] },
+        tables: {},
+        timeOffTypes: { timeOffTypes: [{ id: "1", name: "Sick", units: "hours" }] },
+        balances: {
+          "101": [{ name: "Sick", balance: "40", units: "hours" }],
+        },
+      }),
+    });
+    await runBambooSync({ client, store, mode: "full" });
+    expect(store.timeOffBalances).toEqual([
+      expect.objectContaining({ balance: "5.00" }),
+    ]);
+  });
+
   it("refreshes time-off balances for imported employees that did not change", async () => {
     const store = new MemoryStore();
     store.employees.push({
@@ -983,7 +1014,7 @@ describe("runBambooSync", () => {
     });
     await runBambooSync({ client, store, mode: "incremental" });
     expect(store.timeOffBalances).toEqual([
-      { employeeId: 11, policyId: 1, balance: "12.0" },
+      { employeeId: 11, policyId: 1, balance: "12.00" },
     ]);
   });
 });

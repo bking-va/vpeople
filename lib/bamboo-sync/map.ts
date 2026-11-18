@@ -168,6 +168,19 @@ export function mapEmploymentStatus(input: {
   return "full_time";
 }
 
+export const BAMBOO_HOURS_PER_WORKDAY = 8;
+
+export function bambooBalanceToDays(
+  value: string | number | null | undefined,
+  units?: string | null
+): string {
+  const amount = Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(amount)) return "0.00";
+  const kind = (units || "days").trim().toLowerCase();
+  const days = kind.startsWith("hour") ? amount / BAMBOO_HOURS_PER_WORKDAY : amount;
+  return days.toFixed(2);
+}
+
 export function parsePayRate(
   value: string | number | null | undefined
 ): { amount: string | null; currency: string | null } {

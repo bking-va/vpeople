@@ -1,4 +1,4 @@
-import { IMPORTED_EMPLOYEE_FIELDS } from "./map";
+import { bambooBalanceToDays, IMPORTED_EMPLOYEE_FIELDS } from "./map";
 import type { BambooChangedEmployee, BambooEmployeeRecord } from "./types";
 
 export type BambooFetch = (
@@ -224,7 +224,8 @@ export class BambooHrClient {
 
   async fetchTimeOffBalances(
     bambooId: string,
-    asOf: string
+    asOf: string,
+    unitsByName: Map<string, string> = new Map()
   ): Promise<Array<{ name: string; balance: string }>> {
     const payload = await this.request(
       `/employees/${bambooId}/time_off/calculator?start=${asOf}&end=${asOf}`
@@ -232,10 +233,25 @@ export class BambooHrClient {
     const list = Array.isArray(payload) ? payload : [];
     return list
       .map((row) => asRecord(row))
-      .map((row) => ({
-        name: String(row.name ?? row.timeOffType ?? "").trim(),
-        balance: String(row.balance ?? row.units ?? "0"),
-      }))
+      .map((row) => {
+        const name = String(row.name ?? row.timeOffType ?? "").trim();
+        const rowUnits =
+          typeof row.units === "string" && !/^\d/.test(row.units.trim())
+            ? row.units
+            : undefined;
+        const units =
+          rowUnits ||
+          unitsByName.get(name) ||
+          unitsByName.get(name.toLowerCase());
+        const amount = row.balance ?? row.amount ?? row.total;
+        return {
+          name,
+          balance: bambooBalanceToDays(
+            amount as string | number | null | undefined,
+            units
+          ),
+        };
+      })
       .filter((row) => row.name);
   }
 }

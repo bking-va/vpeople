@@ -298,6 +298,12 @@ export async function runBambooSync(
     tablesSince
   );
   const timeOffTypes = await opts.client.fetchTimeOffTypes().catch(() => []);
+  const unitsByName = new Map<string, string>();
+  for (const type of timeOffTypes) {
+    if (!type.units) continue;
+    unitsByName.set(type.name, type.units);
+    unitsByName.set(type.name.toLowerCase(), type.units);
+  }
   const asOf = (opts.now ?? new Date()).toISOString().slice(0, 10);
   const balanceTargets = uniqueSorted([
     ...mapped.map((row) => row.bambooId),
@@ -308,7 +314,7 @@ export async function runBambooSync(
   const balancesByBambooId = new Map<string, Array<{ name: string; balance: string }>>();
   for (const bambooId of balanceTargets) {
     const balances = await opts.client
-      .fetchTimeOffBalances(bambooId, asOf)
+      .fetchTimeOffBalances(bambooId, asOf, unitsByName)
       .catch(() => []);
     balancesByBambooId.set(bambooId, balances);
   }

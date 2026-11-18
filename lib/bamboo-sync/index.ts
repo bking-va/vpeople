@@ -4,10 +4,12 @@ export {
   createBambooHrClientFromEnv,
 } from "./client";
 export {
+  BAMBOO_HOURS_PER_WORKDAY,
   BRENDAN_WORK_EMAILS,
   EXCLUDED_BAMBOO_FIELDS,
   IMPORTED_EMPLOYEE_FIELDS,
   UNMAPPED_KNOWN_BAMBOO_FIELDS,
+  bambooBalanceToDays,
   collectUnmappedFieldNames,
   isBrendanWorkEmail,
   mapEmergencyContact,

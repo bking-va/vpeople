@@ -382,7 +382,7 @@ npx tsx scripts/bamboo-sync.ts --replace-demo /tmp/db_url.txt
 
 Hourly incremental sync is `GET /api/cron/bamboo-sync` (Vercel Cron `0 * * * *`, `Authorization: Bearer $CRON_SECRET`). It uses BambooHR `employees/changed` since the last successful run. If `BAMBOOHR_API_KEY` is unset the route logs a skip and records a `skipped` row in `bamboo_sync_runs`.
 
-Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, job/status/compensation history, emergency contacts, time-off types and current balances.
+Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, job/status/compensation history, emergency contacts, time-off types and current balances. Hourly Bamboo balances are converted to days at 8 hours/day before they are stored, matching vPeople’s day-based deductions.
 
 Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, time-off *request* history (avoids approval side effects), custom Bamboo fields, FLSA/payroll flags. Compensation is stored but never printed.
 
