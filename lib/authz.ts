@@ -184,6 +184,14 @@ export function canManageTimeOffOperations(opts: {
   return isFullAdmin(opts.accessLevel) || opts.canManageUsers === true;
 }
 
+/** Bamboo custom compensation tables: same rule as current compensation. */
+export function canViewBambooCompensationTables(opts: {
+  isViewingSelf: boolean;
+  canViewCompensation?: boolean | null;
+}): boolean {
+  return opts.isViewingSelf || opts.canViewCompensation === true;
+}
+
 export function canViewOfferSalary(opts: {
   canViewCompensation: boolean;
   accessLevel: AccessLevel;

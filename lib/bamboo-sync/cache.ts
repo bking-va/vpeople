@@ -5,8 +5,9 @@ import path from "node:path";
 import type { BambooEmployeeRecord, BambooSyncMode } from "./types";
 import type { ExtendedFetchPayload } from "./extended";
 import type { MetadataFetchPayload } from "./metadata";
+import type { CompensationTablesFetchPayload } from "./comp-tables";
 
-export const BAMBOO_SYNC_CACHE_VERSION = 3;
+export const BAMBOO_SYNC_CACHE_VERSION = 4;
 
 export type BambooSyncTableSnapshot = {
   jobInfo: Record<string, Array<Record<string, unknown>>>;
@@ -27,6 +28,7 @@ export type BambooSyncSnapshot = {
   balances: Record<string, Array<{ name: string; balance: string }>>;
   extended: ExtendedFetchPayload;
   metadata: MetadataFetchPayload;
+  compensationTables: CompensationTablesFetchPayload;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -62,7 +64,8 @@ export function parseBambooSyncSnapshot(value: unknown): BambooSyncSnapshot {
     !isRecord(value.tables) ||
     !isRecord(value.balances) ||
     !isRecord(value.extended) ||
-    !isRecord(value.metadata)
+    !isRecord(value.metadata) ||
+    !isRecord(value.compensationTables)
   ) {
     throw new Error("Bamboo sync cache is invalid or unsupported");
   }

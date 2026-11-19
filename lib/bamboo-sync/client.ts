@@ -40,6 +40,15 @@ const ALLOWED_FULL_TABLES = new Set([
   "assets",
   "dependents",
   "employeeDependents",
+  "customTeamInformation",
+  "customAdjustments",
+  "customVariablePayActuals",
+  "customInternalReporting",
+  "customAnnualBonus",
+  "customShiftTiming",
+  "customCommissionPlanDetails",
+  "customStatutoryBonusPlanDetails",
+  "customCommissionSupplements",
 ]);
 export const ATS_APPLICATIONS_MAX_PAGES = 2000;
 export const BAMBOO_ATS_DETAIL_CONCURRENCY = 2;
