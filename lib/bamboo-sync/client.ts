@@ -1,4 +1,5 @@
 import { bambooBalanceToDays, IMPORTED_EMPLOYEE_FIELDS } from "./map";
+import { mapPool } from "./pool";
 import type { BambooChangedEmployee, BambooEmployeeRecord } from "./types";
 
 export type BambooFetch = (
@@ -6,10 +7,19 @@ export type BambooFetch = (
   init?: RequestInit
 ) => Promise<Response>;
 
+export const BAMBOO_REQUEST_TIMEOUT_MS = 20_000;
+export const BAMBOO_MAX_RETRIES = 4;
+export const BAMBOO_BALANCE_CONCURRENCY = 6;
+export const BAMBOO_MAX_RETRY_AFTER_MS = 60_000;
+export const BAMBOO_PROGRESS_EVERY = 50;
+
 export type BambooHrClientOptions = {
   apiKey: string;
   subdomain?: string;
   fetch?: BambooFetch;
+  timeoutMs?: number;
+  maxRetries?: number;
+  concurrency?: number;
 };
 
 const EARLIEST_CHANGED = "2010-01-01T00:00:00Z";
@@ -56,6 +66,87 @@ function basicAuth(apiKey: string): string {
   return `Basic ${Buffer.from(`${apiKey}:x`).toString("base64")}`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function parseRetryAfterMs(
+  header: string | null | undefined,
+  attempt: number
+): number {
+  const fallback = Math.min(1000 * 2 ** attempt, 16_000);
+  if (!header) {
+    return fallback;
+  }
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, BAMBOO_MAX_RETRY_AFTER_MS);
+  }
+  const date = Date.parse(header);
+  if (Number.isFinite(date)) {
+    return Math.min(Math.max(date - Date.now(), 0), BAMBOO_MAX_RETRY_AFTER_MS);
+  }
+  return fallback;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503;
+}
+
+function isRetryableAbortOrNetwork(error: unknown): boolean {
+  if (error instanceof BambooHrHttpError) {
+    return isRetryableStatus(error.status);
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.name === "AbortError" ||
+    error.name === "TimeoutError" ||
+    error.name === "TypeError"
+  );
+}
+
+function timeoutError(): Error {
+  const error = new Error("BambooHR request timed out");
+  error.name = "TimeoutError";
+  return error;
+}
+
+async function awaitUntilAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal
+): Promise<T> {
+  if (signal.aborted) {
+    throw timeoutError();
+  }
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(timeoutError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+export function parseBoundedConcurrency(
+  raw: string | undefined,
+  fallback = BAMBOO_BALANCE_CONCURRENCY
+): number {
+  const value = Number(raw);
+  if (Number.isInteger(value) && value >= 1 && value <= 16) {
+    return value;
+  }
+  return fallback;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
@@ -96,12 +187,18 @@ export class BambooHrClient {
   private readonly subdomain: string;
   private readonly fetchImpl: BambooFetch;
   readonly baseUrl: string;
+  readonly timeoutMs: number;
+  readonly maxRetries: number;
+  readonly concurrency: number;
 
   constructor(opts: BambooHrClientOptions) {
     this.apiKey = opts.apiKey;
     this.subdomain = assertSafeBambooSubdomain(opts.subdomain || "vendasta");
     this.fetchImpl = opts.fetch || fetch;
     this.baseUrl = `https://api.bamboohr.com/api/gateway.php/${this.subdomain}/v1`;
+    this.timeoutMs = opts.timeoutMs ?? BAMBOO_REQUEST_TIMEOUT_MS;
+    this.maxRetries = opts.maxRetries ?? BAMBOO_MAX_RETRIES;
+    this.concurrency = opts.concurrency ?? BAMBOO_BALANCE_CONCURRENCY;
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -120,23 +217,54 @@ export class BambooHrClient {
     if (method !== "GET" && !(method === "POST" && path.startsWith("/reports/custom"))) {
       throw new Error(`BambooHR client is read-only; refused ${method} ${path}`);
     }
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      ...init,
-      method,
-      redirect: "error",
-      headers: this.headers(init.headers as Record<string, string> | undefined),
-    });
-    if (!response.ok) {
-      throw new BambooHrHttpError(method, path, response.status);
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const response = await awaitUntilAbort(
+          this.fetchImpl(`${this.baseUrl}${path}`, {
+            ...init,
+            method,
+            redirect: "error",
+            signal: controller.signal,
+            headers: this.headers(init.headers as Record<string, string> | undefined),
+          }),
+          controller.signal
+        );
+        if (isRetryableStatus(response.status)) {
+          lastError = new BambooHrHttpError(method, path, response.status);
+          if (attempt === this.maxRetries) {
+            throw lastError;
+          }
+          await sleep(parseRetryAfterMs(response.headers.get("retry-after"), attempt));
+          continue;
+        }
+        if (!response.ok) {
+          throw new BambooHrHttpError(method, path, response.status);
+        }
+        if (response.status === 204) {
+          return null;
+        }
+        const text = await awaitUntilAbort(response.text(), controller.signal);
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return text;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt === this.maxRetries || !isRetryableAbortOrNetwork(error)) {
+          throw error;
+        }
+        await sleep(parseRetryAfterMs(null, attempt));
+      } finally {
+        clearTimeout(timeout);
+      }
     }
-    if (response.status === 204) return null;
-    const text = await response.text();
-    if (!text) return null;
-    try {
-      return JSON.parse(text);
-    } catch {
-      return text;
-    }
+    throw lastError;
   }
 
   async fetchAllEmployees(): Promise<BambooEmployeeRecord[]> {
@@ -289,6 +417,42 @@ export class BambooHrClient {
       })
       .filter((row) => row.name);
   }
+
+  async fetchTimeOffBalancesMany(
+    bambooIds: string[],
+    asOf: string,
+    unitsByName: Map<string, string> = new Map(),
+    options?: {
+      concurrency?: number;
+      onProgress?: (done: number, total: number) => void;
+    }
+  ): Promise<{
+    balances: Map<string, Array<{ name: string; balance: string }>>;
+    failed: number;
+  }> {
+    const balances = new Map<string, Array<{ name: string; balance: string }>>();
+    if (bambooIds.length === 0) {
+      return { balances, failed: 0 };
+    }
+    let done = 0;
+    let failed = 0;
+    const concurrency = options?.concurrency ?? this.concurrency;
+    await mapPool(bambooIds, concurrency, async (bambooId) => {
+      try {
+        balances.set(
+          bambooId,
+          await this.fetchTimeOffBalances(bambooId, asOf, unitsByName)
+        );
+      } catch {
+        failed += 1;
+        balances.set(bambooId, []);
+      } finally {
+        done += 1;
+        options?.onProgress?.(done, bambooIds.length);
+      }
+    });
+    return { balances, failed };
+  }
 }
 
 export function createBambooHrClientFromEnv(
@@ -296,8 +460,14 @@ export function createBambooHrClientFromEnv(
 ): BambooHrClient | null {
   const apiKey = env.BAMBOOHR_API_KEY?.trim();
   if (!apiKey) return null;
+  const timeoutMs = Number(env.BAMBOO_SYNC_TIMEOUT_MS);
   return new BambooHrClient({
     apiKey,
     subdomain: env.BAMBOOHR_SUBDOMAIN?.trim() || "vendasta",
+    timeoutMs:
+      Number.isFinite(timeoutMs) && timeoutMs >= 1000
+        ? timeoutMs
+        : BAMBOO_REQUEST_TIMEOUT_MS,
+    concurrency: parseBoundedConcurrency(env.BAMBOO_SYNC_CONCURRENCY),
   });
 }

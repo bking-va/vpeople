@@ -3,6 +3,9 @@ export {
   BambooHrHttpError,
   assertSafeBambooSubdomain,
   createBambooHrClientFromEnv,
+  parseRetryAfterMs,
+  BAMBOO_BALANCE_CONCURRENCY,
+  BAMBOO_REQUEST_TIMEOUT_MS,
 } from "./client";
 export {
   BAMBOO_HOURS_PER_WORKDAY,
