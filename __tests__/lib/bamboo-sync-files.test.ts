@@ -1,4 +1,5 @@
 import { BambooHrClient } from "@/lib/bamboo-sync/client";
+import { isStoredBlobUrl } from "@/lib/bamboo-sync/blob";
 import { runBambooFilesSync } from "@/lib/bamboo-sync/files-sync";
 import {
   filesFromViewPayload,
@@ -6,6 +7,26 @@ import {
   mapDocumentCategory,
 } from "@/lib/bamboo-sync/map-files";
 import { canViewCompanyFile, canViewEmployeeDocument } from "@/lib/document-access";
+
+describe("stored blob URL guard", () => {
+  test("accepts Vercel Blob hosts and rejects other https URLs", () => {
+    expect(isStoredBlobUrl("https://blob.vercel-storage.com/private/i9")).toBe(true);
+    expect(
+      isStoredBlobUrl("https://store.blob.vercel-storage.com/ats-resumes/file.pdf")
+    ).toBe(true);
+    expect(
+      isStoredBlobUrl("https://store.public.blob.vercel-storage.com/file.pdf")
+    ).toBe(true);
+    expect(isStoredBlobUrl("https://evil.example/steal")).toBe(false);
+    expect(isStoredBlobUrl("https://evil.example.blob.vercel-storage.com.attacker/x")).toBe(
+      false
+    );
+    expect(isStoredBlobUrl("https://user:pass@blob.vercel-storage.com/x")).toBe(false);
+    expect(isStoredBlobUrl("http://blob.vercel-storage.com/x")).toBe(false);
+    expect(isStoredBlobUrl("bamboo:unavailable")).toBe(false);
+    expect(isStoredBlobUrl(null)).toBe(false);
+  });
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
