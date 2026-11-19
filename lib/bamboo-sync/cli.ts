@@ -6,6 +6,8 @@ export type BambooSyncCliArgs = {
   incremental: boolean;
   atsApplications: boolean;
   skipResumes: boolean;
+  files: boolean;
+  skipBlobs: boolean;
   dbUrlFile: string | null;
   cacheFile: string | null;
 };
@@ -17,6 +19,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     incremental: false,
     atsApplications: false,
     skipResumes: false,
+    files: false,
+    skipBlobs: false,
     dbUrlFile: null,
     cacheFile: null,
   };
@@ -27,6 +31,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     else if (arg === "--incremental") args.incremental = true;
     else if (arg === "--ats-applications") args.atsApplications = true;
     else if (arg === "--skip-resumes") args.skipResumes = true;
+    else if (arg === "--files") args.files = true;
+    else if (arg === "--skip-blobs") args.skipBlobs = true;
     else if (arg.startsWith("--cache=")) {
       args.cacheFile = arg.slice("--cache=".length);
     } else if (arg === "--cache") {

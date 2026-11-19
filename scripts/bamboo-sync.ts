@@ -9,6 +9,10 @@ import {
   runAtsApplicationsSync,
 } from "../lib/bamboo-sync/ats-applications";
 import { createVercelPrivateBlobStore } from "../lib/bamboo-sync/blob";
+import {
+  formatFilesSyncSummary,
+  runBambooFilesSync,
+} from "../lib/bamboo-sync/files-sync";
 import { createBambooHrClientFromEnv } from "../lib/bamboo-sync/client";
 import { parseBambooSyncArgs, readDatabaseUrl } from "../lib/bamboo-sync/cli";
 import { createBambooSyncStore } from "../lib/bamboo-sync/store";
@@ -43,6 +47,24 @@ async function main() {
   const client = createBambooHrClientFromEnv();
 
   try {
+    if (args.files) {
+      const result = await runBambooFilesSync({
+        client,
+        store,
+        blob: args.skipBlobs ? null : createVercelPrivateBlobStore(),
+        mode: args.incremental ? "incremental" : "full",
+        dryRun: args.dryRun,
+        importBlobs: !args.skipBlobs,
+        log: (message) => {
+          console.log(message);
+        },
+      });
+      console.log(formatFilesSyncSummary(result));
+      if (result.status === "failed") {
+        process.exitCode = 1;
+      }
+      return;
+    }
     if (args.atsApplications) {
       const result = await runAtsApplicationsSync({
         client,

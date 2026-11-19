@@ -62,3 +62,9 @@ export {
 } from "./map-ats";
 export { ATS_APPLICATIONS_MAX_PAGES, BAMBOO_ATS_DETAIL_CONCURRENCY } from "./client";
 export { atsResumeBlobPath, createVercelPrivateBlobStore } from "./blob";
+export { formatFilesSyncSummary, runBambooFilesSync } from "./files-sync";
+export {
+  filesFromViewPayload,
+  isRestrictedBambooFileCategory,
+  mapDocumentCategory,
+} from "./map-files";

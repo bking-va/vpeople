@@ -597,6 +597,25 @@ export class BambooHrClient {
     return this.requestBinary(`/files/${pathSegment(fileId, "file id")}`);
   }
 
+  async fetchEmployeeFilesView(employeeBambooId: string): Promise<unknown> {
+    return this.request(
+      `/employees/${pathSegment(employeeBambooId, "employee id")}/files/view`
+    );
+  }
+
+  async fetchEmployeeFile(
+    employeeBambooId: string,
+    fileId: string
+  ): Promise<{ body: Buffer; contentType: string | null; filename: string | null }> {
+    return this.requestBinary(
+      `/employees/${pathSegment(employeeBambooId, "employee id")}/files/${pathSegment(fileId, "file id")}`
+    );
+  }
+
+  async fetchCompanyFilesView(): Promise<unknown> {
+    return this.request("/files/view");
+  }
+
   async fetchMetaTables(): Promise<string[]> {
     const payload = await this.request("/meta/tables");
     const root = asRecord(payload);
