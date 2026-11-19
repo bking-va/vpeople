@@ -33,6 +33,9 @@ const SENSITIVE_FIELDS = [
   "nationalIdNumber",
   "taxId",
   "taxIdNumber",
+  "ethnicity",
+  "eeo",
+  "eeoJobCategory",
   // Banking
   "bankAccount",
   "bankAccountNumber",

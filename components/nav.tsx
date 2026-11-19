@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { Button } from "./ui/button";
-import { Users, Building2, LayoutGrid, Calendar, ListTodo, Settings, Briefcase, FileText, BookOpen, Clock, BarChart3, MessageSquare } from "lucide-react";
+import { Users, Building2, LayoutGrid, Calendar, ListTodo, Settings, Briefcase, FileText, BookOpen, Clock, BarChart3, MessageSquare, Laptop } from "lucide-react";
 
 export async function Nav() {
   const session = await auth();
@@ -62,6 +62,13 @@ export async function Nav() {
             >
               <Clock className="h-4 w-4" />
               Time Tracking
+            </Link>
+            <Link
+              href="/assets"
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary"
+            >
+              <Laptop className="h-4 w-4" />
+              Assets
             </Link>
             <Link
               href="/files"

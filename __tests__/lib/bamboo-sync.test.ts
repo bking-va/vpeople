@@ -263,9 +263,10 @@ describe("BambooHR field mapping", () => {
       facebook: "fb.com/ada",
       payGroup: "Salaried",
     });
-    expect(unmapped).toEqual(
-      expect.arrayContaining(["ethnicity", "eeo", "facebook", "payGroup"])
-    );
+    expect(unmapped).toEqual(expect.arrayContaining(["facebook"]));
+    expect(unmapped).not.toContain("ethnicity");
+    expect(unmapped).not.toContain("eeo");
+    expect(unmapped).not.toContain("payGroup");
     expect(unmapped).not.toContain("firstName");
     expect(unmapped).not.toContain("ssn");
   });
@@ -492,6 +493,10 @@ class MemoryStore implements BambooSyncStore {
   jobOpenings: Array<Record<string, unknown>> = [];
   education: Array<Record<string, unknown>> = [];
   visas: Array<Record<string, unknown>> = [];
+  assets: Array<Record<string, unknown>> = [];
+  dependents: Array<Record<string, unknown>> = [];
+  customFields: Array<Record<string, unknown>> = [];
+  customFieldValues: Array<Record<string, unknown>> = [];
   approvalRequests: Array<Record<string, unknown>> = [];
   writes = 0;
   nextId = 1;
@@ -934,6 +939,118 @@ class MemoryStore implements BambooSyncStore {
     return rows.length;
   }
 
+  async updateEmployeeExtrasBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      const employee = this.employees.find((item) => item.bambooId === row.bambooId);
+      if (employee) {
+        this.writes += 1;
+        Object.assign(employee, row);
+      }
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async upsertCustomFieldsBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<Map<string, number>> {
+    const ids = new Map<string, number>();
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.customFields.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else {
+        const id = this.nextId++;
+        this.customFields.push({ ...row, id });
+      }
+      const stored = this.customFields.find((item) => item.bambooId === bambooId);
+      ids.set(bambooId, Number(stored?.id));
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return ids;
+  }
+
+  async upsertCustomFieldValuesBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const key = `${row.customFieldId}:${row.entityId}`;
+      const existing = this.customFieldValues.find(
+        (item) => `${item.customFieldId}:${item.entityId}` === key
+      );
+      if (existing) Object.assign(existing, row);
+      else this.customFieldValues.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async pruneImportedCustomFieldValues(
+    keep: Array<{ customFieldId: number; entityId: number }>,
+    fieldIds: number[],
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    const keepKeys = new Set(keep.map((row) => `${row.customFieldId}:${row.entityId}`));
+    const fieldSet = new Set(fieldIds);
+    const next = this.customFieldValues.filter((row) => {
+      if (!fieldSet.has(Number(row.customFieldId))) return true;
+      return keepKeys.has(`${row.customFieldId}:${row.entityId}`);
+    });
+    const removed = this.customFieldValues.length - next.length;
+    this.customFieldValues.length = 0;
+    this.customFieldValues.push(...next);
+    progress?.onProgress?.(keep.length, keep.length);
+    if (removed > 0) this.writes += 1;
+    return removed;
+  }
+
+  async upsertAssetsBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.assets.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else this.assets.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async upsertDependentsBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.dependents.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else this.dependents.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
   candidates: Array<Record<string, unknown>> = [];
   candidateAnswers: Array<Record<string, unknown>> = [];
   candidateComments: Array<Record<string, unknown>> = [];
@@ -1112,7 +1229,14 @@ class MemoryStore implements BambooSyncStore {
   }
 
   async pruneImportedRowsNotIn(
-    kind: "time_off_requests" | "job_openings" | "education" | "visas" | "candidates",
+    kind:
+      | "time_off_requests"
+      | "job_openings"
+      | "education"
+      | "visas"
+      | "candidates"
+      | "assets"
+      | "dependents",
     keepBambooIds: string[],
     progress?: { onProgress?: (done: number, total: number) => void }
   ): Promise<number> {
@@ -1126,7 +1250,11 @@ class MemoryStore implements BambooSyncStore {
             ? this.education
             : kind === "candidates"
               ? this.candidates
-              : this.visas;
+              : kind === "assets"
+                ? this.assets
+                : kind === "dependents"
+                  ? this.dependents
+                  : this.visas;
     const next = collection.filter((row) => keep.has(String(row.bambooId)));
     const removed = collection.length - next.length;
     collection.length = 0;
@@ -1169,6 +1297,7 @@ function mockBambooFetch(handlers: {
   atsStatuses?: unknown;
   atsJobs?: unknown;
   metaTables?: unknown;
+  metaFields?: unknown;
   allTables?: Record<string, unknown>;
 }): jest.Mock {
   return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1231,6 +1360,9 @@ function mockBambooFetch(handlers: {
     }
     if (url.includes("/meta/tables")) {
       return jsonResponse(handlers.metaTables ?? { tables: [] });
+    }
+    if (url.includes("/meta/fields")) {
+      return jsonResponse(handlers.metaFields ?? []);
     }
     if (/\/employees\/\d+/.test(url) && method === "GET") {
       const id = url.match(/\/employees\/(\d+)/)?.[1] ?? "0";
@@ -1758,6 +1890,11 @@ describe("runBambooSync", () => {
       jobOpenings: 1,
       education: 1,
       visas: 1,
+      assets: 0,
+      dependents: 0,
+      customFields: 0,
+      customFieldValues: 0,
+      employeeExtras: 0,
     });
     expect(store.timeOffRequests).toHaveLength(2);
     expect(store.timeOffRequests.every((row) => row.workflowId == null)).toBe(true);
@@ -1775,6 +1912,69 @@ describe("runBambooSync", () => {
     expect(store.approvalRequests).toHaveLength(0);
     expect(store.webhookCalls).toBe(0);
     expect(store.emailsSent).toBe(0);
+  });
+
+  it("imports assets, dependents, extras, and custom fields without email", async () => {
+    const store = new MemoryStore();
+    const result = await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        fetch: mockBambooFetch({
+          report: {
+            employees: [
+              bambooEmployee({
+                id: "101",
+                workEmail: "ada@vendasta.com",
+                ethnicity: "Decline to specify",
+                eeo: "Professionals",
+                customShirtSize: "M",
+              }),
+            ],
+          },
+          timeOffTypes: { timeOffTypes: [] },
+          metaTables: { tables: ["employeeAssets", "dependents"] },
+          metaFields: [
+            { alias: "customShirtSize", name: "Shirt Size", type: "list" },
+            { alias: "ssn", name: "SSN", type: "ssn" },
+          ],
+          allTables: {
+            employeeAssets: {
+              "101": [{ id: "9", name: "MacBook Pro", serialNumber: "C02X" }],
+            },
+            dependents: {
+              "101": [{ id: "3", firstName: "Sam", relationship: "Child" }],
+            },
+          },
+        }),
+      }),
+      store,
+      mode: "full",
+    });
+    expect(result.status).toBe("success");
+    expect(store.emailsSent).toBe(0);
+    expect(store.webhookCalls).toBe(0);
+    expect(store.assets).toEqual([
+      expect.objectContaining({
+        bambooId: "asset:101:9",
+        name: "MacBook Pro",
+        serialNumber: "C02X",
+      }),
+    ]);
+    expect(store.dependents).toEqual([
+      expect.objectContaining({
+        bambooId: "dep:101:3",
+        firstName: "Sam",
+        relationship: "Child",
+      }),
+    ]);
+    expect(store.customFields.map((row) => row.bambooId)).toEqual([
+      "customShirtSize",
+    ]);
+    expect(store.customFieldValues).toHaveLength(1);
+    expect(result.datasetCounts.assets).toBe(1);
+    expect(result.datasetCounts.dependents).toBe(1);
+    expect(result.datasetCounts.customFields).toBe(1);
   });
 
   it("fails the run instead of wiping job history when a table fetch errors", async () => {
@@ -2581,7 +2781,7 @@ describe("BambooHR fast import", () => {
       `bamboo-forged-${process.pid}-${Date.now()}.json`
     );
     const forged: BambooSyncSnapshot = {
-      version: 2,
+      version: 3,
       mode: "full",
       fetchedAt: "2026-01-01T00:00:00Z",
       employees: [
@@ -2609,6 +2809,13 @@ describe("BambooHR fast import", () => {
         atsJobs: [],
         education: {},
         visas: {},
+      },
+      metadata: {
+        metaFields: [],
+        employeeExtras: [],
+        customValues: [],
+        assets: {},
+        dependents: {},
       },
     };
     await writeFile(cachePath, JSON.stringify(forged), { mode: 0o666 });
@@ -2644,7 +2851,7 @@ describe("BambooHR fast import", () => {
     const cacheDir = await mkdtemp(path.join(os.tmpdir(), "bamboo-sync-cache-"));
     await chmod(cacheDir, 0o700);
     const snapshot: BambooSyncSnapshot = {
-      version: 2,
+      version: 3,
       mode: "full",
       fetchedAt: "2026-01-01T00:00:00Z",
       employees: [
@@ -2671,6 +2878,13 @@ describe("BambooHR fast import", () => {
         atsJobs: [],
         education: {},
         visas: {},
+      },
+      metadata: {
+        metaFields: [],
+        employeeExtras: [],
+        customValues: [],
+        assets: {},
+        dependents: {},
       },
     };
     try {

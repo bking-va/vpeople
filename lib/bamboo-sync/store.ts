@@ -17,6 +17,9 @@ import {
   divisions,
   documents,
   emergencyContacts,
+  customFields,
+  employeeAssets,
+  employeeDependents,
   employeeEducation,
   employeeNotes,
   employeeTasks,
@@ -1254,6 +1257,285 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       return rows.length;
     },
 
+    async updateEmployeeExtrasBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            ${row.ethnicity},
+            ${row.eeoJobCategory},
+            ${row.payGroup},
+            CAST(${row.flsaExempt} AS boolean),
+            CAST(${row.standardHoursPerWeek} AS numeric),
+            CAST(${row.timeTrackingEnabled} AS boolean)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            UPDATE employees AS e SET
+              ethnicity = v.ethnicity,
+              eeo_job_category = v.eeo_job_category,
+              pay_group = v.pay_group,
+              flsa_exempt = CAST(v.flsa_exempt AS boolean),
+              standard_hours_per_week = CAST(v.standard_hours_per_week AS numeric),
+              time_tracking_enabled = CAST(v.time_tracking_enabled AS boolean),
+              updated_at = now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, ethnicity, eeo_job_category, pay_group, flsa_exempt,
+              standard_hours_per_week, time_tracking_enabled
+            )
+            WHERE e.bamboo_id = v.bamboo_id
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async upsertCustomFieldsBatch(rows, progress) {
+      const ids = new Map<string, number>();
+      if (rows.length === 0) return ids;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            ${row.name},
+            CAST(${row.fieldType} AS custom_field_type),
+            ${row.entityType},
+            ${row.section},
+            ${row.options},
+            CAST(${row.isRequired} AS boolean),
+            CAST(${row.orderIndex} AS int),
+            CAST(${row.visibility} AS custom_field_visibility)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO custom_fields (
+              bamboo_id, name, field_type, entity_type, section, options,
+              is_required, order_index, visibility, created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              v.name,
+              CAST(v.field_type AS custom_field_type),
+              v.entity_type,
+              v.section,
+              v.options,
+              CAST(v.is_required AS boolean),
+              CAST(v.order_index AS int),
+              CAST(v.visibility AS custom_field_visibility),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, name, field_type, entity_type, section, options,
+              is_required, order_index, visibility
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              name = EXCLUDED.name,
+              field_type = CAST(EXCLUDED.field_type AS custom_field_type),
+              entity_type = EXCLUDED.entity_type,
+              section = EXCLUDED.section,
+              options = EXCLUDED.options,
+              is_required = CAST(EXCLUDED.is_required AS boolean),
+              order_index = CAST(EXCLUDED.order_index AS int),
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      const existing: Array<{ id: number; bambooId: string | null }> = await db
+        .select({ id: customFields.id, bambooId: customFields.bambooId })
+        .from(customFields)
+        .where(inArray(customFields.bambooId, rows.map((row) => row.bambooId)));
+      for (const row of existing) {
+        if (row.bambooId) ids.set(row.bambooId, row.id);
+      }
+      return ids;
+    },
+
+    async upsertCustomFieldValuesBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            CAST(${row.customFieldId} AS int),
+            CAST(${row.entityId} AS int),
+            ${row.value}
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO custom_field_values (
+              custom_field_id, entity_id, value, created_at, updated_at
+            )
+            SELECT
+              CAST(v.custom_field_id AS int),
+              CAST(v.entity_id AS int),
+              v.value,
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              custom_field_id, entity_id, value
+            )
+            ON CONFLICT (custom_field_id, entity_id) DO UPDATE SET
+              value = EXCLUDED.value,
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async pruneImportedCustomFieldValues(keep, fieldIds, progress) {
+      const ids = fieldIds.filter((id) => Number.isInteger(id) && id > 0);
+      if (ids.length === 0) return 0;
+      const keepKeys = new Set(
+        keep.map((row) => `${row.customFieldId}:${row.entityId}`)
+      );
+      const existing: Array<{
+        id: number;
+        customFieldId: number;
+        entityId: number;
+      }> = await db
+        .select({
+          id: customFieldValues.id,
+          customFieldId: customFieldValues.customFieldId,
+          entityId: customFieldValues.entityId,
+        })
+        .from(customFieldValues)
+        .where(inArray(customFieldValues.customFieldId, ids));
+      const toDelete = existing
+        .filter((row) => !keepKeys.has(`${row.customFieldId}:${row.entityId}`))
+        .map((row) => row.id);
+      if (toDelete.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(toDelete, size)) {
+        await db.delete(customFieldValues).where(inArray(customFieldValues.id, chunk));
+        done += chunk.length;
+        reportChunkProgress(progress, done, toDelete.length);
+      }
+      return toDelete.length;
+    },
+
+    async upsertAssetsBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            CAST(${row.employeeId} AS int),
+            ${row.name},
+            ${row.category},
+            ${row.serialNumber},
+            CAST(${row.assignedDate} AS date),
+            ${row.notes}
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO employee_assets (
+              bamboo_id, employee_id, name, category, serial_number,
+              assigned_date, notes, created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              CAST(v.employee_id AS int),
+              v.name,
+              v.category,
+              v.serial_number,
+              CAST(v.assigned_date AS date),
+              v.notes,
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, employee_id, name, category, serial_number,
+              assigned_date, notes
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              employee_id = CAST(EXCLUDED.employee_id AS int),
+              name = EXCLUDED.name,
+              category = EXCLUDED.category,
+              serial_number = EXCLUDED.serial_number,
+              assigned_date = CAST(EXCLUDED.assigned_date AS date),
+              notes = EXCLUDED.notes,
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async upsertDependentsBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            CAST(${row.employeeId} AS int),
+            ${row.firstName},
+            ${row.lastName},
+            ${row.relationship},
+            CAST(${row.birthDate} AS date)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO employee_dependents (
+              bamboo_id, employee_id, first_name, last_name, relationship,
+              birth_date, created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              CAST(v.employee_id AS int),
+              v.first_name,
+              v.last_name,
+              v.relationship,
+              CAST(v.birth_date AS date),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, employee_id, first_name, last_name, relationship,
+              birth_date
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              employee_id = CAST(EXCLUDED.employee_id AS int),
+              first_name = EXCLUDED.first_name,
+              last_name = EXCLUDED.last_name,
+              relationship = EXCLUDED.relationship,
+              birth_date = CAST(EXCLUDED.birth_date AS date),
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
     async listJobOpeningIdsByBambooId() {
       const rows: Array<{ id: number; bambooId: string | null }> = await db
         .select({ id: jobOpenings.id, bambooId: jobOpenings.bambooId })
@@ -1883,7 +2165,11 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
               ? employeeEducation
               : kind === "candidates"
                 ? candidates
-                : employeeVisas;
+                : kind === "assets"
+                  ? employeeAssets
+                  : kind === "dependents"
+                    ? employeeDependents
+                    : employeeVisas;
       const existing: Array<{ id: number; bambooId: string | null }> = await db
         .select({
           id: table.id,

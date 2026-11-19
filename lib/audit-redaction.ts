@@ -47,6 +47,9 @@ export function redactAuditLogForViewer(
       "nationalIdNumber",
       "taxId",
       "taxIdNumber",
+      "ethnicity",
+      "eeo",
+      "eeoJobCategory",
     ].some((field) => field.toLowerCase() === key.toLowerCase());
 
     const isBankingField = [

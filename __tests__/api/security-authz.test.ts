@@ -1,5 +1,7 @@
 import {
   canViewCustomFieldValue,
+  canViewDependents,
+  canViewEeoDemographics,
   canViewImmigrationNumbers,
   canViewIssuedLetterBody,
   canViewPersonalEmail,
@@ -174,6 +176,27 @@ describe("field-level authz helpers", () => {
     ).toBe(true);
   });
 
+  test("ethnicity/EEO is HR-admin only and dependents are self or HR", () => {
+    expect(canViewEeoDemographics({ canViewSensitivePersonalInfo: false })).toBe(
+      false
+    );
+    expect(canViewEeoDemographics({ canViewSensitivePersonalInfo: true })).toBe(
+      true
+    );
+    expect(
+      canViewDependents({
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewDependents({
+        isViewingSelf: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(true);
+  });
+
   test("compensation custom fields are hidden from coworkers without permission", () => {
     expect(
       canViewCustomFieldValue({
@@ -191,6 +214,29 @@ describe("field-level authz helpers", () => {
         isManager: false,
         isHROrAdmin: false,
         canViewCompensation: false,
+      })
+    ).toBe(true);
+  });
+
+  test("EEO custom fields require sensitive-personal permission, not user-management", () => {
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "hr_only", section: "eeo" },
+        isViewingSelf: false,
+        isManager: false,
+        isHROrAdmin: true,
+        canViewCompensation: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "hr_only", section: "eeo" },
+        isViewingSelf: false,
+        isManager: false,
+        isHROrAdmin: true,
+        canViewCompensation: true,
+        canViewSensitivePersonalInfo: true,
       })
     ).toBe(true);
   });

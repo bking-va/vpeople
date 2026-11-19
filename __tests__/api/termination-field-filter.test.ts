@@ -24,6 +24,8 @@ const employee = {
   terminationType: "involuntary",
   terminationReasonId: 4,
   terminationReason: "Dismissal",
+  ethnicity: "hidden",
+  eeoJobCategory: "Professionals",
 };
 
 describe("filterEmployeeFields termination privacy", () => {
@@ -33,6 +35,8 @@ describe("filterEmployeeFields termination privacy", () => {
     expect(filtered.terminationType).toBeUndefined();
     expect(filtered.terminationReasonId).toBeUndefined();
     expect(filtered.terminationReason).toBeUndefined();
+    expect(filtered.ethnicity).toBeUndefined();
+    expect(filtered.eeoJobCategory).toBeUndefined();
   });
 
   test("keeps ROE and termination fields for self and sensitive-HR", () => {
@@ -41,5 +45,12 @@ describe("filterEmployeeFields termination privacy", () => {
       filterEmployeeFields(employee, { ...none, canViewSensitivePersonalInfo: true }, { isSelf: false })
         .terminationType
     ).toBe("involuntary");
+    expect(
+      filterEmployeeFields(
+        employee,
+        { ...none, canViewSensitivePersonalInfo: true },
+        { isSelf: false }
+      ).ethnicity
+    ).toBe("hidden");
   });
 });

@@ -214,6 +214,11 @@ export type BambooSyncDatasetCounts = {
   jobOpenings: number;
   education: number;
   visas: number;
+  assets: number;
+  dependents: number;
+  customFields: number;
+  customFieldValues: number;
+  employeeExtras: number;
 };
 
 export type AtsDatasetCounts = {
