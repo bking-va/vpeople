@@ -45,15 +45,20 @@ export async function DELETE(
       );
     }
 
+    if (document.bambooId) {
+      return NextResponse.json(
+        { error: "BambooHR is the system of record for this document" },
+        { status: 409 }
+      );
+    }
+
     // Delete the blob if it exists
     if (document.fileUrl) {
       try {
         const { del } = await import("@vercel/blob");
         await del(document.fileUrl);
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        // Tolerate blob deletion failures (e.g. 404 not found)
-        console.warn(`Blob deletion warning for ${document.fileUrl}:`, errorMessage);
+      } catch {
+        console.warn("Blob deletion warning for document", documentId);
       }
     }
 

@@ -1847,13 +1847,14 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       if (kind === "company") {
         const rows: Array<{ bambooId: string }> = await db
           .select({ bambooId: companyFiles.bambooId })
-          .from(companyFiles);
+          .from(companyFiles)
+          .where(isNotNull(companyFiles.fileUrl));
         return new Set(rows.map((row) => row.bambooId));
       }
       const rows: Array<{ bambooId: string | null }> = await db
         .select({ bambooId: documents.bambooId })
         .from(documents)
-        .where(isNotNull(documents.bambooId));
+        .where(and(isNotNull(documents.bambooId), isNotNull(documents.fileUrl)));
       return new Set(rows.flatMap((row) => (row.bambooId ? [row.bambooId] : [])));
     },
 
