@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { companyFiles, employees } from "@/lib/db/schema";
 import { getUserPermissions } from "@/lib/permissions";
 import { canViewCompanyFile } from "@/lib/document-access";
+import { isStoredBlobUrl } from "@/lib/bamboo-sync/blob";
 import type { AccessLevel } from "@/lib/authz";
 
 export const runtime = "nodejs";
@@ -55,7 +56,7 @@ export async function GET(
   if (!allowed) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (!file.fileUrl || !process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!isStoredBlobUrl(file.fileUrl) || !process.env.BLOB_READ_WRITE_TOKEN) {
     return NextResponse.json({ error: "File not available" }, { status: 404 });
   }
 

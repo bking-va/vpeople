@@ -1143,6 +1143,7 @@ export default async function EmployeeProfilePage({
                 ? doc.body
                 : null,
               fileUrl: doc.fileUrl,
+              bambooId: doc.bambooId,
             }))}
             canUpload={canViewCompensation}
           />

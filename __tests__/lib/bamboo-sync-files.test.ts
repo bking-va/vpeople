@@ -126,15 +126,34 @@ describe("runBambooFilesSync", () => {
       async updateSyncRun(_id: number, run: Record<string, unknown>) {
         Object.assign(this.syncRuns[0], run);
       },
-      async listImportedFileBambooIds() {
-        return new Set<string>();
+      async listImportedFileBambooIds(kind: "employee" | "company") {
+        const rows = kind === "company" ? this.company : this.documents;
+        return new Set(
+          rows
+            .filter((row) => row.bambooId && row.fileUrl)
+            .map((row) => String(row.bambooId))
+        );
       },
       async upsertEmployeeDocumentsBatch(rows: Array<Record<string, unknown>>) {
-        this.documents.push(...rows);
+        for (const row of rows) {
+          const existing = this.documents.find((item) => item.bambooId === row.bambooId);
+          if (existing) {
+            const next = { ...row };
+            if (next.fileUrl == null) next.fileUrl = existing.fileUrl;
+            Object.assign(existing, next);
+          } else this.documents.push(row);
+        }
         return rows.length;
       },
       async upsertCompanyFilesBatch(rows: Array<Record<string, unknown>>) {
-        this.company.push(...rows);
+        for (const row of rows) {
+          const existing = this.company.find((item) => item.bambooId === row.bambooId);
+          if (existing) {
+            const next = { ...row };
+            if (next.fileUrl == null) next.fileUrl = existing.fileUrl;
+            Object.assign(existing, next);
+          } else this.company.push(row);
+        }
         return rows.length;
       },
     };
@@ -189,5 +208,115 @@ describe("runBambooFilesSync", () => {
     expect(store.company).toHaveLength(1);
     expect(blobs.every((path) => path.startsWith("bamboo-files/"))).toBe(true);
     expect(JSON.stringify(store.syncRuns)).not.toMatch(/pat@vendasta/i);
+  });
+
+  test("retries metadata-only rows once blob storage is available", async () => {
+    const store = {
+      employees: [
+        {
+          id: 7,
+          bambooId: "404",
+          email: "pat@vendasta.com",
+          employeeNumber: "E7",
+          firstName: "Pat",
+          lastName: "Lee",
+          accessLevel: "employee" as const,
+          vendastaSub: null,
+          userId: null,
+          managerId: null,
+        },
+      ],
+      documents: [
+        {
+          bambooId: "emp:404:12",
+          employeeId: 7,
+          title: "i9.pdf",
+          fileUrl: null,
+        },
+      ] as Array<Record<string, unknown>>,
+      company: [
+        {
+          bambooId: "company:88",
+          title: "handbook.pdf",
+          fileUrl: null,
+        },
+      ] as Array<Record<string, unknown>>,
+      syncRuns: [] as Array<Record<string, unknown>>,
+      async listEmployees() {
+        return this.employees;
+      },
+      async lastIncompleteKindCheckpoint() {
+        return null;
+      },
+      async startSyncRun(run: Record<string, unknown>) {
+        this.syncRuns.push({ ...run, id: 1 });
+        return 1;
+      },
+      async updateSyncRun(_id: number, run: Record<string, unknown>) {
+        Object.assign(this.syncRuns[0], run);
+      },
+      async listImportedFileBambooIds(kind: "employee" | "company") {
+        const rows = kind === "company" ? this.company : this.documents;
+        return new Set(
+          rows
+            .filter((row) => row.bambooId && row.fileUrl)
+            .map((row) => String(row.bambooId))
+        );
+      },
+      async upsertEmployeeDocumentsBatch(rows: Array<Record<string, unknown>>) {
+        for (const row of rows) {
+          const existing = this.documents.find((item) => item.bambooId === row.bambooId);
+          if (existing) Object.assign(existing, row);
+          else this.documents.push(row);
+        }
+        return rows.length;
+      },
+      async upsertCompanyFilesBatch(rows: Array<Record<string, unknown>>) {
+        for (const row of rows) {
+          const existing = this.company.find((item) => item.bambooId === row.bambooId);
+          if (existing) Object.assign(existing, row);
+          else this.company.push(row);
+        }
+        return rows.length;
+      },
+    };
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/employees/404/files/view")) {
+          return jsonResponse({
+            categories: [{ name: "I-9", files: [{ id: 12, name: "i9.pdf" }] }],
+          });
+        }
+        if (url.endsWith("/employees/404/files/12")) {
+          return new Response(Buffer.from("i9"), { status: 200 });
+        }
+        if (url.endsWith("/files/view")) {
+          return jsonResponse({
+            categories: [{ name: "Policies", files: [{ id: 88, name: "handbook.pdf" }] }],
+          });
+        }
+        if (url.endsWith("/files/88")) {
+          return new Response(Buffer.from("hb"), { status: 200 });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(String(store.documents[0].fileUrl)).toContain("blob.vercel-storage.com");
+    expect(String(store.company[0].fileUrl)).toContain("blob.vercel-storage.com");
   });
 });

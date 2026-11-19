@@ -5,6 +5,7 @@ import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserPermissions } from "@/lib/permissions";
 import { canViewEmployeeDocument } from "@/lib/document-access";
+import { isStoredBlobUrl } from "@/lib/bamboo-sync/blob";
 import type { AccessLevel } from "@/lib/authz";
 
 export async function GET(
@@ -67,7 +68,7 @@ export async function GET(
     }
 
     // Stream the file through this route using server-side token
-    if (!document.fileUrl) {
+    if (!isStoredBlobUrl(document.fileUrl)) {
       return NextResponse.json(
         { error: "Document file not available" },
         { status: 404 }

@@ -90,6 +90,15 @@ describe("BambooHR extended batched writes (Real Postgres)", () => {
       policyId = policies.get(`extended vacation ${runId}`) ?? null;
       expect(policyId).not.toBeNull();
 
+      const renamed = await tx.upsertTimeOffPoliciesBatch([
+        {
+          name: `Extended Vacation ${runId} Renamed`,
+          policyType: "vacation",
+          bambooId: `type:${runId}`,
+        },
+      ]);
+      expect(renamed.get(`extended vacation ${runId} renamed`)).toBe(policyId);
+
       const requestCount = await tx.upsertTimeOffRequestsBatch(
         [
           {
@@ -192,6 +201,14 @@ describe("BambooHR extended batched writes (Real Postgres)", () => {
     expect(Number(approved?.daysRequested)).toBe(2);
     const pending = requests.find((row) => row.status === "pending");
     expect(pending?.workflowId).toBeNull();
+
+    const matchingPolicies = await db
+      .select()
+      .from(timeOffPolicies)
+      .where(eq(timeOffPolicies.bambooId, `type:${runId}`));
+    expect(matchingPolicies).toHaveLength(1);
+    expect(matchingPolicies[0]?.id).toBe(policyId);
+    expect(matchingPolicies[0]?.name).toBe(`Extended Vacation ${runId} Renamed`);
 
     const approvals = await db
       .select()

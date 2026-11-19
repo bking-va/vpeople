@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { candidates } from "@/lib/db/schema";
 import { hiringAccessForCandidate } from "@/lib/hiring-access";
+import { isStoredResumeBlobUrl } from "@/lib/bamboo-sync/blob";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ export async function GET(
     .where(eq(candidates.id, id))
     .limit(1);
 
-  if (!candidate?.resumeBlobUrl) {
+  if (!isStoredResumeBlobUrl(candidate?.resumeBlobUrl)) {
     return NextResponse.json({ error: "Resume not available" }, { status: 404 });
   }
 

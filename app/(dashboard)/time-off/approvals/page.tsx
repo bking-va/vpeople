@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { timeOffRequests, employees, timeOffPolicies } from "@/lib/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +55,12 @@ export default async function TimeOffApprovalsPage() {
         .from(timeOffRequests)
         .leftJoin(employees, eq(timeOffRequests.employeeId, employees.id))
         .leftJoin(timeOffPolicies, eq(timeOffRequests.policyId, timeOffPolicies.id))
-        .where(eq(timeOffRequests.status, "pending"))
+        .where(
+          and(
+            eq(timeOffRequests.status, "pending"),
+            isNull(timeOffRequests.bambooId)
+          )
+        )
     : db
         .select({
           request: timeOffRequests,
@@ -68,6 +73,7 @@ export default async function TimeOffApprovalsPage() {
         .where(
           and(
             eq(timeOffRequests.status, "pending"),
+            isNull(timeOffRequests.bambooId),
             inArray(timeOffRequests.employeeId, reportIds)
           )
         );

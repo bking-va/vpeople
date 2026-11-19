@@ -1,5 +1,5 @@
 import { BambooHrClient, BambooHrHttpError } from "./client";
-import type { PrivateBlobStore } from "./blob";
+import { BAMBOO_BLOB_UNAVAILABLE, type PrivateBlobStore } from "./blob";
 import {
   bambooFileBlobPath,
   filesFromViewPayload,
@@ -209,6 +209,7 @@ export async function runBambooFilesSync(
             } catch (error) {
               if (error instanceof BambooHrHttpError && error.status === 404) {
                 log(`employee file missing bambooFileId=${mapped.fileId}`);
+                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
               } else {
                 throw error;
               }
@@ -280,13 +281,14 @@ export async function runBambooFilesSync(
             const file = await opts.client.fetchFile(mapped.fileId);
             fileUrl = await putFile(blob, "company", mapped, file);
             if (fileUrl) checkpoint.blobs += 1;
-          } catch (error) {
-            if (error instanceof BambooHrHttpError && error.status === 404) {
-              log(`company file missing bambooFileId=${mapped.fileId}`);
-            } else {
-              throw error;
+            } catch (error) {
+              if (error instanceof BambooHrHttpError && error.status === 404) {
+                log(`company file missing bambooFileId=${mapped.fileId}`);
+                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+              } else {
+                throw error;
+              }
             }
-          }
         }
         if (!dryRun) {
           await opts.store.upsertCompanyFilesBatch([
