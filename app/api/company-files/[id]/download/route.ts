@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { companyFiles, employees } from "@/lib/db/schema";
-import { getUserPermissions } from "@/lib/permissions";
+import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewCompanyFile } from "@/lib/document-access";
 import { getStoredPrivateBlob } from "@/lib/bamboo-sync/blob";
 import type { AccessLevel } from "@/lib/authz";
@@ -16,7 +16,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.email) {
+  const viewerId = session?.user?.employeeId;
+  if (!viewerId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -29,7 +30,7 @@ export async function GET(
   const [employee] = await db
     .select({ id: employees.id, accessLevel: employees.accessLevel })
     .from(employees)
-    .where(eq(employees.email, session.user.email))
+    .where(eq(employees.id, viewerId))
     .limit(1);
   if (!employee) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -44,7 +45,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const permissions = await getUserPermissions(session.user.email);
+  const permissions = await getSessionUserPermissions(session);
   const allowed = canViewCompanyFile({
     accessLevel: employee.accessLevel as AccessLevel,
     canManageUsers: permissions.canManageUsers,
