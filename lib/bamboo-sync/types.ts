@@ -193,11 +193,118 @@ export type JobOpeningStatus =
   | "filled"
   | "canceled";
 
+export type CandidateStage =
+  | "new"
+  | "phone_screen"
+  | "interview"
+  | "offer"
+  | "hired"
+  | "rejected";
+
+export type CandidateSource =
+  | "linkedin"
+  | "indeed"
+  | "glassdoor"
+  | "referral"
+  | "direct"
+  | "other";
+
 export type BambooSyncDatasetCounts = {
   timeOffRequests: number;
   jobOpenings: number;
   education: number;
   visas: number;
+};
+
+export type AtsDatasetCounts = {
+  applications: number;
+  answers: number;
+  comments: number;
+  statusHistory: number;
+  resumes: number;
+};
+
+export type MappedAtsApplicationWrite = {
+  bambooId: string;
+  jobBambooId: string;
+  jobTitle: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  linkedinUrl: string | null;
+  source: CandidateSource;
+  sourceDetail: string | null;
+  stage: CandidateStage;
+  bambooStatusId: string | null;
+  bambooStatusLabel: string | null;
+  rating: number | null;
+  appliedAt: string | null;
+  coverLetter: string | null;
+  resumeBambooFileId: string | null;
+};
+
+export type MappedAtsAnswerWrite = {
+  bambooQuestionId: string;
+  question: string;
+  answer: string | null;
+};
+
+export type MappedAtsCommentWrite = {
+  bambooId: string;
+  authorName: string | null;
+  authorBambooId: string | null;
+  content: string;
+  commentedAt: string | null;
+};
+
+export type MappedAtsStatusHistoryWrite = {
+  bambooEventId: string;
+  bambooStatusId: string | null;
+  statusLabel: string;
+  changedAt: string | null;
+  changedByName: string | null;
+};
+
+export type AtsSyncCheckpoint = {
+  phase: "list" | "details" | "resumes" | "done";
+  listPage: number;
+  lastListId: string | null;
+  lastDetailId: string | null;
+  lastResumeId: string | null;
+  listed: number;
+  detailed: number;
+  resumes: number;
+  answers: number;
+  comments: number;
+  history: number;
+  newSince: string | null;
+  paginationComplete: boolean;
+  detailsRequeued?: boolean;
+};
+
+export function isResumableAtsRun(
+  status: unknown,
+  checkpoint: unknown
+): boolean {
+  if (status === "running" || status === "checkpointed") return true;
+  if (status !== "failed") return false;
+  return Boolean(
+    checkpoint &&
+      typeof checkpoint === "object" &&
+      !Array.isArray(checkpoint) &&
+      Object.keys(checkpoint as Record<string, unknown>).length > 0
+  );
+}
+
+export type BambooAtsSyncResult = {
+  status: "success" | "skipped" | "failed" | "checkpointed";
+  dryRun: boolean;
+  kind: "ats_applications";
+  mode: BambooSyncMode;
+  datasetCounts: AtsDatasetCounts;
+  checkpoint: AtsSyncCheckpoint;
+  errorMessage?: string;
 };
 
 export type MappedTimeOffRequestWrite = {

@@ -4,6 +4,8 @@ export type BambooSyncCliArgs = {
   dryRun: boolean;
   replaceDemo: boolean;
   incremental: boolean;
+  atsApplications: boolean;
+  skipResumes: boolean;
   dbUrlFile: string | null;
   cacheFile: string | null;
 };
@@ -13,6 +15,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     dryRun: false,
     replaceDemo: false,
     incremental: false,
+    atsApplications: false,
+    skipResumes: false,
     dbUrlFile: null,
     cacheFile: null,
   };
@@ -21,6 +25,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--replace-demo") args.replaceDemo = true;
     else if (arg === "--incremental") args.incremental = true;
+    else if (arg === "--ats-applications") args.atsApplications = true;
+    else if (arg === "--skip-resumes") args.skipResumes = true;
     else if (arg.startsWith("--cache=")) {
       args.cacheFile = arg.slice("--cache=".length);
     } else if (arg === "--cache") {

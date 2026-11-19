@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCronAuthorized } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { runAtsApplicationsSync } from "@/lib/bamboo-sync/ats-applications";
 import { createBambooHrClientFromEnv } from "@/lib/bamboo-sync/client";
 import { createBambooSyncStore } from "@/lib/bamboo-sync/store";
 import { runBambooSync } from "@/lib/bamboo-sync/sync";
@@ -26,6 +27,18 @@ export async function GET(request: NextRequest) {
         console.log(message);
       },
     });
+    const ats = await runAtsApplicationsSync({
+      client,
+      store,
+      blob: null,
+      mode: "incremental",
+      importResumes: false,
+      maxListPages: 20,
+      maxMs: 90_000,
+      log: (message) => {
+        console.log(message);
+      },
+    });
     return NextResponse.json({
       status: result.status,
       fetched: result.fetched,
@@ -35,6 +48,11 @@ export async function GET(request: NextRequest) {
       bambooIds: result.bambooIds,
       unmappedFields: result.unmappedFields,
       datasetCounts: result.datasetCounts,
+      atsApplications: {
+        status: ats.status,
+        datasetCounts: ats.datasetCounts,
+        phase: ats.checkpoint.phase,
+      },
     });
   } catch {
     console.error("Bamboo sync failed");

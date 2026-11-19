@@ -232,6 +232,13 @@
       "when": 1795110525808,
       "tag": "0032_bamboo_sync_extended_datasets",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795111306633,
+      "tag": "0033_bamboo_sync_ats_applications",
+      "breakpoints": true
     }
   ]
 }

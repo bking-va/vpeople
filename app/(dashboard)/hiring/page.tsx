@@ -2,7 +2,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { jobOpenings, candidates, offerLetters } from "@/lib/db/schema";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { hiringAccessForEmail } from "@/lib/hiring-access";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,20 +17,26 @@ export default async function HiringPage() {
   }
 
   const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
+  const hiringAccess = session.user.email
+    ? await hiringAccessForEmail(session.user.email)
+    : { allowed: false };
 
-  // Fetch real data
   const [openPositions] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(jobOpenings)
     .where(eq(jobOpenings.status, "open"));
 
-  const [activeCandidates] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(candidates);
+  const [activeCandidates] = hiringAccess.allowed
+    ? await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(candidates)
+    : [{ count: 0 }];
 
-  const [offersThisMonth] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(offerLetters);
+  const [offersThisMonth] = hiringAccess.allowed
+    ? await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(offerLetters)
+    : [{ count: 0 }];
 
   const allOpenings = await db
     .select({
@@ -42,21 +49,25 @@ export default async function HiringPage() {
     .from(jobOpenings)
     .orderBy(jobOpenings.createdAt);
 
-  const candidatesByStage = await db
-    .select({
-      stage: candidates.stage,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(candidates)
-    .groupBy(candidates.stage);
+  const candidatesByStage = hiringAccess.allowed
+    ? await db
+        .select({
+          stage: candidates.stage,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(candidates)
+        .groupBy(candidates.stage)
+    : [];
 
-  const candidatesBySource = await db
-    .select({
-      source: candidates.source,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(candidates)
-    .groupBy(candidates.source);
+  const candidatesBySource = hiringAccess.allowed
+    ? await db
+        .select({
+          source: candidates.source,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(candidates)
+        .groupBy(candidates.source)
+    : [];
 
   const stageCounts: Record<string, number> = {};
   candidatesByStage.forEach((row) => {

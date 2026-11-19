@@ -46,4 +46,19 @@ export {
 } from "./chunks";
 export { formatSyncSummary, runBambooSync } from "./sync";
 export type { BambooSyncStore } from "./sync";
-export type { BambooSyncResult } from "./types";
+export type { BambooSyncResult, BambooAtsSyncResult } from "./types";
+export {
+  formatAtsSyncSummary,
+  runAtsApplicationsSync,
+} from "./ats-applications";
+export {
+  formatBambooNewSince,
+  mapApplicationStage,
+  mapAtsAnswers,
+  mapAtsApplication,
+  mapAtsComments,
+  mapAtsStatusHistory,
+  mapCandidateSource,
+} from "./map-ats";
+export { ATS_APPLICATIONS_MAX_PAGES, BAMBOO_ATS_DETAIL_CONCURRENCY } from "./client";
+export { atsResumeBlobPath, createVercelPrivateBlobStore } from "./blob";

@@ -210,13 +210,87 @@ export interface BambooSyncStore {
     progress?: BatchProgress
   ): Promise<number>;
   pruneImportedRowsNotIn(
-    kind: "time_off_requests" | "job_openings" | "education" | "visas",
+    kind: "time_off_requests" | "job_openings" | "education" | "visas" | "candidates",
     keepBambooIds: string[],
     progress?: BatchProgress
   ): Promise<number>;
   applyBrendanCarryOver(opts: BrendanSnapshot): Promise<boolean>;
   recordSyncRun(run: Record<string, unknown>): Promise<void>;
   lastSuccessfulIncrementalCursor(): Promise<string | null>;
+  listJobOpeningIdsByBambooId(): Promise<Map<string, number>>;
+  upsertCandidatesBatch(
+    rows: Array<{
+      bambooId: string;
+      jobOpeningId: number;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string | null;
+      linkedinUrl: string | null;
+      source: "linkedin" | "indeed" | "glassdoor" | "referral" | "direct" | "other";
+      sourceDetail: string | null;
+      stage: "new" | "phone_screen" | "interview" | "offer" | "hired" | "rejected";
+      bambooStatusId: string | null;
+      bambooStatusLabel: string | null;
+      rating: number | null;
+      appliedAt: string | null;
+      coverLetter: string | null;
+      resumeBambooFileId: string | null;
+      resumeBlobUrl: string | null;
+      atsDetailImportedAt: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<Map<string, number>>;
+  upsertCandidateAnswersBatch(
+    rows: Array<{
+      candidateId: number;
+      bambooQuestionId: string;
+      question: string;
+      answer: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertCandidateCommentsBatch(
+    rows: Array<{
+      candidateId: number;
+      bambooId: string;
+      authorName: string | null;
+      authorBambooId: string | null;
+      content: string;
+      commentedAt: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertCandidateStatusHistoryBatch(
+    rows: Array<{
+      candidateId: number;
+      bambooEventId: string;
+      bambooStatusId: string | null;
+      statusLabel: string;
+      changedAt: string | null;
+      changedByName: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  listCandidatesNeedingDetail(
+    limit: number,
+    afterBambooId?: string | null
+  ): Promise<Array<{ id: number; bambooId: string }>>;
+  listCandidatesNeedingResume(
+    limit: number,
+    afterBambooId?: string | null
+  ): Promise<Array<{ id: number; bambooId: string; resumeBambooFileId: string }>>;
+  setCandidateResumeBlob(bambooId: string, blobUrl: string): Promise<void>;
+  requeueCandidateDetails(): Promise<number>;
+  markCandidateDetailImported(bambooIds: string[]): Promise<void>;
+  startSyncRun(run: Record<string, unknown>): Promise<number>;
+  updateSyncRun(id: number, run: Record<string, unknown>): Promise<void>;
+  lastIncompleteAtsCheckpoint(): Promise<{
+    id: number;
+    checkpoint: Record<string, unknown> | null;
+    latestChanged: string | null;
+  } | null>;
+  lastSuccessfulAtsCursor(): Promise<string | null>;
   transaction?<T>(fn: (store: BambooSyncStore) => Promise<T>): Promise<T>;
 }
 
