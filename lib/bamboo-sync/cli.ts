@@ -5,6 +5,7 @@ export type BambooSyncCliArgs = {
   replaceDemo: boolean;
   incremental: boolean;
   dbUrlFile: string | null;
+  cacheFile: string | null;
 };
 
 export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
@@ -13,12 +14,22 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     replaceDemo: false,
     incremental: false,
     dbUrlFile: null,
+    cacheFile: null,
   };
-  for (const arg of argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
     if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--replace-demo") args.replaceDemo = true;
     else if (arg === "--incremental") args.incremental = true;
-    else if (arg.startsWith("--db-url-file=")) {
+    else if (arg.startsWith("--cache=")) {
+      args.cacheFile = arg.slice("--cache=".length);
+    } else if (arg === "--cache") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("-")) {
+        args.cacheFile = next;
+        i += 1;
+      }
+    } else if (arg.startsWith("--db-url-file=")) {
       args.dbUrlFile = arg.slice("--db-url-file=".length);
     } else if (arg === "--db-url-file") {
       continue;

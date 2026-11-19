@@ -44,6 +44,7 @@ async function main() {
       mode: args.incremental ? "incremental" : "full",
       dryRun: args.dryRun,
       replaceDemo: args.replaceDemo,
+      cachePath: args.cacheFile,
       log: (message) => {
         console.log(message);
       },

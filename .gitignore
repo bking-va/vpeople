@@ -29,6 +29,10 @@ yarn-error.log*
 .env*.local
 .env
 
+# BambooHR sync fetch cache (contains employee PII; never commit)
+*.bamboo-cache.json
+bamboo-sync-cache.json
+
 # vercel
 .vercel
 

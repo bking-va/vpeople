@@ -1,4 +1,15 @@
-import { BambooHrClient, BambooHrHttpError } from "./client";
+import {
+  BAMBOO_SYNC_CACHE_VERSION,
+  bambooSyncCacheExists,
+  readBambooSyncCache,
+  writeBambooSyncCache,
+  type BambooSyncSnapshot,
+} from "./cache";
+import {
+  BambooHrClient,
+  BambooHrHttpError,
+  BAMBOO_PROGRESS_EVERY,
+} from "./client";
 import {
   blankToNull,
   isBrendanWorkEmail,
@@ -79,6 +90,9 @@ export type RunBambooSyncOptions = {
   replaceDemo?: boolean;
   log?: BambooSyncLogger;
   now?: Date;
+  cachePath?: string | null;
+  concurrency?: number;
+  progressEvery?: number;
 };
 
 const PII_LOG_PATTERN =
@@ -121,6 +135,58 @@ async function inStoreTransaction<T>(
 }
 
 type TableRows = Record<string, Array<Record<string, unknown>>>;
+
+type SyncFetchPayload = {
+  employees: BambooEmployeeRecord[];
+  latestChanged: string | null;
+  deletedBambooIds: string[];
+  jobInfo: TableRows;
+  statusInfo: TableRows;
+  compensation: TableRows;
+  contacts: TableRows | null;
+  timeOffTypes: Array<{ id: string; name: string; units?: string }>;
+  balancesByBambooId: Map<string, Array<{ name: string; balance: string }>>;
+};
+
+function tableKeyCount(table: TableRows | null): number {
+  return table ? Object.keys(table).length : 0;
+}
+
+function snapshotToPayload(snapshot: BambooSyncSnapshot): SyncFetchPayload {
+  return {
+    employees: snapshot.employees,
+    latestChanged: snapshot.latestChanged,
+    deletedBambooIds: snapshot.deletedBambooIds,
+    jobInfo: snapshot.tables.jobInfo,
+    statusInfo: snapshot.tables.employmentStatus,
+    compensation: snapshot.tables.compensation,
+    contacts: snapshot.tables.emergencyContacts,
+    timeOffTypes: snapshot.timeOffTypes,
+    balancesByBambooId: new Map(Object.entries(snapshot.balances)),
+  };
+}
+
+function payloadToSnapshot(
+  mode: BambooSyncMode,
+  payload: SyncFetchPayload
+): BambooSyncSnapshot {
+  return {
+    version: BAMBOO_SYNC_CACHE_VERSION,
+    mode,
+    fetchedAt: new Date().toISOString(),
+    employees: payload.employees,
+    latestChanged: payload.latestChanged,
+    deletedBambooIds: payload.deletedBambooIds,
+    tables: {
+      jobInfo: payload.jobInfo,
+      employmentStatus: payload.statusInfo,
+      compensation: payload.compensation,
+      emergencyContacts: payload.contacts,
+    },
+    timeOffTypes: payload.timeOffTypes,
+    balances: Object.fromEntries(payload.balancesByBambooId),
+  };
+}
 
 async function fetchOptionalTable(
   client: BambooHrClient,
@@ -186,6 +252,86 @@ async function loadEmployees(
   };
 }
 
+async function fetchHttpPayload(
+  client: BambooHrClient,
+  store: BambooSyncStore,
+  mode: BambooSyncMode,
+  existingBambooIds: string[],
+  log: BambooSyncLogger,
+  now: Date,
+  concurrency: number,
+  progressEvery: number
+): Promise<SyncFetchPayload> {
+  log("Phase fetch: employees");
+  const { employees, latestChanged, deletedBambooIds } = await loadEmployees(
+    client,
+    store,
+    mode
+  );
+
+  const tablesSince =
+    mode === "incremental"
+      ? (await store.lastSuccessfulIncrementalCursor()) || "2010-01-01T00:00:00Z"
+      : "2010-01-01T00:00:00Z";
+  log("Phase fetch: tables");
+  const jobInfo = await client.fetchTableRows("jobInfo", tablesSince);
+  const statusInfo = await client.fetchTableRows("employmentStatus", tablesSince);
+  const compensation = await client.fetchTableRows("compensation", tablesSince);
+  const contacts = await fetchOptionalTable(
+    client,
+    "emergencyContacts",
+    tablesSince
+  );
+  log(
+    `tables fetched jobInfo=${tableKeyCount(jobInfo)} employmentStatus=${tableKeyCount(statusInfo)} compensation=${tableKeyCount(compensation)} emergencyContacts=${tableKeyCount(contacts)}`
+  );
+
+  log("Phase fetch: time-off types");
+  const timeOffTypes = await client.fetchTimeOffTypes().catch(() => []);
+  const unitsByName = new Map<string, string>();
+  for (const type of timeOffTypes) {
+    if (!type.units) continue;
+    unitsByName.set(type.name, type.units);
+    unitsByName.set(type.name.toLowerCase(), type.units);
+  }
+
+  const asOf = now.toISOString().slice(0, 10);
+  const balanceTargets = uniqueSorted([
+    ...employees.map((row) => String(row.id ?? "")).filter(Boolean),
+    ...existingBambooIds,
+  ]);
+  log(`Phase fetch: time-off balances (${balanceTargets.length})`);
+  const { balances, failed } = await client.fetchTimeOffBalancesMany(
+    balanceTargets,
+    asOf,
+    unitsByName,
+    {
+      concurrency,
+      onProgress: (done, total) => {
+        if (done === total || done % progressEvery === 0) {
+          log(`time-off balances ${done}/${total}`);
+        }
+      },
+    }
+  );
+  if (failed > 0) {
+    log(`time-off balances failed: ${failed}`);
+  }
+  log("Phase fetch complete");
+
+  return {
+    employees,
+    latestChanged,
+    deletedBambooIds,
+    jobInfo,
+    statusInfo,
+    compensation,
+    contacts,
+    timeOffTypes,
+    balancesByBambooId: balances,
+  };
+}
+
 export async function runBambooSync(
   opts: RunBambooSyncOptions
 ): Promise<BambooSyncResult> {
@@ -230,24 +376,12 @@ export async function runBambooSync(
   let unmappedFields: string[] = [];
 
   try {
-  const { employees, latestChanged, deletedBambooIds } = await loadEmployees(
-    opts.client,
-    opts.store,
-    opts.mode
-  );
-  mapped = employees
-    .map((row) => mapEmployeeRecord(row))
-    .filter((row) => row.bambooId);
-  bambooIds = uniqueSorted(mapped.map((row) => row.bambooId));
-  unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
   const existing = await opts.store.listEmployees();
   const existingByBambooId = new Map(
     existing
       .filter((row) => row.bambooId)
       .map((row) => [row.bambooId as string, row])
   );
-  const wouldCreate = mapped.filter((row) => !existingByBambooId.has(row.bambooId)).length;
-  const wouldUpdate = mapped.length - wouldCreate;
   const demoExisting = existing.filter((row) => !row.bambooId);
   const brendanSnapshotFromExisting = existing.find(
     (row) => row.employeeNumber === "E001" || isBrendanWorkEmail(row.email)
@@ -262,6 +396,70 @@ export async function runBambooSync(
         userId: brendanSnapshotFromExisting.userId,
       }
     : { accessLevel: "full_admin", vendastaSub: null, userId: null };
+
+  let payload: SyncFetchPayload;
+  if (dryRun) {
+    log("Phase fetch: employees");
+    payload = {
+      ...(await loadEmployees(opts.client, opts.store, opts.mode)),
+      jobInfo: {},
+      statusInfo: {},
+      compensation: {},
+      contacts: null,
+      timeOffTypes: [],
+      balancesByBambooId: new Map(),
+    };
+  } else if (opts.cachePath) {
+    if (await bambooSyncCacheExists(opts.cachePath)) {
+      const cached = await readBambooSyncCache(opts.cachePath);
+      if (cached.mode !== opts.mode) {
+        throw new Error("Bamboo sync cache mode does not match this run");
+      }
+      log("Phase fetch: loaded cache");
+      payload = snapshotToPayload(cached);
+    } else {
+      payload = await fetchHttpPayload(
+        opts.client,
+        opts.store,
+        opts.mode,
+        [...existingByBambooId.keys()],
+        log,
+        opts.now ?? new Date(),
+        opts.concurrency ?? opts.client.concurrency,
+        opts.progressEvery ?? BAMBOO_PROGRESS_EVERY
+      );
+      try {
+        await writeBambooSyncCache(
+          opts.cachePath,
+          payloadToSnapshot(opts.mode, payload)
+        );
+        log("Phase fetch: wrote cache");
+      } catch {
+        log("Phase fetch: cache write failed");
+      }
+    }
+  } else {
+    payload = await fetchHttpPayload(
+      opts.client,
+      opts.store,
+      opts.mode,
+      [...existingByBambooId.keys()],
+      log,
+      opts.now ?? new Date(),
+      opts.concurrency ?? opts.client.concurrency,
+      opts.progressEvery ?? BAMBOO_PROGRESS_EVERY
+    );
+  }
+
+  mapped = payload.employees
+    .map((row) => mapEmployeeRecord(row))
+    .filter((row) => row.bambooId);
+  bambooIds = uniqueSorted(mapped.map((row) => row.bambooId));
+  unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
+  const wouldCreate = mapped.filter((row) => !existingByBambooId.has(row.bambooId)).length;
+  const wouldUpdate = mapped.length - wouldCreate;
+  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId } =
+    payload;
 
   log(`Fetched ${mapped.length} employees`);
   log(`Bamboo ids: ${bambooIds.join(", ")}`);
@@ -292,40 +490,7 @@ export async function runBambooSync(
     };
   }
 
-  const tablesSince =
-    opts.mode === "incremental"
-      ? (await opts.store.lastSuccessfulIncrementalCursor()) || "2010-01-01T00:00:00Z"
-      : "2010-01-01T00:00:00Z";
-  const jobInfo = await opts.client.fetchTableRows("jobInfo", tablesSince);
-  const statusInfo = await opts.client.fetchTableRows("employmentStatus", tablesSince);
-  const compensation = await opts.client.fetchTableRows("compensation", tablesSince);
-  const contacts = await fetchOptionalTable(
-    opts.client,
-    "emergencyContacts",
-    tablesSince
-  );
-  const timeOffTypes = await opts.client.fetchTimeOffTypes().catch(() => []);
-  const unitsByName = new Map<string, string>();
-  for (const type of timeOffTypes) {
-    if (!type.units) continue;
-    unitsByName.set(type.name, type.units);
-    unitsByName.set(type.name.toLowerCase(), type.units);
-  }
-  const asOf = (opts.now ?? new Date()).toISOString().slice(0, 10);
-  const balanceTargets = uniqueSorted([
-    ...mapped.map((row) => row.bambooId),
-    ...existing
-      .map((row) => row.bambooId)
-      .filter((id): id is string => Boolean(id)),
-  ]);
-  const balancesByBambooId = new Map<string, Array<{ name: string; balance: string }>>();
-  for (const bambooId of balanceTargets) {
-    const balances = await opts.client
-      .fetchTimeOffBalances(bambooId, asOf, unitsByName)
-      .catch(() => []);
-    balancesByBambooId.set(bambooId, balances);
-  }
-
+  log("Phase write: starting database transaction");
   return await inStoreTransaction(opts.store, async (store) => {
     let demoRemoved = 0;
     let appliedSnapshot = snapshot;

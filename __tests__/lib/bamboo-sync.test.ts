@@ -13,8 +13,14 @@ import {
   reconcileImportedTimeOffBalance,
   resolveLoginEmails,
 } from "@/lib/bamboo-sync/map";
-import { BambooHrClient } from "@/lib/bamboo-sync/client";
+import {
+  BambooHrClient,
+  parseRetryAfterMs,
+} from "@/lib/bamboo-sync/client";
 import { parseBambooSyncArgs } from "@/lib/bamboo-sync/cli";
+import { unlink, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { isDemoEmployee } from "@/lib/bamboo-sync/demo";
 import { runBambooSync, type BambooSyncStore } from "@/lib/bamboo-sync/sync";
 import type {
@@ -1350,6 +1356,24 @@ describe("CLI args and demo detection", () => {
       replaceDemo: true,
       incremental: false,
       dbUrlFile: "/tmp/db_url.txt",
+      cacheFile: null,
+    });
+  });
+
+  it("parses --cache without treating the cache path as the db url file", () => {
+    expect(
+      parseBambooSyncArgs([
+        "--replace-demo",
+        "--cache",
+        "/tmp/bamboo-sync.bamboo-cache.json",
+        "/tmp/db_url.txt",
+      ])
+    ).toEqual({
+      dryRun: false,
+      replaceDemo: true,
+      incremental: false,
+      dbUrlFile: "/tmp/db_url.txt",
+      cacheFile: "/tmp/bamboo-sync.bamboo-cache.json",
     });
   });
 
@@ -1381,6 +1405,252 @@ describe("CLI args and demo detection", () => {
     } finally {
       if (previous === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previous;
+    }
+  });
+});
+
+describe("BambooHR fast import", () => {
+  it("caps Retry-After and falls back to exponential backoff", () => {
+    expect(parseRetryAfterMs("2", 0)).toBe(2000);
+    expect(parseRetryAfterMs("0", 0)).toBe(0);
+    expect(parseRetryAfterMs("120", 0)).toBe(60_000);
+    expect(parseRetryAfterMs(null, 0)).toBe(1000);
+    expect(parseRetryAfterMs(null, 4)).toBe(16_000);
+  });
+
+  it("times out a hung BambooHR request", async () => {
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      timeoutMs: 20,
+      maxRetries: 0,
+      fetch: jest.fn(() => new Promise<Response>(() => {})),
+    });
+    await expect(client.fetchAllEmployees()).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+  });
+
+  it("retries 429 calculator responses using Retry-After", async () => {
+    let calculatorCalls = 0;
+    const inner = mockBambooFetch({
+      balances: {
+        "42": [{ name: "Vacation", balance: "10", units: "days" }],
+      },
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: jest.fn(async (url, init) => {
+        if (String(url).includes("time_off/calculator")) {
+          calculatorCalls += 1;
+          if (calculatorCalls === 1) {
+            return new Response("", {
+              status: 429,
+              headers: { "Retry-After": "0" },
+            });
+          }
+        }
+        return inner(url, init);
+      }),
+    });
+    const rows = await client.fetchTimeOffBalances("42", "2026-01-01");
+    expect(calculatorCalls).toBe(2);
+    expect(rows).toEqual([
+      expect.objectContaining({ name: "Vacation", balance: "10.00" }),
+    ]);
+  });
+
+  it("fetches time-off balances with bounded concurrency", async () => {
+    const employees = Array.from({ length: 8 }, (_, index) =>
+      bambooEmployee({
+        id: String(index + 1),
+        workEmail: `emp${index + 1}@vendasta.com`,
+        firstName: `Emp${index + 1}`,
+      })
+    );
+    let inflight = 0;
+    let maxInflight = 0;
+    const inner = mockBambooFetch({
+      report: { employees },
+      tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+      timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation", units: "days" }] },
+      balances: Object.fromEntries(
+        employees.map((row) => [String(row.id), [{ name: "Vacation", balance: "1" }]])
+      ),
+    });
+    const fetchMock = jest.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes("time_off/calculator")) {
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        inflight -= 1;
+      }
+      return inner(url, init);
+    });
+    const store = new MemoryStore();
+    const events: string[] = [];
+    const originalTransaction = store.transaction.bind(store);
+    store.transaction = async (fn) => {
+      events.push("tx");
+      return originalTransaction(fn);
+    };
+    const result = await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        concurrency: 4,
+        fetch: fetchMock,
+      }),
+      store,
+      mode: "full",
+      concurrency: 4,
+      progressEvery: 4,
+      log: (message) => events.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(maxInflight).toBeGreaterThan(1);
+    expect(maxInflight).toBeLessThanOrEqual(4);
+    expect(events.filter((row) => row.startsWith("time-off balances "))).toEqual(
+      expect.arrayContaining(["time-off balances 4/8", "time-off balances 8/8"])
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        "Phase fetch: employees",
+        "Phase fetch: tables",
+        "Phase fetch: time-off types",
+        "Phase write: starting database transaction",
+      ])
+    );
+    const lastHttp = [...fetchMock.mock.calls.keys()].pop();
+    expect(lastHttp).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("tx")).toBeGreaterThan(-1);
+  });
+
+  it("completes all HTTP fetches before opening the database transaction", async () => {
+    const employees = [
+      bambooEmployee({ id: "1", workEmail: "one@vendasta.com" }),
+      bambooEmployee({ id: "2", workEmail: "two@vendasta.com" }),
+    ];
+    const order: string[] = [];
+    const inner = mockBambooFetch({
+      report: { employees },
+      tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+      timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation" }] },
+    });
+    const store = new MemoryStore();
+    const originalTransaction = store.transaction.bind(store);
+    store.transaction = async (fn) => {
+      order.push("tx");
+      return originalTransaction(fn);
+    };
+    await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        fetch: async (url, init) => {
+          order.push("http");
+          return inner(url, init);
+        },
+      }),
+      store,
+      mode: "full",
+    });
+    expect(order.filter((row) => row === "http").length).toBeGreaterThan(0);
+    expect(order.indexOf("tx")).toBeGreaterThan(order.lastIndexOf("http"));
+  });
+
+  it("uses bulk table endpoints instead of per-employee table GETs", async () => {
+    const employees = Array.from({ length: 6 }, (_, index) =>
+      bambooEmployee({
+        id: String(index + 1),
+        workEmail: `bulk${index + 1}@vendasta.com`,
+      })
+    );
+    const fetchMock = mockBambooFetch({
+      report: { employees },
+      tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+      timeOffTypes: { timeOffTypes: [] },
+    });
+    await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        fetch: fetchMock,
+      }),
+      store: new MemoryStore(),
+      mode: "full",
+    });
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    for (const call of fetchMock.mock.calls) {
+      const method = ((call[1] as RequestInit | undefined)?.method || "GET").toUpperCase();
+      if (method === "POST") {
+        expect(String(call[0])).toContain("/reports/custom");
+      } else {
+        expect(method).toBe("GET");
+      }
+    }
+    const tableUrls = urls.filter((url) => url.includes("/changed/tables/"));
+    expect(tableUrls).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("/changed/tables/jobInfo"),
+        expect.stringContaining("/changed/tables/employmentStatus"),
+        expect.stringContaining("/changed/tables/compensation"),
+      ])
+    );
+    expect(urls.filter((url) => /\/employees\/\d+\/tables\//.test(url))).toHaveLength(0);
+    expect(tableUrls.length).toBeLessThanOrEqual(4);
+  });
+
+  it("writes a mode-600 cache and reuses it without refetching", async () => {
+    const cachePath = path.join(
+      os.tmpdir(),
+      `bamboo-sync-test-${process.pid}-${Date.now()}.bamboo-cache.json`
+    );
+    const employees = [
+      bambooEmployee({ id: "7", workEmail: "cache@vendasta.com", firstName: "Cache" }),
+    ];
+    const inner = mockBambooFetch({
+      report: { employees },
+      tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+      timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation", units: "days" }] },
+      balances: { "7": [{ name: "Vacation", balance: "4" }] },
+    });
+    try {
+      const first = await runBambooSync({
+        client: new BambooHrClient({
+          apiKey: "test-key",
+          subdomain: "vendasta",
+          fetch: inner,
+        }),
+        store: new MemoryStore(),
+        mode: "full",
+        cachePath,
+      });
+      expect(first.status).toBe("success");
+      const info = await stat(cachePath);
+      expect(info.mode & 0o777).toBe(0o600);
+
+      const blocked = jest.fn(async () => {
+        throw new Error("should not refetch BambooHR when cache exists");
+      });
+      const store = new MemoryStore();
+      const second = await runBambooSync({
+        client: new BambooHrClient({
+          apiKey: "test-key",
+          subdomain: "vendasta",
+          fetch: blocked,
+        }),
+        store,
+        mode: "full",
+        cachePath,
+      });
+      expect(second.status).toBe("success");
+      expect(blocked).not.toHaveBeenCalled();
+      expect(store.employees).toHaveLength(1);
+      expect(store.employees[0]?.bambooId).toBe("7");
+    } finally {
+      await unlink(cachePath).catch(() => undefined);
     }
   });
 });
