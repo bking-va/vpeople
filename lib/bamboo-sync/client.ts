@@ -311,18 +311,17 @@ export class BambooHrClient {
   async fetchEmployeesByIds(ids: string[]): Promise<BambooEmployeeRecord[]> {
     ids = ids.map((id) => id.trim()).filter((id) => SAFE_PATH_SEGMENT.test(id));
     if (ids.length === 0) return [];
-    const payload = await this.request("/reports/custom?format=JSON", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: "vPeople employee sync incremental",
-        filters: { employeeIds: ids },
-        fields: [...IMPORTED_EMPLOYEE_FIELDS],
-      }),
-    });
-    const employees = asRecord(payload).employees;
-    if (Array.isArray(employees) && employees.length > 0) {
-      return employees.map((row) => row as BambooEmployeeRecord);
+    const wanted = new Set(ids);
+    try {
+      // BambooHR 500s when a custom report combines filters.employeeIds with address fields.
+      const employees = await this.fetchAllEmployees();
+      if (employees.length > 0) {
+        return employees.filter((row) => wanted.has(String(row.id)));
+      }
+    } catch (error) {
+      if (!(error instanceof BambooHrHttpError) || error.status < 500) {
+        throw error;
+      }
     }
     const fetched: BambooEmployeeRecord[] = [];
     for (const id of ids) {
