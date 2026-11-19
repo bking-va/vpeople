@@ -40,7 +40,8 @@ export async function GET(
     .where(eq(candidates.id, id))
     .limit(1);
 
-  if (!isStoredResumeBlobUrl(candidate?.resumeBlobUrl)) {
+  const resumeUrl = candidate?.resumeBlobUrl;
+  if (!isStoredResumeBlobUrl(resumeUrl)) {
     return NextResponse.json({ error: "Resume not available" }, { status: 404 });
   }
 
@@ -49,7 +50,7 @@ export async function GET(
     return NextResponse.json({ error: "Resume not available" }, { status: 404 });
   }
 
-  const blobResponse = await fetch(candidate.resumeBlobUrl, {
+  const blobResponse = await fetch(resumeUrl, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!blobResponse.ok) {

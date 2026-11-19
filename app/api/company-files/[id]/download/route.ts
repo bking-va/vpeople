@@ -56,12 +56,17 @@ export async function GET(
   if (!allowed) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (!isStoredBlobUrl(file.fileUrl) || !process.env.BLOB_READ_WRITE_TOKEN) {
+  const fileUrl = file.fileUrl;
+  if (!isStoredBlobUrl(fileUrl)) {
+    return NextResponse.json({ error: "File not available" }, { status: 404 });
+  }
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
     return NextResponse.json({ error: "File not available" }, { status: 404 });
   }
 
-  const blobResponse = await fetch(file.fileUrl, {
-    headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+  const blobResponse = await fetch(fileUrl, {
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!blobResponse.ok) {
     return NextResponse.json({ error: "File not available" }, { status: 404 });

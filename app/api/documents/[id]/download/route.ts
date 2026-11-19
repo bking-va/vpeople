@@ -68,7 +68,8 @@ export async function GET(
     }
 
     // Stream the file through this route using server-side token
-    if (!isStoredBlobUrl(document.fileUrl)) {
+    const fileUrl = document.fileUrl;
+    if (!isStoredBlobUrl(fileUrl)) {
       return NextResponse.json(
         { error: "Document file not available" },
         { status: 404 }
@@ -76,7 +77,7 @@ export async function GET(
     }
 
     // Fetch blob with server-side token and stream to client
-    const blobResponse = await fetch(document.fileUrl, {
+    const blobResponse = await fetch(fileUrl, {
       headers: {
         Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
       },
