@@ -8,6 +8,7 @@ import {
 import { mapPool } from "./pool";
 import {
   atsResumeBlobPath,
+  BAMBOO_RESUME_UNAVAILABLE,
   type PrivateBlobStore,
 } from "./blob";
 import {
@@ -71,6 +72,7 @@ function emptyCheckpoint(newSince: string | null): AtsSyncCheckpoint {
     history: 0,
     newSince,
     paginationComplete: false,
+    detailsRequeued: false,
   };
 }
 
@@ -97,6 +99,7 @@ function asCheckpoint(value: Record<string, unknown> | null | undefined, fallbac
         ? value.newSince
         : fallbackNewSince,
     paginationComplete: value.paginationComplete === true,
+    detailsRequeued: value.detailsRequeued === true,
   };
 }
 
@@ -246,8 +249,12 @@ export async function runAtsApplicationsSync(
     );
     let jobIds = await opts.store.listJobOpeningIdsByBambooId();
     const listedIds: string[] = [];
-    const maxPages = Math.min(
+    const pageBudget = Math.min(
       opts.maxListPages ?? ATS_APPLICATIONS_MAX_PAGES,
+      ATS_APPLICATIONS_MAX_PAGES
+    );
+    const lastListPage = Math.min(
+      checkpoint.listPage + pageBudget - 1,
       ATS_APPLICATIONS_MAX_PAGES
     );
 
@@ -255,7 +262,7 @@ export async function runAtsApplicationsSync(
       log(
         `Phase list: ATS applications page ${checkpoint.listPage} newSince=${checkpoint.newSince || "none"}`
       );
-      for (let page = checkpoint.listPage; page <= maxPages; page += 1) {
+      for (let page = checkpoint.listPage; page <= lastListPage; page += 1) {
         if (timedOut()) {
           checkpoint.listPage = page;
           await persist("checkpointed");
@@ -336,6 +343,11 @@ export async function runAtsApplicationsSync(
 
     if (checkpoint.phase === "details") {
       log("Phase details: ATS application Q&A, comments, history");
+      if (!dryRun && opts.mode === "full" && !checkpoint.detailsRequeued) {
+        await opts.store.requeueCandidateDetails();
+        checkpoint.detailsRequeued = true;
+        await persist("running");
+      }
       while (!dryRun) {
         if (timedOut()) {
           await persist("checkpointed");
@@ -479,6 +491,10 @@ export async function runAtsApplicationsSync(
             } catch (error) {
               if (error instanceof BambooHrHttpError && error.status === 404) {
                 log(`resume file missing bambooFileId=${row.resumeBambooFileId}`);
+                await opts.store.setCandidateResumeBlob(
+                  row.bambooId,
+                  BAMBOO_RESUME_UNAVAILABLE
+                );
                 return;
               }
               throw error;
