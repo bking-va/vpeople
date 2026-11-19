@@ -1,0 +1,546 @@
+import {
+  ATS_APPLICATIONS_MAX_PAGES,
+  BAMBOO_ATS_DETAIL_CONCURRENCY,
+  BambooHrClient,
+  BambooHrHttpError,
+  parseBoundedConcurrency,
+} from "./client";
+import { mapPool } from "./pool";
+import {
+  atsResumeBlobPath,
+  type PrivateBlobStore,
+} from "./blob";
+import {
+  emptyAtsDatasetCounts,
+  formatBambooNewSince,
+  mapAtsAnswers,
+  mapAtsApplication,
+  mapAtsComments,
+  mapAtsStatusHistory,
+} from "./map-ats";
+import type { BambooSyncStore } from "./sync";
+import type { BatchProgress } from "./chunks";
+import type {
+  AtsDatasetCounts,
+  AtsSyncCheckpoint,
+  BambooAtsSyncResult,
+  BambooSyncMode,
+  MappedAtsApplicationWrite,
+} from "./types";
+
+const PII_LOG_PATTERN =
+  /(\b\d{3}-\d{2}-\d{4}\b)|(\$\s?\d)|(@[a-z0-9.-]+\.[a-z]{2,})/i;
+
+export type AtsSyncLogger = (message: string) => void;
+
+export type RunAtsApplicationsSyncOptions = {
+  client: BambooHrClient | null;
+  store: BambooSyncStore;
+  blob?: PrivateBlobStore | null;
+  mode: BambooSyncMode;
+  dryRun?: boolean;
+  importResumes?: boolean;
+  log?: AtsSyncLogger;
+  now?: Date;
+  concurrency?: number;
+  maxListPages?: number;
+  maxMs?: number;
+  writeChunkSize?: number;
+};
+
+function safeLog(log: AtsSyncLogger, message: string) {
+  if (PII_LOG_PATTERN.test(message)) {
+    log("sync log redacted");
+    return;
+  }
+  log(message);
+}
+
+function emptyCheckpoint(newSince: string | null): AtsSyncCheckpoint {
+  return {
+    phase: "list",
+    listPage: 1,
+    lastListId: null,
+    lastDetailId: null,
+    lastResumeId: null,
+    listed: 0,
+    detailed: 0,
+    resumes: 0,
+    answers: 0,
+    comments: 0,
+    history: 0,
+    newSince,
+    paginationComplete: false,
+  };
+}
+
+function asCheckpoint(value: Record<string, unknown> | null | undefined, fallbackNewSince: string | null): AtsSyncCheckpoint {
+  if (!value) return emptyCheckpoint(fallbackNewSince);
+  const phase = value.phase;
+  return {
+    phase:
+      phase === "details" || phase === "resumes" || phase === "done" || phase === "list"
+        ? phase
+        : "list",
+    listPage: Number(value.listPage) > 0 ? Number(value.listPage) : 1,
+    lastListId: typeof value.lastListId === "string" ? value.lastListId : null,
+    lastDetailId: typeof value.lastDetailId === "string" ? value.lastDetailId : null,
+    lastResumeId: typeof value.lastResumeId === "string" ? value.lastResumeId : null,
+    listed: Number(value.listed) || 0,
+    detailed: Number(value.detailed) || 0,
+    resumes: Number(value.resumes) || 0,
+    answers: Number(value.answers) || 0,
+    comments: Number(value.comments) || 0,
+    history: Number(value.history) || 0,
+    newSince:
+      typeof value.newSince === "string"
+        ? value.newSince
+        : fallbackNewSince,
+    paginationComplete: value.paginationComplete === true,
+  };
+}
+
+function countsFrom(checkpoint: AtsSyncCheckpoint): AtsDatasetCounts {
+  return {
+    applications: checkpoint.listed,
+    answers: checkpoint.answers,
+    comments: checkpoint.comments,
+    statusHistory: checkpoint.history,
+    resumes: checkpoint.resumes,
+  };
+}
+
+function progress(_label: string, chunkSize?: number): BatchProgress {
+  return { chunkSize };
+}
+
+async function ensureJobOpenings(
+  store: BambooSyncStore,
+  mapped: MappedAtsApplicationWrite[],
+  jobIds: Map<string, number>
+) {
+  const missing = mapped.filter((row) => !jobIds.has(row.jobBambooId));
+  if (missing.length === 0) return jobIds;
+  const stubs = new Map<string, MappedAtsApplicationWrite>();
+  for (const row of missing) {
+    if (!stubs.has(row.jobBambooId)) stubs.set(row.jobBambooId, row);
+  }
+  await store.upsertJobOpeningsBatch(
+    [...stubs.values()].map((row) => ({
+      bambooId: row.jobBambooId,
+      title: row.jobTitle,
+      departmentId: null,
+      locationId: null,
+      hiringLeadId: null,
+      status: "draft" as const,
+      bambooStatusId: null,
+      bambooStatusLabel: null,
+      employmentType: "full_time",
+      description: null,
+      requirements: null,
+      openDate: null,
+      closeDate: null,
+    })),
+    progress("job_opening_stubs")
+  );
+  const refreshed = await store.listJobOpeningIdsByBambooId();
+  for (const [id, value] of refreshed) jobIds.set(id, value);
+  return jobIds;
+}
+
+export async function runAtsApplicationsSync(
+  opts: RunAtsApplicationsSyncOptions
+): Promise<BambooAtsSyncResult> {
+  const log: AtsSyncLogger = (message) => {
+    if (opts.log) safeLog(opts.log, message);
+  };
+  const dryRun = Boolean(opts.dryRun);
+  const startedAt = (opts.now ?? new Date()).toISOString();
+  const deadline = opts.maxMs != null ? Date.now() + opts.maxMs : null;
+  const timedOut = () => deadline != null && Date.now() >= deadline;
+  const importResumes = opts.importResumes !== false;
+  const concurrency = Math.max(
+    1,
+    Math.min(opts.concurrency ?? BAMBOO_ATS_DETAIL_CONCURRENCY, 4)
+  );
+
+  const failed = (
+    checkpoint: AtsSyncCheckpoint,
+    message: string
+  ): BambooAtsSyncResult => ({
+    status: "failed",
+    dryRun,
+    kind: "ats_applications",
+    mode: opts.mode,
+    datasetCounts: countsFrom(checkpoint),
+    checkpoint,
+    errorMessage: message,
+  });
+
+  if (!opts.client) {
+    log("BAMBOOHR_API_KEY is unset; ATS applications sync skipped");
+    return {
+      status: "skipped",
+      dryRun,
+      kind: "ats_applications",
+      mode: opts.mode,
+      datasetCounts: emptyAtsDatasetCounts(),
+      checkpoint: emptyCheckpoint(null),
+    };
+  }
+
+  const newSince =
+    opts.mode === "incremental"
+      ? formatBambooNewSince(
+          new Date(
+            (await opts.store.lastSuccessfulAtsCursor()) || "2010-01-01T00:00:00Z"
+          )
+        )
+      : null;
+
+  const incomplete = dryRun ? null : await opts.store.lastIncompleteAtsCheckpoint();
+  const freshFull = opts.mode === "full" && !incomplete;
+  let checkpoint = asCheckpoint(incomplete?.checkpoint, newSince);
+  if (opts.mode === "incremental" && !incomplete) {
+    checkpoint = emptyCheckpoint(newSince);
+  }
+  if (freshFull) {
+    checkpoint = emptyCheckpoint(null);
+  }
+
+  let runId = incomplete?.id ?? null;
+  if (!dryRun && runId == null) {
+    runId = await opts.store.startSyncRun({
+      kind: "ats_applications",
+      mode: opts.mode,
+      status: "running",
+      startedAt,
+      latestChanged: checkpoint.newSince,
+      checkpoint,
+      datasetCounts: countsFrom(checkpoint),
+    });
+  }
+
+  const persist = async (status: "running" | "checkpointed" | "success" | "failed", errorMessage?: string) => {
+    if (dryRun || runId == null) return;
+    await opts.store.updateSyncRun(runId, {
+      status,
+      finishedAt: status === "running" ? null : new Date().toISOString(),
+      latestChanged:
+        opts.mode === "incremental"
+          ? formatBambooNewSince(opts.now ?? new Date())
+          : checkpoint.newSince,
+      checkpoint,
+      datasetCounts: countsFrom(checkpoint),
+      errorMessage,
+    });
+  };
+
+  try {
+    const statuses = await opts.client.fetchAtsStatuses();
+    const statusesById = new Map(
+      statuses.map((status) => [
+        status.id,
+        { code: status.code, name: status.name, kind: status.kind },
+      ])
+    );
+    let jobIds = await opts.store.listJobOpeningIdsByBambooId();
+    const listedIds: string[] = [];
+    const maxPages = Math.min(
+      opts.maxListPages ?? ATS_APPLICATIONS_MAX_PAGES,
+      ATS_APPLICATIONS_MAX_PAGES
+    );
+
+    if (checkpoint.phase === "list") {
+      log(
+        `Phase list: ATS applications page ${checkpoint.listPage} newSince=${checkpoint.newSince || "none"}`
+      );
+      for (let page = checkpoint.listPage; page <= maxPages; page += 1) {
+        if (timedOut()) {
+          checkpoint.listPage = page;
+          await persist("checkpointed");
+          log(`checkpointed list page=${page} listed=${checkpoint.listed}`);
+          return {
+            status: "checkpointed",
+            dryRun,
+            kind: "ats_applications",
+            mode: opts.mode,
+            datasetCounts: countsFrom(checkpoint),
+            checkpoint,
+          };
+        }
+        const listed = await opts.client.fetchAtsApplicationsPage({
+          page,
+          newSince: checkpoint.newSince,
+        });
+        const mapped = listed.applications
+          .map((row) => mapAtsApplication(row, statusesById))
+          .filter((row): row is MappedAtsApplicationWrite => Boolean(row));
+        log(`ATS applications page=${page} count=${mapped.length}`);
+        if (!dryRun && mapped.length > 0) {
+          jobIds = await ensureJobOpenings(opts.store, mapped, jobIds);
+          const rows = mapped.flatMap((row) => {
+            const jobOpeningId = jobIds.get(row.jobBambooId);
+            if (jobOpeningId == null) return [];
+            return [
+              {
+                bambooId: row.bambooId,
+                jobOpeningId,
+                firstName: row.firstName,
+                lastName: row.lastName,
+                email: row.email,
+                phone: row.phone,
+                linkedinUrl: row.linkedinUrl,
+                source: row.source,
+                sourceDetail: row.sourceDetail,
+                stage: row.stage,
+                bambooStatusId: row.bambooStatusId,
+                bambooStatusLabel: row.bambooStatusLabel,
+                rating: row.rating,
+                appliedAt: row.appliedAt,
+                coverLetter: row.coverLetter,
+                resumeBambooFileId: row.resumeBambooFileId,
+                resumeBlobUrl: null,
+                atsDetailImportedAt: null,
+              },
+            ];
+          });
+          await opts.store.upsertCandidatesBatch(
+            rows,
+            progress("candidates", opts.writeChunkSize)
+          );
+        }
+        checkpoint.listed += mapped.length;
+        checkpoint.listPage = page + 1;
+        checkpoint.lastListId = mapped[mapped.length - 1]?.bambooId ?? checkpoint.lastListId;
+        listedIds.push(...mapped.map((row) => row.bambooId));
+        checkpoint.paginationComplete = listed.paginationComplete;
+        await persist("running");
+        if (listed.paginationComplete) break;
+      }
+      if (!checkpoint.paginationComplete) {
+        await persist("checkpointed");
+        log(`checkpointed list page=${checkpoint.listPage} listed=${checkpoint.listed}`);
+        return {
+          status: "checkpointed",
+          dryRun,
+          kind: "ats_applications",
+          mode: opts.mode,
+          datasetCounts: countsFrom(checkpoint),
+          checkpoint,
+        };
+      }
+      checkpoint.phase = "details";
+      await persist("running");
+    }
+
+    if (checkpoint.phase === "details") {
+      log("Phase details: ATS application Q&A, comments, history");
+      while (!dryRun) {
+        if (timedOut()) {
+          await persist("checkpointed");
+          return {
+            status: "checkpointed",
+            dryRun,
+            kind: "ats_applications",
+            mode: opts.mode,
+            datasetCounts: countsFrom(checkpoint),
+            checkpoint,
+          };
+        }
+        const batch = await opts.store.listCandidatesNeedingDetail(25);
+        if (batch.length === 0) break;
+        const details = await mapPool(batch, concurrency, async (row) => {
+          try {
+            const detail = await opts.client!.fetchAtsApplicationDetail(row.bambooId);
+            return { row, detail };
+          } catch (error) {
+            if (error instanceof BambooHrHttpError && error.status === 404) {
+              return { row, detail: { id: row.bambooId } };
+            }
+            throw error;
+          }
+        });
+        const mappedDetails = details.flatMap((item) => {
+          const mapped = mapAtsApplication(item.detail, statusesById);
+          return mapped ? [{ item, mapped }] : [];
+        });
+        jobIds = await ensureJobOpenings(
+          opts.store,
+          mappedDetails.map((row) => row.mapped),
+          jobIds
+        );
+        const nowIso = (opts.now ?? new Date()).toISOString();
+        const candidateRows = mappedDetails.flatMap(({ mapped }) => {
+          const jobOpeningId = jobIds.get(mapped.jobBambooId);
+          if (jobOpeningId == null) return [];
+          return [
+            {
+              bambooId: mapped.bambooId,
+              jobOpeningId,
+              firstName: mapped.firstName,
+              lastName: mapped.lastName,
+              email: mapped.email,
+              phone: mapped.phone,
+              linkedinUrl: mapped.linkedinUrl,
+              source: mapped.source,
+              sourceDetail: mapped.sourceDetail,
+              stage: mapped.stage,
+              bambooStatusId: mapped.bambooStatusId,
+              bambooStatusLabel: mapped.bambooStatusLabel,
+              rating: mapped.rating,
+              appliedAt: mapped.appliedAt,
+              coverLetter: mapped.coverLetter,
+              resumeBambooFileId: mapped.resumeBambooFileId,
+              resumeBlobUrl: null,
+              atsDetailImportedAt: nowIso,
+            },
+          ];
+        });
+        if (candidateRows.length > 0) {
+          await opts.store.upsertCandidatesBatch(
+            candidateRows,
+            progress("candidate_details", opts.writeChunkSize)
+          );
+        }
+        await opts.store.markCandidateDetailImported(batch.map((row) => row.bambooId));
+        const answers: Parameters<BambooSyncStore["upsertCandidateAnswersBatch"]>[0] = [];
+        const comments: Parameters<BambooSyncStore["upsertCandidateCommentsBatch"]>[0] = [];
+        const history: Parameters<BambooSyncStore["upsertCandidateStatusHistoryBatch"]>[0] = [];
+        for (const item of details) {
+          const candidateId = item.row.id;
+          for (const answer of mapAtsAnswers(item.detail, item.row.bambooId)) {
+            answers.push({ candidateId, ...answer });
+          }
+          for (const comment of mapAtsComments(item.detail, item.row.bambooId)) {
+            comments.push({ candidateId, ...comment });
+          }
+          for (const event of mapAtsStatusHistory(item.detail, item.row.bambooId)) {
+            history.push({ candidateId, ...event });
+          }
+        }
+        checkpoint.answers += await opts.store.upsertCandidateAnswersBatch(
+          answers,
+          progress("candidate_answers", opts.writeChunkSize)
+        );
+        checkpoint.comments += await opts.store.upsertCandidateCommentsBatch(
+          comments,
+          progress("candidate_comments", opts.writeChunkSize)
+        );
+        checkpoint.history += await opts.store.upsertCandidateStatusHistoryBatch(
+          history,
+          progress("candidate_history", opts.writeChunkSize)
+        );
+        checkpoint.detailed += batch.length;
+        checkpoint.lastDetailId = batch[batch.length - 1]?.bambooId ?? checkpoint.lastDetailId;
+        log(`ATS details processed=${checkpoint.detailed}`);
+        await persist("running");
+        if (batch.length < 25) break;
+      }
+      checkpoint.phase = importResumes ? "resumes" : "done";
+      await persist("running");
+    }
+
+    if (checkpoint.phase === "resumes") {
+      if (!importResumes || !opts.blob) {
+        if (importResumes && !opts.blob) {
+          log("BLOB_READ_WRITE_TOKEN unset; skipping resume blobs");
+        }
+        checkpoint.phase = "done";
+      } else {
+        log("Phase resumes: private blob upload");
+        while (!dryRun) {
+          if (timedOut()) {
+            await persist("checkpointed");
+            return {
+              status: "checkpointed",
+              dryRun,
+              kind: "ats_applications",
+              mode: opts.mode,
+              datasetCounts: countsFrom(checkpoint),
+              checkpoint,
+            };
+          }
+          const batch = await opts.store.listCandidatesNeedingResume(10);
+          if (batch.length === 0) break;
+          await mapPool(batch, 1, async (row) => {
+            try {
+              const file = await opts.client!.fetchFile(row.resumeBambooFileId);
+              const stored = await opts.blob!.putPrivate({
+                pathname: atsResumeBlobPath(
+                  row.bambooId,
+                  file.filename || "resume"
+                ),
+                body: file.body,
+                contentType: file.contentType,
+              });
+              await opts.store.setCandidateResumeBlob(row.bambooId, stored.url);
+              checkpoint.resumes += 1;
+            } catch (error) {
+              if (error instanceof BambooHrHttpError && error.status === 404) {
+                log(`resume file missing bambooFileId=${row.resumeBambooFileId}`);
+                return;
+              }
+              throw error;
+            }
+          });
+          checkpoint.lastResumeId = batch[batch.length - 1]?.bambooId ?? checkpoint.lastResumeId;
+          log(`ATS resumes stored=${checkpoint.resumes}`);
+          await persist("running");
+          if (batch.length < 10) break;
+        }
+        checkpoint.phase = "done";
+      }
+    }
+
+    if (
+      freshFull &&
+      !dryRun &&
+      checkpoint.paginationComplete &&
+      checkpoint.phase === "done" &&
+      listedIds.length > 0
+    ) {
+      log("Phase prune: stale imported applications");
+      await opts.store.pruneImportedRowsNotIn(
+        "candidates",
+        listedIds,
+        progress("prune candidates")
+      );
+    }
+
+    await persist("success");
+    log(
+      `ATS applications listed=${checkpoint.listed} detailed=${checkpoint.detailed} resumes=${checkpoint.resumes}`
+    );
+    return {
+      status: "success",
+      dryRun,
+      kind: "ats_applications",
+      mode: opts.mode,
+      datasetCounts: countsFrom(checkpoint),
+      checkpoint,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message.replace(PII_LOG_PATTERN, "[redacted]") : "ATS sync failed";
+    log(`ATS applications sync failed: ${message}`);
+    const checkpointSafe = checkpoint;
+    await persist("failed", message);
+    return failed(checkpointSafe, message);
+  }
+}
+
+export function formatAtsSyncSummary(result: BambooAtsSyncResult): string {
+  return [
+    `ATS applications ${result.status}`,
+    `mode=${result.mode}`,
+    `applications=${result.datasetCounts.applications}`,
+    `answers=${result.datasetCounts.answers}`,
+    `comments=${result.datasetCounts.comments}`,
+    `history=${result.datasetCounts.statusHistory}`,
+    `resumes=${result.datasetCounts.resumes}`,
+    `phase=${result.checkpoint.phase}`,
+  ].join(" ");
+}
+
+export { parseBoundedConcurrency };

@@ -1,11 +1,15 @@
-import { eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import {
   announcements,
   approvalRequestSteps,
   approvalRequests,
   auditLogs,
   bambooSyncRuns,
+  candidateApplicationAnswers,
+  candidateApplicationComments,
   candidateNotes,
+  candidateStatusHistory,
+  candidates,
   compensationHistory,
   customFieldValues,
   departments,
@@ -1206,6 +1210,452 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       return rows.length;
     },
 
+    async listJobOpeningIdsByBambooId() {
+      const rows: Array<{ id: number; bambooId: string | null }> = await db
+        .select({ id: jobOpenings.id, bambooId: jobOpenings.bambooId })
+        .from(jobOpenings)
+        .where(isNotNull(jobOpenings.bambooId));
+      const map = new Map<string, number>();
+      for (const row of rows) {
+        if (row.bambooId) map.set(row.bambooId, row.id);
+      }
+      return map;
+    },
+
+    async upsertCandidatesBatch(rows, progress) {
+      const ids = new Map<string, number>();
+      if (rows.length === 0) return ids;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            CAST(${row.jobOpeningId} AS int),
+            ${row.firstName},
+            ${row.lastName},
+            ${row.email},
+            ${row.phone},
+            ${row.linkedinUrl},
+            CAST(${row.source} AS candidate_source),
+            ${row.sourceDetail},
+            CAST(${row.stage} AS candidate_stage),
+            ${row.bambooStatusId},
+            ${row.bambooStatusLabel},
+            CAST(${row.rating} AS int),
+            CAST(${row.appliedAt} AS timestamp),
+            ${row.coverLetter},
+            ${row.resumeBambooFileId},
+            ${row.resumeBlobUrl},
+            CAST(${row.atsDetailImportedAt} AS timestamp)
+          )`
+        );
+        const result = await executeSql(
+          db,
+          sql`
+            INSERT INTO candidates (
+              bamboo_id, job_opening_id, first_name, last_name, email, phone,
+              linkedin_url, source, source_detail, stage, bamboo_status_id,
+              bamboo_status_label, rating, applied_at, cover_letter,
+              resume_bamboo_file_id, resume_blob_url, ats_detail_imported_at,
+              created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              CAST(v.job_opening_id AS int),
+              v.first_name,
+              v.last_name,
+              v.email,
+              v.phone,
+              v.linkedin_url,
+              CAST(v.source AS candidate_source),
+              v.source_detail,
+              CAST(v.stage AS candidate_stage),
+              v.bamboo_status_id,
+              v.bamboo_status_label,
+              CAST(v.rating AS int),
+              COALESCE(CAST(v.applied_at AS timestamp), now()),
+              v.cover_letter,
+              v.resume_bamboo_file_id,
+              v.resume_blob_url,
+              CAST(v.ats_detail_imported_at AS timestamp),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, job_opening_id, first_name, last_name, email, phone,
+              linkedin_url, source, source_detail, stage, bamboo_status_id,
+              bamboo_status_label, rating, applied_at, cover_letter,
+              resume_bamboo_file_id, resume_blob_url, ats_detail_imported_at
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              job_opening_id = CAST(EXCLUDED.job_opening_id AS int),
+              first_name = EXCLUDED.first_name,
+              last_name = EXCLUDED.last_name,
+              email = EXCLUDED.email,
+              phone = COALESCE(EXCLUDED.phone, candidates.phone),
+              linkedin_url = COALESCE(EXCLUDED.linkedin_url, candidates.linkedin_url),
+              source = CAST(EXCLUDED.source AS candidate_source),
+              source_detail = COALESCE(EXCLUDED.source_detail, candidates.source_detail),
+              stage = CAST(EXCLUDED.stage AS candidate_stage),
+              bamboo_status_id = COALESCE(EXCLUDED.bamboo_status_id, candidates.bamboo_status_id),
+              bamboo_status_label = COALESCE(EXCLUDED.bamboo_status_label, candidates.bamboo_status_label),
+              rating = COALESCE(CAST(EXCLUDED.rating AS int), candidates.rating),
+              applied_at = COALESCE(CAST(EXCLUDED.applied_at AS timestamp), candidates.applied_at),
+              cover_letter = COALESCE(EXCLUDED.cover_letter, candidates.cover_letter),
+              resume_bamboo_file_id = COALESCE(EXCLUDED.resume_bamboo_file_id, candidates.resume_bamboo_file_id),
+              resume_blob_url = COALESCE(EXCLUDED.resume_blob_url, candidates.resume_blob_url),
+              ats_detail_imported_at = COALESCE(
+                CAST(EXCLUDED.ats_detail_imported_at AS timestamp),
+                candidates.ats_detail_imported_at
+              ),
+              updated_at = now()
+            RETURNING bamboo_id, id
+          `
+        );
+        const returned = Array.isArray((result as { rows?: unknown }).rows)
+          ? (result as { rows: Array<{ bamboo_id: string; id: number }> }).rows
+          : Array.isArray(result)
+            ? (result as Array<{ bamboo_id: string; id: number }>)
+            : [];
+        for (const row of returned) {
+          if (row.bamboo_id) ids.set(row.bamboo_id, Number(row.id));
+        }
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return ids;
+    },
+
+    async upsertCandidateAnswersBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            CAST(${row.candidateId} AS int),
+            ${row.bambooQuestionId},
+            ${row.question},
+            ${row.answer}
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO candidate_application_answers (
+              candidate_id, bamboo_question_id, question, answer, created_at, updated_at
+            )
+            SELECT
+              CAST(v.candidate_id AS int),
+              v.bamboo_question_id,
+              v.question,
+              v.answer,
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              candidate_id, bamboo_question_id, question, answer
+            )
+            ON CONFLICT (candidate_id, bamboo_question_id) DO UPDATE SET
+              question = EXCLUDED.question,
+              answer = EXCLUDED.answer,
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async upsertCandidateCommentsBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            CAST(${row.candidateId} AS int),
+            ${row.bambooId},
+            ${row.authorName},
+            ${row.authorBambooId},
+            ${row.content},
+            CAST(${row.commentedAt} AS timestamp)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO candidate_application_comments (
+              candidate_id, bamboo_id, author_name, author_bamboo_id, content,
+              commented_at, created_at, updated_at
+            )
+            SELECT
+              CAST(v.candidate_id AS int),
+              v.bamboo_id,
+              v.author_name,
+              v.author_bamboo_id,
+              v.content,
+              CAST(v.commented_at AS timestamp),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              candidate_id, bamboo_id, author_name, author_bamboo_id, content, commented_at
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              candidate_id = CAST(EXCLUDED.candidate_id AS int),
+              author_name = EXCLUDED.author_name,
+              author_bamboo_id = EXCLUDED.author_bamboo_id,
+              content = EXCLUDED.content,
+              commented_at = CAST(EXCLUDED.commented_at AS timestamp),
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async upsertCandidateStatusHistoryBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            CAST(${row.candidateId} AS int),
+            ${row.bambooEventId},
+            ${row.bambooStatusId},
+            ${row.statusLabel},
+            CAST(${row.changedAt} AS timestamp),
+            ${row.changedByName}
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO candidate_status_history (
+              candidate_id, bamboo_event_id, bamboo_status_id, status_label,
+              changed_at, changed_by_name, created_at
+            )
+            SELECT
+              CAST(v.candidate_id AS int),
+              v.bamboo_event_id,
+              v.bamboo_status_id,
+              v.status_label,
+              CAST(v.changed_at AS timestamp),
+              v.changed_by_name,
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              candidate_id, bamboo_event_id, bamboo_status_id, status_label,
+              changed_at, changed_by_name
+            )
+            ON CONFLICT (bamboo_event_id) DO UPDATE SET
+              candidate_id = CAST(EXCLUDED.candidate_id AS int),
+              bamboo_status_id = EXCLUDED.bamboo_status_id,
+              status_label = EXCLUDED.status_label,
+              changed_at = CAST(EXCLUDED.changed_at AS timestamp),
+              changed_by_name = EXCLUDED.changed_by_name
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async listCandidatesNeedingDetail(limit, afterBambooId) {
+      const size = Math.max(1, Math.min(limit, 500));
+      const rows: Array<{ id: number; bambooId: string | null }> = afterBambooId
+        ? await db
+            .select({ id: candidates.id, bambooId: candidates.bambooId })
+            .from(candidates)
+            .where(
+              and(
+                isNotNull(candidates.bambooId),
+                isNull(candidates.atsDetailImportedAt),
+                gt(candidates.bambooId, afterBambooId)
+              )
+            )
+            .orderBy(candidates.bambooId)
+            .limit(size)
+        : await db
+            .select({ id: candidates.id, bambooId: candidates.bambooId })
+            .from(candidates)
+            .where(
+              and(isNotNull(candidates.bambooId), isNull(candidates.atsDetailImportedAt))
+            )
+            .orderBy(candidates.bambooId)
+            .limit(size);
+      return rows.flatMap((row) =>
+        row.bambooId ? [{ id: row.id, bambooId: row.bambooId }] : []
+      );
+    },
+
+    async listCandidatesNeedingResume(limit, afterBambooId) {
+      const size = Math.max(1, Math.min(limit, 200));
+      const rows: Array<{
+        id: number;
+        bambooId: string | null;
+        resumeBambooFileId: string | null;
+      }> = afterBambooId
+        ? await db
+            .select({
+              id: candidates.id,
+              bambooId: candidates.bambooId,
+              resumeBambooFileId: candidates.resumeBambooFileId,
+            })
+            .from(candidates)
+            .where(
+              and(
+                isNotNull(candidates.bambooId),
+                isNotNull(candidates.resumeBambooFileId),
+                isNull(candidates.resumeBlobUrl),
+                gt(candidates.bambooId, afterBambooId)
+              )
+            )
+            .orderBy(candidates.bambooId)
+            .limit(size)
+        : await db
+            .select({
+              id: candidates.id,
+              bambooId: candidates.bambooId,
+              resumeBambooFileId: candidates.resumeBambooFileId,
+            })
+            .from(candidates)
+            .where(
+              and(
+                isNotNull(candidates.bambooId),
+                isNotNull(candidates.resumeBambooFileId),
+                isNull(candidates.resumeBlobUrl)
+              )
+            )
+            .orderBy(candidates.bambooId)
+            .limit(size);
+      return rows.flatMap((row) =>
+        row.bambooId && row.resumeBambooFileId
+          ? [
+              {
+                id: row.id,
+                bambooId: row.bambooId,
+                resumeBambooFileId: row.resumeBambooFileId,
+              },
+            ]
+          : []
+      );
+    },
+
+    async setCandidateResumeBlob(bambooId, blobUrl) {
+      await db
+        .update(candidates)
+        .set({ resumeBlobUrl: blobUrl, updatedAt: new Date() })
+        .where(eq(candidates.bambooId, bambooId));
+    },
+
+    async markCandidateDetailImported(bambooIds) {
+      const ids = bambooIds.filter(Boolean);
+      if (ids.length === 0) return;
+      await db
+        .update(candidates)
+        .set({ atsDetailImportedAt: new Date(), updatedAt: new Date() })
+        .where(inArray(candidates.bambooId, ids));
+    },
+
+    async startSyncRun(run) {
+      const [row] = await db
+        .insert(bambooSyncRuns)
+        .values({
+          kind: String(run.kind || "employees"),
+          startedAt: run.startedAt ? new Date(String(run.startedAt)) : new Date(),
+          mode: String(run.mode || "full"),
+          status: String(run.status || "running"),
+          employeesFetched: Number(run.employeesFetched || 0),
+          employeesCreated: Number(run.employeesCreated || 0),
+          employeesUpdated: Number(run.employeesUpdated || 0),
+          demoRemoved: Number(run.demoRemoved || 0),
+          latestChanged: run.latestChanged ? String(run.latestChanged) : null,
+          unmappedFields: Array.isArray(run.unmappedFields) ? run.unmappedFields : [],
+          datasetCounts:
+            run.datasetCounts && typeof run.datasetCounts === "object"
+              ? run.datasetCounts
+              : {},
+          checkpoint:
+            run.checkpoint && typeof run.checkpoint === "object"
+              ? run.checkpoint
+              : {},
+          errorMessage: run.errorMessage ? String(run.errorMessage) : null,
+        })
+        .returning({ id: bambooSyncRuns.id });
+      return row.id;
+    },
+
+    async updateSyncRun(id, run) {
+      const patch: Record<string, unknown> = {};
+      if (run.status != null) patch.status = String(run.status);
+      if (run.finishedAt != null) patch.finishedAt = new Date(String(run.finishedAt));
+      if (run.latestChanged !== undefined) {
+        patch.latestChanged = run.latestChanged ? String(run.latestChanged) : null;
+      }
+      if (run.datasetCounts && typeof run.datasetCounts === "object") {
+        patch.datasetCounts = run.datasetCounts;
+      }
+      if (run.checkpoint && typeof run.checkpoint === "object") {
+        patch.checkpoint = run.checkpoint;
+      }
+      if (run.errorMessage !== undefined) {
+        patch.errorMessage = run.errorMessage ? String(run.errorMessage) : null;
+      }
+      if (Object.keys(patch).length === 0) return;
+      await db.update(bambooSyncRuns).set(patch).where(eq(bambooSyncRuns.id, id));
+    },
+
+    async lastIncompleteAtsCheckpoint() {
+      const rows = await db
+        .select({
+          id: bambooSyncRuns.id,
+          checkpoint: bambooSyncRuns.checkpoint,
+          latestChanged: bambooSyncRuns.latestChanged,
+          status: bambooSyncRuns.status,
+        })
+        .from(bambooSyncRuns)
+        .where(
+          and(
+            eq(bambooSyncRuns.kind, "ats_applications"),
+            or(
+              eq(bambooSyncRuns.status, "running"),
+              eq(bambooSyncRuns.status, "checkpointed")
+            )
+          )
+        )
+        .orderBy(sql`${bambooSyncRuns.id} desc`)
+        .limit(1);
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        checkpoint:
+          row.checkpoint && typeof row.checkpoint === "object"
+            ? row.checkpoint
+            : null,
+        latestChanged: row.latestChanged,
+      };
+    },
+
+    async lastSuccessfulAtsCursor() {
+      const rows = await db
+        .select({ latestChanged: bambooSyncRuns.latestChanged })
+        .from(bambooSyncRuns)
+        .where(
+          and(
+            eq(bambooSyncRuns.kind, "ats_applications"),
+            eq(bambooSyncRuns.status, "success")
+          )
+        )
+        .orderBy(sql`${bambooSyncRuns.id} desc`)
+        .limit(1);
+      return rows[0]?.latestChanged ?? null;
+    },
+
     async pruneImportedRowsNotIn(kind, keepBambooIds, progress) {
       const table =
         kind === "time_off_requests"
@@ -1214,7 +1664,9 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
             ? jobOpenings
             : kind === "education"
               ? employeeEducation
-              : employeeVisas;
+              : kind === "candidates"
+                ? candidates
+                : employeeVisas;
       const existing: Array<{ id: number; bambooId: string | null }> = await db
         .select({
           id: table.id,
@@ -1270,6 +1722,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
 
     async recordSyncRun(run) {
       await db.insert(bambooSyncRuns).values({
+        kind: String(run.kind || "employees"),
         startedAt: run.startedAt ? new Date(String(run.startedAt)) : new Date(),
         finishedAt: run.finishedAt ? new Date(String(run.finishedAt)) : new Date(),
         mode: String(run.mode || "full"),
@@ -1295,7 +1748,12 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
           status: bambooSyncRuns.status,
         })
         .from(bambooSyncRuns)
-        .where(eq(bambooSyncRuns.status, "success"))
+        .where(
+          and(
+            eq(bambooSyncRuns.status, "success"),
+            eq(bambooSyncRuns.kind, "employees")
+          )
+        )
         .orderBy(sql`${bambooSyncRuns.id} desc`)
         .limit(1);
       return rows[0]?.latestChanged ?? null;

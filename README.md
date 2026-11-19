@@ -393,7 +393,21 @@ Imported when Bamboo provides them: identity, work/personal email, phones, job t
 
 Time-off types/policies come from `GET /meta/time_off/types` and `GET /meta/time_off/policies` (`GET /time_off/types` 404s and is not used). Requests come from `GET /time_off/requests` one year at a time. ATS jobs come from `GET /applicant_tracking/jobs?statusGroups=ALL` with `GET /applicant_tracking/statuses` for the 117-status map. Education and visas come from `GET /employees/all/tables/{alias}` after `/meta/tables`.
 
-Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, custom Bamboo fields, FLSA/payroll flags, ATS applications/candidates, employee/company files. Compensation is stored but never printed.
+ATS applications/candidates are a **separate, resumable job** (not part of the hourly employee full pass). Historical import never sends email or notifications. Resumes go to private `@vercel/blob` and are served only via `/api/hiring/candidates/[id]/resume` after hiring access checks. The public careers page never queries `candidates`.
+
+```bash
+npm run db:migrate   # through drizzle/0033_bamboo_sync_ats_applications.sql
+npx tsx scripts/bamboo-sync.ts --ats-applications --cache "$HOME/.cache/vpeople/bamboo-sync.json" /tmp/db_url.txt
+# Resume later with the same command (checkpointed in bamboo_sync_runs.kind=ats_applications)
+npx tsx scripts/bamboo-sync.ts --ats-applications --skip-resumes /tmp/db_url.txt
+npx tsx scripts/bamboo-sync.ts --ats-applications --incremental /tmp/db_url.txt
+```
+
+- **Expected runtime:** a full 88,507-application pass is hours, not minutes (list + per-application detail + optional resume download). Concurrency is 2 for details and 1 for resume files, with 429 backoff. Incremental cron uses `newSince` and at most 20 list pages / 90 seconds and does **not** download resumes.
+- **Blob storage:** private Vercel Blob; plan for resume files (subset of 88k). Requires `BLOB_READ_WRITE_TOKEN`. Skip with `--skip-resumes` if the token is not provisioned yet.
+- **New env vars:** `BLOB_READ_WRITE_TOKEN` (existing Blob token; now used by the ATS importer). Optional `BAMBOO_SYNC_CONCURRENCY` still caps other Bamboo reads; ATS details stay at 1–4.
+
+Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, custom Bamboo fields, FLSA/payroll flags, employee/company files. Compensation is stored but never printed.
 
 ## Contributing
 

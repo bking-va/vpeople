@@ -4,11 +4,14 @@ import { db } from "@/lib/db";
 import {
   candidates,
   candidateNotes,
+  candidateApplicationAnswers,
+  candidateApplicationComments,
+  candidateStatusHistory,
   jobOpenings,
   employees,
   offerLetters,
 } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,8 +66,11 @@ export default async function CandidateDetailPage({
       email: candidates.email,
       phone: candidates.phone,
       resumeUrl: candidates.resumeUrl,
+      hasResumeBlob: sql<boolean>`${candidates.resumeBlobUrl} is not null`,
+      coverLetter: candidates.coverLetter,
       linkedinUrl: candidates.linkedinUrl,
       source: candidates.source,
+      sourceDetail: candidates.sourceDetail,
       stage: candidates.stage,
       rating: candidates.rating,
       employeeId: candidates.employeeId,
@@ -92,6 +98,38 @@ export default async function CandidateDetailPage({
     .leftJoin(employees, eq(candidateNotes.authorId, employees.id))
     .where(eq(candidateNotes.candidateId, candidateId))
     .orderBy(desc(candidateNotes.createdAt));
+
+  const answers = await db
+    .select({
+      id: candidateApplicationAnswers.id,
+      question: candidateApplicationAnswers.question,
+      answer: candidateApplicationAnswers.answer,
+    })
+    .from(candidateApplicationAnswers)
+    .where(eq(candidateApplicationAnswers.candidateId, candidateId))
+    .orderBy(candidateApplicationAnswers.id);
+
+  const importedComments = await db
+    .select({
+      id: candidateApplicationComments.id,
+      authorName: candidateApplicationComments.authorName,
+      content: candidateApplicationComments.content,
+      commentedAt: candidateApplicationComments.commentedAt,
+    })
+    .from(candidateApplicationComments)
+    .where(eq(candidateApplicationComments.candidateId, candidateId))
+    .orderBy(desc(candidateApplicationComments.commentedAt));
+
+  const statusHistory = await db
+    .select({
+      id: candidateStatusHistory.id,
+      statusLabel: candidateStatusHistory.statusLabel,
+      changedAt: candidateStatusHistory.changedAt,
+      changedByName: candidateStatusHistory.changedByName,
+    })
+    .from(candidateStatusHistory)
+    .where(eq(candidateStatusHistory.candidateId, candidateId))
+    .orderBy(desc(candidateStatusHistory.changedAt));
 
   const offerPublicFields = {
     id: offerLetters.id,
@@ -201,17 +239,25 @@ export default async function CandidateDetailPage({
                 </a>
               </div>
             )}
-            {candidate.resumeUrl && (
+            {(candidate.hasResumeBlob || candidate.resumeUrl) && (
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-muted-foreground" />
                 <a
-                  href={candidate.resumeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={
+                    candidate.hasResumeBlob
+                      ? `/api/hiring/candidates/${candidate.id}/resume`
+                      : candidate.resumeUrl!
+                  }
                   className="text-primary hover:underline"
                 >
                   View Resume
                 </a>
+              </div>
+            )}
+            {candidate.sourceDetail && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Source detail</span>
+                <span>{candidate.sourceDetail}</span>
               </div>
             )}
             <div className="pt-4 border-t space-y-2">
@@ -291,6 +337,75 @@ export default async function CandidateDetailPage({
           )}
         </div>
       </div>
+
+      {candidate.coverLetter && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Cover letter</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap">{candidate.coverLetter}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {answers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Application questions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {answers.map((row) => (
+              <div key={row.id}>
+                <p className="text-sm font-medium">{row.question}</p>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {row.answer || "—"}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {statusHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Status history</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {statusHistory.map((row) => (
+              <div key={row.id} className="flex justify-between text-sm">
+                <span>{row.statusLabel}</span>
+                <span className="text-muted-foreground">
+                  {row.changedByName ? `${row.changedByName} · ` : ""}
+                  {row.changedAt ? new Date(row.changedAt).toLocaleDateString() : ""}
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {importedComments.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Imported comments</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {importedComments.map((row) => (
+              <div key={row.id} className="border-l-2 border-muted pl-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium">{row.authorName || "BambooHR"}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {row.commentedAt ? new Date(row.commentedAt).toLocaleDateString() : ""}
+                  </span>
+                </div>
+                <p className="text-sm whitespace-pre-wrap">{row.content}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

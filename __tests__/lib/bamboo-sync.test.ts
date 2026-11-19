@@ -698,7 +698,12 @@ class MemoryStore implements BambooSyncStore {
   async lastSuccessfulIncrementalCursor(): Promise<string | null> {
     const success = [...this.syncRuns]
       .reverse()
-      .find((run) => run.status === "success" && run.latestChanged);
+      .find(
+        (run) =>
+          run.status === "success" &&
+          run.latestChanged &&
+          run.kind !== "ats_applications"
+      );
     return typeof success?.latestChanged === "string" ? success.latestChanged : null;
   }
 
@@ -921,8 +926,143 @@ class MemoryStore implements BambooSyncStore {
     return rows.length;
   }
 
+  candidates: Array<Record<string, unknown>> = [];
+  candidateAnswers: Array<Record<string, unknown>> = [];
+  candidateComments: Array<Record<string, unknown>> = [];
+  candidateHistory: Array<Record<string, unknown>> = [];
+
+  async listJobOpeningIdsByBambooId(): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    this.jobOpenings.forEach((row, index) => {
+      if (row.bambooId) map.set(String(row.bambooId), Number(row.id ?? index + 1));
+    });
+    return map;
+  }
+
+  async upsertCandidatesBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<Map<string, number>> {
+    const ids = new Map<string, number>();
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.candidates.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else {
+        const id = this.nextId++;
+        this.candidates.push({ ...row, id });
+      }
+      const stored = this.candidates.find((item) => item.bambooId === bambooId);
+      ids.set(bambooId, Number(stored?.id));
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return ids;
+  }
+
+  async upsertCandidateAnswersBatch(rows: Array<Record<string, unknown>>): Promise<number> {
+    this.candidateAnswers.push(...rows);
+    this.writes += rows.length;
+    return rows.length;
+  }
+
+  async upsertCandidateCommentsBatch(rows: Array<Record<string, unknown>>): Promise<number> {
+    this.candidateComments.push(...rows);
+    this.writes += rows.length;
+    return rows.length;
+  }
+
+  async upsertCandidateStatusHistoryBatch(rows: Array<Record<string, unknown>>): Promise<number> {
+    this.candidateHistory.push(...rows);
+    this.writes += rows.length;
+    return rows.length;
+  }
+
+  async listCandidatesNeedingDetail(limit: number, afterBambooId?: string | null) {
+    return this.candidates
+      .filter(
+        (row) =>
+          row.bambooId &&
+          !row.atsDetailImportedAt &&
+          (!afterBambooId || String(row.bambooId) > afterBambooId)
+      )
+      .slice(0, limit)
+      .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
+  }
+
+  async listCandidatesNeedingResume(limit: number, afterBambooId?: string | null) {
+    return this.candidates
+      .filter(
+        (row) =>
+          row.bambooId &&
+          row.resumeBambooFileId &&
+          !row.resumeBlobUrl &&
+          (!afterBambooId || String(row.bambooId) > afterBambooId)
+      )
+      .slice(0, limit)
+      .map((row) => ({
+        id: Number(row.id),
+        bambooId: String(row.bambooId),
+        resumeBambooFileId: String(row.resumeBambooFileId),
+      }));
+  }
+
+  async setCandidateResumeBlob(bambooId: string, blobUrl: string): Promise<void> {
+    const row = this.candidates.find((item) => item.bambooId === bambooId);
+    if (row) row.resumeBlobUrl = blobUrl;
+    this.writes += 1;
+  }
+
+  async markCandidateDetailImported(bambooIds: string[]): Promise<void> {
+    for (const id of bambooIds) {
+      const row = this.candidates.find((item) => item.bambooId === id);
+      if (row) row.atsDetailImportedAt = new Date().toISOString();
+    }
+  }
+
+  async startSyncRun(run: Record<string, unknown>): Promise<number> {
+    this.writes += 1;
+    const id = this.nextId++;
+    this.syncRuns.push({ ...run, id, status: run.status || "running" });
+    return id;
+  }
+
+  async updateSyncRun(id: number, run: Record<string, unknown>): Promise<void> {
+    this.writes += 1;
+    const existing = this.syncRuns.find((item) => item.id === id);
+    if (existing) Object.assign(existing, run);
+  }
+
+  async lastIncompleteAtsCheckpoint() {
+    const row = [...this.syncRuns]
+      .reverse()
+      .find(
+        (item) =>
+          item.kind === "ats_applications" &&
+          (item.status === "running" || item.status === "checkpointed")
+      );
+    if (!row) return null;
+    return {
+      id: Number(row.id),
+      checkpoint:
+        row.checkpoint && typeof row.checkpoint === "object"
+          ? (row.checkpoint as Record<string, unknown>)
+          : null,
+      latestChanged: typeof row.latestChanged === "string" ? row.latestChanged : null,
+    };
+  }
+
+  async lastSuccessfulAtsCursor(): Promise<string | null> {
+    const success = [...this.syncRuns]
+      .reverse()
+      .find((run) => run.status === "success" && run.kind === "ats_applications");
+    return typeof success?.latestChanged === "string" ? success.latestChanged : null;
+  }
+
   async pruneImportedRowsNotIn(
-    kind: "time_off_requests" | "job_openings" | "education" | "visas",
+    kind: "time_off_requests" | "job_openings" | "education" | "visas" | "candidates",
     keepBambooIds: string[],
     progress?: { onProgress?: (done: number, total: number) => void }
   ): Promise<number> {
@@ -934,7 +1074,9 @@ class MemoryStore implements BambooSyncStore {
           ? this.jobOpenings
           : kind === "education"
             ? this.education
-            : this.visas;
+            : kind === "candidates"
+              ? this.candidates
+              : this.visas;
     const next = collection.filter((row) => keep.has(String(row.bambooId)));
     const removed = collection.length - next.length;
     collection.length = 0;
@@ -1927,6 +2069,27 @@ describe("CLI args and demo detection", () => {
       dryRun: true,
       replaceDemo: true,
       incremental: false,
+      atsApplications: false,
+      skipResumes: false,
+      dbUrlFile: "/tmp/db_url.txt",
+      cacheFile: null,
+    });
+  });
+
+  it("parses --ats-applications and --skip-resumes", () => {
+    expect(
+      parseBambooSyncArgs([
+        "--ats-applications",
+        "--skip-resumes",
+        "--incremental",
+        "/tmp/db_url.txt",
+      ])
+    ).toEqual({
+      dryRun: false,
+      replaceDemo: false,
+      incremental: true,
+      atsApplications: true,
+      skipResumes: true,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
     });
@@ -1944,6 +2107,8 @@ describe("CLI args and demo detection", () => {
       dryRun: false,
       replaceDemo: true,
       incremental: false,
+      atsApplications: false,
+      skipResumes: false,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: "/tmp/bamboo-sync.bamboo-cache.json",
     });

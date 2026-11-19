@@ -627,6 +627,7 @@ export const candidates = pgTable(
   "candidates",
   {
     id: serial("id").primaryKey(),
+    bambooId: text("bamboo_id").unique(),
     jobOpeningId: integer("job_opening_id")
       .notNull()
       .references(() => jobOpenings.id, { onDelete: "cascade" }),
@@ -638,10 +639,17 @@ export const candidates = pgTable(
     email: text("email").notNull(),
     phone: text("phone"),
     resumeUrl: text("resume_url"),
+    resumeBambooFileId: text("resume_bamboo_file_id"),
+    resumeBlobUrl: text("resume_blob_url"),
     linkedinUrl: text("linkedin_url"),
     source: candidateSourceEnum("source").default("other").notNull(),
+    sourceDetail: text("source_detail"),
     stage: candidateStageEnum("stage").default("new").notNull(),
+    bambooStatusId: text("bamboo_status_id"),
+    bambooStatusLabel: text("bamboo_status_label"),
     rating: integer("rating"), // 1-5 stars
+    coverLetter: text("cover_letter"),
+    atsDetailImportedAt: timestamp("ats_detail_imported_at"),
     appliedAt: timestamp("applied_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -664,6 +672,56 @@ export const candidateNotes = pgTable("candidate_notes", {
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const candidateApplicationAnswers = pgTable(
+  "candidate_application_answers",
+  {
+    id: serial("id").primaryKey(),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    bambooQuestionId: text("bamboo_question_id").notNull(),
+    question: text("question").notNull(),
+    answer: text("answer"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    candidateQuestionUnique: uniqueIndex(
+      "candidate_application_answers_candidate_question_unique"
+    ).on(table.candidateId, table.bambooQuestionId),
+  })
+);
+
+export const candidateApplicationComments = pgTable(
+  "candidate_application_comments",
+  {
+    id: serial("id").primaryKey(),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    bambooId: text("bamboo_id").notNull().unique(),
+    authorName: text("author_name"),
+    authorBambooId: text("author_bamboo_id"),
+    content: text("content").notNull(),
+    commentedAt: timestamp("commented_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  }
+);
+
+export const candidateStatusHistory = pgTable("candidate_status_history", {
+  id: serial("id").primaryKey(),
+  candidateId: integer("candidate_id")
+    .notNull()
+    .references(() => candidates.id, { onDelete: "cascade" }),
+  bambooEventId: text("bamboo_event_id").notNull().unique(),
+  bambooStatusId: text("bamboo_status_id"),
+  statusLabel: text("status_label").notNull(),
+  changedAt: timestamp("changed_at"),
+  changedByName: text("changed_by_name"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const offerLetters = pgTable("offer_letters", {
@@ -706,6 +764,9 @@ export const candidatesRelations = relations(candidates, ({ one, many }) => ({
     references: [employees.id],
   }),
   notes: many(candidateNotes),
+  applicationAnswers: many(candidateApplicationAnswers),
+  applicationComments: many(candidateApplicationComments),
+  statusHistory: many(candidateStatusHistory),
   offerLetter: one(offerLetters),
 }));
 
@@ -726,6 +787,36 @@ export const offerLettersRelations = relations(offerLetters, ({ one }) => ({
     references: [candidates.id],
   }),
 }));
+
+export const candidateApplicationAnswersRelations = relations(
+  candidateApplicationAnswers,
+  ({ one }) => ({
+    candidate: one(candidates, {
+      fields: [candidateApplicationAnswers.candidateId],
+      references: [candidates.id],
+    }),
+  })
+);
+
+export const candidateApplicationCommentsRelations = relations(
+  candidateApplicationComments,
+  ({ one }) => ({
+    candidate: one(candidates, {
+      fields: [candidateApplicationComments.candidateId],
+      references: [candidates.id],
+    }),
+  })
+);
+
+export const candidateStatusHistoryRelations = relations(
+  candidateStatusHistory,
+  ({ one }) => ({
+    candidate: one(candidates, {
+      fields: [candidateStatusHistory.candidateId],
+      references: [candidates.id],
+    }),
+  })
+);
 
 // Access Control Tables
 
@@ -1208,6 +1299,7 @@ export const letterTemplates = pgTable("letter_templates", {
 
 export const bambooSyncRuns = pgTable("bamboo_sync_runs", {
   id: serial("id").primaryKey(),
+  kind: text("kind").default("employees").notNull(),
   startedAt: timestamp("started_at").defaultNow().notNull(),
   finishedAt: timestamp("finished_at"),
   mode: text("mode").notNull(),
@@ -1219,6 +1311,7 @@ export const bambooSyncRuns = pgTable("bamboo_sync_runs", {
   latestChanged: text("latest_changed"),
   unmappedFields: jsonb("unmapped_fields").$type<string[]>(),
   datasetCounts: jsonb("dataset_counts").$type<Record<string, number>>(),
+  checkpoint: jsonb("checkpoint").$type<Record<string, unknown>>(),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

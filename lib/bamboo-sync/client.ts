@@ -38,6 +38,8 @@ const ALLOWED_FULL_TABLES = new Set([
   "employeeVisas",
 ]);
 const ATS_JOBS_MAX_PAGES = 100;
+export const ATS_APPLICATIONS_MAX_PAGES = 2000;
+export const BAMBOO_ATS_DETAIL_CONCURRENCY = 2;
 
 export function assertSafeBambooSubdomain(subdomain: string): string {
   const value = subdomain.trim();
@@ -274,6 +276,62 @@ export class BambooHrClient {
     throw lastError;
   }
 
+  private async requestBinary(
+    path: string
+  ): Promise<{ body: Buffer; contentType: string | null; filename: string | null }> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const response = await awaitUntilAbort(
+          this.fetchImpl(`${this.baseUrl}${path}`, {
+            method: "GET",
+            redirect: "error",
+            signal: controller.signal,
+            headers: this.headers({ Accept: "*/*" }),
+          }),
+          controller.signal
+        );
+        if (isRetryableStatus(response.status)) {
+          lastError = new BambooHrHttpError("GET", path, response.status);
+          if (attempt === this.maxRetries) {
+            throw lastError;
+          }
+          await sleep(parseRetryAfterMs(response.headers.get("retry-after"), attempt));
+          continue;
+        }
+        if (!response.ok) {
+          throw new BambooHrHttpError("GET", path, response.status);
+        }
+        const bytes = await awaitUntilAbort(
+          response.arrayBuffer(),
+          controller.signal
+        );
+        const disposition = response.headers.get("content-disposition");
+        const filenameMatch = disposition?.match(
+          /filename\*?=(?:UTF-8''|")?([^\";]+)/i
+        );
+        return {
+          body: Buffer.from(bytes),
+          contentType: response.headers.get("content-type"),
+          filename: filenameMatch
+            ? decodeURIComponent(filenameMatch[1].replace(/"/g, "").trim())
+            : null,
+        };
+      } catch (error) {
+        lastError = error;
+        if (attempt === this.maxRetries || !isRetryableAbortOrNetwork(error)) {
+          throw error;
+        }
+        await sleep(parseRetryAfterMs(null, attempt));
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    throw lastError;
+  }
+
   async fetchAllEmployees(): Promise<BambooEmployeeRecord[]> {
     const payload = await this.request("/reports/custom?format=JSON", {
       method: "POST",
@@ -495,6 +553,56 @@ export class BambooHrClient {
       if (root.paginationComplete === true || records.length === 0) break;
     }
     return jobs;
+  }
+
+  async fetchAtsApplicationsPage(opts: {
+    page: number;
+    newSince?: string | null;
+  }): Promise<{
+    applications: Array<Record<string, unknown>>;
+    paginationComplete: boolean;
+  }> {
+    if (!Number.isInteger(opts.page) || opts.page < 1 || opts.page > ATS_APPLICATIONS_MAX_PAGES) {
+      throw new Error("Invalid ATS applications page");
+    }
+    const params = new URLSearchParams({
+      page: String(opts.page),
+      applicationStatus: "ALL",
+      jobStatusGroups: "ALL",
+    });
+    if (opts.newSince) {
+      params.set("newSince", opts.newSince);
+    }
+    const payload = await this.request(
+      `/applicant_tracking/applications?${params.toString()}`
+    );
+    const root = asRecord(payload);
+    const pageApps = Array.isArray(payload)
+      ? payload
+      : Array.isArray(root.applications)
+        ? root.applications
+        : [];
+    const applications = pageApps.filter(
+      (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+    );
+    const paginationComplete =
+      root.paginationComplete === true || applications.length === 0;
+    return { applications, paginationComplete };
+  }
+
+  async fetchAtsApplicationDetail(
+    applicationId: string
+  ): Promise<Record<string, unknown>> {
+    const payload = await this.request(
+      `/applicant_tracking/applications/${pathSegment(applicationId, "application id")}`
+    );
+    return asRecord(payload);
+  }
+
+  async fetchFile(
+    fileId: string
+  ): Promise<{ body: Buffer; contentType: string | null; filename: string | null }> {
+    return this.requestBinary(`/files/${pathSegment(fileId, "file id")}`);
   }
 
   async fetchMetaTables(): Promise<string[]> {

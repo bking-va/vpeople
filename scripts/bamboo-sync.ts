@@ -4,6 +4,11 @@ import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
 import { Pool as PgPool } from "pg";
 import ws from "ws";
 import * as schema from "../lib/db/schema";
+import {
+  formatAtsSyncSummary,
+  runAtsApplicationsSync,
+} from "../lib/bamboo-sync/ats-applications";
+import { createVercelPrivateBlobStore } from "../lib/bamboo-sync/blob";
 import { createBambooHrClientFromEnv } from "../lib/bamboo-sync/client";
 import { parseBambooSyncArgs, readDatabaseUrl } from "../lib/bamboo-sync/cli";
 import { createBambooSyncStore } from "../lib/bamboo-sync/store";
@@ -38,6 +43,24 @@ async function main() {
   const client = createBambooHrClientFromEnv();
 
   try {
+    if (args.atsApplications) {
+      const result = await runAtsApplicationsSync({
+        client,
+        store,
+        blob: args.skipResumes ? null : createVercelPrivateBlobStore(),
+        mode: args.incremental ? "incremental" : "full",
+        dryRun: args.dryRun,
+        importResumes: !args.skipResumes,
+        log: (message) => {
+          console.log(message);
+        },
+      });
+      console.log(formatAtsSyncSummary(result));
+      if (result.status === "failed") {
+        process.exitCode = 1;
+      }
+      return;
+    }
     const result = await runBambooSync({
       client,
       store,
