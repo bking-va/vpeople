@@ -5,7 +5,7 @@ import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserPermissions } from "@/lib/permissions";
 import { canViewEmployeeDocument } from "@/lib/document-access";
-import { isStoredBlobUrl } from "@/lib/bamboo-sync/blob";
+import { getStoredPrivateBlob } from "@/lib/bamboo-sync/blob";
 import type { AccessLevel } from "@/lib/authz";
 
 export const runtime = "nodejs";
@@ -73,15 +73,6 @@ export async function GET(
       );
     }
 
-    // Stream the file through this route using server-side token
-    const fileUrl = document.fileUrl;
-    if (!isStoredBlobUrl(fileUrl)) {
-      return NextResponse.json(
-        { error: "Document file not available" },
-        { status: 404 }
-      );
-    }
-
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     if (!token) {
       return NextResponse.json(
@@ -90,14 +81,8 @@ export async function GET(
       );
     }
 
-    const blobResponse = await fetch(fileUrl, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!blobResponse.ok) {
-      console.error("Blob fetch failed:", blobResponse.status);
+    const stored = await getStoredPrivateBlob(document.fileUrl, token);
+    if (!stored) {
       return NextResponse.json(
         { error: "Document file not available" },
         { status: 404 }
@@ -105,11 +90,9 @@ export async function GET(
     }
 
     const filename = (document.title || "download").replace(/["\\\r\n]+/g, "_");
-    const contentType = blobResponse.headers.get("content-type") || "application/octet-stream";
-
-    return new NextResponse(blobResponse.body, {
+    return new NextResponse(stored.stream, {
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": stored.contentType,
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "private, max-age=0",
       },

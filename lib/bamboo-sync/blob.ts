@@ -45,6 +45,40 @@ export function isStoredResumeBlobUrl(
   return isStoredBlobUrl(url);
 }
 
+export function storedBlobPathname(url: string | null | undefined): string | null {
+  if (!isStoredBlobUrl(url)) return null;
+  const pathname = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, "");
+  if (!pathname || pathname.includes("\\")) return null;
+  const parts = pathname.split("/");
+  if (parts.some((part) => part === ".." || part === "." || part === "")) return null;
+  return pathname;
+}
+
+export type StoredPrivateBlob = {
+  stream: ReadableStream<Uint8Array>;
+  contentType: string;
+};
+
+export async function getStoredPrivateBlob(
+  url: string | null | undefined,
+  token: string
+): Promise<StoredPrivateBlob | null> {
+  const pathname = storedBlobPathname(url);
+  const secret = token.trim();
+  if (!pathname || !secret) return null;
+  try {
+    const { get } = await import("@vercel/blob");
+    const result = await get(pathname, { access: "private", token: secret });
+    if (!result || result.statusCode !== 200 || !result.stream) return null;
+    return {
+      stream: result.stream,
+      contentType: result.blob.contentType || "application/octet-stream",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function atsResumeBlobPath(applicationBambooId: string, filename: string): string {
   const id = applicationBambooId.replace(SAFE_NAME, "").slice(0, 64) || "unknown";
   const base = filename.replace(SAFE_NAME, "-").replace(/^\.+/, "").slice(0, 80) || "resume";

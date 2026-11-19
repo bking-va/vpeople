@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { companyFiles, employees } from "@/lib/db/schema";
 import { getUserPermissions } from "@/lib/permissions";
 import { canViewCompanyFile } from "@/lib/document-access";
-import { isStoredBlobUrl } from "@/lib/bamboo-sync/blob";
+import { getStoredPrivateBlob } from "@/lib/bamboo-sync/blob";
 import type { AccessLevel } from "@/lib/authz";
 
 export const runtime = "nodejs";
@@ -56,25 +56,18 @@ export async function GET(
   if (!allowed) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const fileUrl = file.fileUrl;
-  if (!isStoredBlobUrl(fileUrl)) {
-    return NextResponse.json({ error: "File not available" }, { status: 404 });
-  }
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
     return NextResponse.json({ error: "File not available" }, { status: 404 });
   }
 
-  const blobResponse = await fetch(fileUrl, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!blobResponse.ok) {
+  const stored = await getStoredPrivateBlob(file.fileUrl, token);
+  if (!stored) {
     return NextResponse.json({ error: "File not available" }, { status: 404 });
   }
-  return new NextResponse(blobResponse.body, {
+  return new NextResponse(stored.stream, {
     headers: {
-      "Content-Type":
-        blobResponse.headers.get("content-type") || "application/octet-stream",
+      "Content-Type": stored.contentType,
       "Content-Disposition": `attachment; filename="company-file-${id}"`,
       "Cache-Control": "private, max-age=0",
     },
