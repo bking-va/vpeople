@@ -1,5 +1,5 @@
 import { BambooHrClient } from "@/lib/bamboo-sync/client";
-import { isStoredBlobUrl, storedBlobPathname } from "@/lib/bamboo-sync/blob";
+import { isStoredBlobUrl, storedBlobGetUrl, storedBlobPathname } from "@/lib/bamboo-sync/blob";
 import { runBambooFilesSync } from "@/lib/bamboo-sync/files-sync";
 import {
   filesFromViewPayload,
@@ -37,6 +37,13 @@ describe("stored blob URL guard", () => {
     expect(storedBlobPathname("https://evil.example/steal")).toBe(null);
     expect(storedBlobPathname("https://blob.vercel-storage.com/")).toBe(null);
     expect(storedBlobPathname("bamboo:unavailable")).toBe(null);
+    expect(
+      storedBlobPathname("https://blob.vercel-storage.com/private/file%23q%3F.pdf")
+    ).toBe("private/file%23q%3F.pdf");
+    expect(
+      storedBlobGetUrl("https://STORE.blob.vercel-storage.com/private/file%23q%3F.pdf")
+    ).toBe("https://store.blob.vercel-storage.com/private/file%23q%3F.pdf");
+    expect(storedBlobGetUrl("https://evil.example/steal")).toBe(null);
   });
 });
 
