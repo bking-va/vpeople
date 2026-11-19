@@ -37,8 +37,6 @@ const ALLOWED_FULL_TABLES = new Set([
   "visas",
   "employeeVisas",
 ]);
-const ATS_JOBS_MAX_PAGES = 100;
-
 export function assertSafeBambooSubdomain(subdomain: string): string {
   const value = subdomain.trim();
   if (!SAFE_SUBDOMAIN.test(value)) {
@@ -477,24 +475,18 @@ export class BambooHrClient {
   }
 
   async fetchAtsJobs(): Promise<Array<Record<string, unknown>>> {
-    const jobs: Array<Record<string, unknown>> = [];
-    for (let page = 1; page <= ATS_JOBS_MAX_PAGES; page += 1) {
-      const payload = await this.request(
-        `/applicant_tracking/jobs?page=${page}&statusGroups=${encodeURIComponent("ALL")}`
-      );
-      const root = asRecord(payload);
-      const pageJobs = Array.isArray(payload)
-        ? payload
-        : Array.isArray(root.jobs)
-          ? root.jobs
-          : [];
-      const records = pageJobs.filter(
-        (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
-      );
-      jobs.push(...records);
-      if (root.paginationComplete === true || records.length === 0) break;
-    }
-    return jobs;
+    const payload = await this.request(
+      `/applicant_tracking/jobs?statusGroups=${encodeURIComponent("ALL")}`
+    );
+    const root = asRecord(payload);
+    const pageJobs = Array.isArray(payload)
+      ? payload
+      : Array.isArray(root.jobs)
+        ? root.jobs
+        : [];
+    return pageJobs.filter(
+      (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+    );
   }
 
   async fetchMetaTables(): Promise<string[]> {

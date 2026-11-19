@@ -839,20 +839,62 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
     async upsertTimeOffPoliciesBatch(policies) {
       const map = new Map<string, number>();
       if (policies.length === 0) return map;
-      const existing: Array<{ id: number; name: string }> = await db
-        .select({ id: timeOffPolicies.id, name: timeOffPolicies.name })
+      const existing: Array<{
+        id: number;
+        name: string;
+        bambooId: string | null;
+      }> = await db
+        .select({
+          id: timeOffPolicies.id,
+          name: timeOffPolicies.name,
+          bambooId: timeOffPolicies.bambooId,
+        })
         .from(timeOffPolicies);
-      for (const row of existing) map.set(row.name.toLowerCase(), row.id);
+      const byBamboo = new Map<string, { id: number; name: string }>();
+      for (const row of existing) {
+        map.set(row.name.toLowerCase(), row.id);
+        if (row.bambooId) byBamboo.set(row.bambooId, { id: row.id, name: row.name });
+      }
       const missing = [];
       const seen = new Set<string>();
       for (const policy of policies) {
+        if (!policy.name.trim()) continue;
         const key = policy.name.toLowerCase();
-        if (map.has(key) || seen.has(key) || !policy.name.trim()) continue;
+        const bambooId = policy.bambooId || null;
+        if (bambooId && byBamboo.has(bambooId)) {
+          const hit = byBamboo.get(bambooId)!;
+          map.set(key, hit.id);
+          seen.add(key);
+          if (hit.name !== policy.name) {
+            await db
+              .update(timeOffPolicies)
+              .set({
+                name: policy.name,
+                policyType: policy.policyType || policy.name,
+                bambooId,
+                updatedAt: new Date(),
+              })
+              .where(eq(timeOffPolicies.id, hit.id));
+          }
+          continue;
+        }
+        if (map.has(key) || seen.has(key)) {
+          seen.add(key);
+          const id = map.get(key);
+          if (id != null && bambooId && !byBamboo.has(bambooId)) {
+            await db
+              .update(timeOffPolicies)
+              .set({ bambooId, updatedAt: new Date() })
+              .where(eq(timeOffPolicies.id, id));
+            byBamboo.set(bambooId, { id, name: policy.name });
+          }
+          continue;
+        }
         seen.add(key);
         missing.push({
           name: policy.name,
           policyType: policy.policyType || policy.name,
-          bambooId: policy.bambooId || null,
+          bambooId,
         });
       }
       if (missing.length > 0) {
