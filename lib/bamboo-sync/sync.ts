@@ -767,6 +767,7 @@ export async function runBambooSync(
       balancesByBambooId: new Map(),
       extended: emptyExtendedPayload(),
       metadata: emptyMetadataPayload(),
+      compensationTables: emptyCompensationTablesPayload(),
     };
   } else if (opts.cachePath) {
     await assertSafeCacheLocation(opts.cachePath);
