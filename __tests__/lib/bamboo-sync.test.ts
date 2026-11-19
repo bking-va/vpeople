@@ -2,6 +2,7 @@ import {
   BAMBOO_HOURS_PER_WORKDAY,
   BRENDAN_WORK_EMAILS,
   EXCLUDED_BAMBOO_FIELDS,
+  IMPORTED_EMPLOYEE_FIELDS,
   bambooBalanceToDays,
   collectUnmappedFieldNames,
   isBrendanWorkEmail,
@@ -869,6 +870,81 @@ describe("BambooHR client", () => {
     expect(fetchMock.mock.calls.map((call) => String(call[0])).join("\n")).not.toContain(
       "?x=1"
     );
+  });
+
+  it("does not POST custom reports filtered by employeeIds", async () => {
+    const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("/reports/custom") && method === "POST") {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        if (body?.filters?.employeeIds) {
+          return jsonResponse({ error: "server error" }, 500);
+        }
+        expect(body.fields).toEqual([...IMPORTED_EMPLOYEE_FIELDS]);
+        return jsonResponse({
+          employees: [
+            { id: "101", firstName: "Ada" },
+            { id: "102", firstName: "Grace" },
+            { id: "103", firstName: "Alan" },
+          ],
+        });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    const rows = await client.fetchEmployeesByIds(["101", "103"]);
+    expect(rows.map((row) => String(row.id))).toEqual(["101", "103"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps only requested employee ids from the unfiltered custom report", async () => {
+    const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("/reports/custom") && method === "POST") {
+        return jsonResponse({
+          employees: [
+            { id: 101, firstName: "Ada" },
+            { id: "102", firstName: "Grace" },
+            { id: "103", firstName: "Alan" },
+          ],
+        });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    const rows = await client.fetchEmployeesByIds(["101", "103"]);
+    expect(rows.map((row) => String(row.id))).toEqual(["101", "103"]);
+  });
+
+  it("falls back to per-employee GET when the custom report returns 500", async () => {
+    const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("/reports/custom") && method === "POST") {
+        return jsonResponse({ error: "server error" }, 500);
+      }
+      if (method === "GET" && /\/employees\/101\?fields=/.test(url)) {
+        return jsonResponse({ firstName: "Ada" });
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    const rows = await client.fetchEmployeesByIds(["101"]);
+    expect(rows).toEqual([expect.objectContaining({ id: "101", firstName: "Ada" })]);
   });
 });
 
