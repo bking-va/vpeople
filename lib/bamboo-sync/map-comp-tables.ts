@@ -1,6 +1,6 @@
 import { blankToNull } from "./map";
 import { nestedId } from "./map-extended";
-import { FORBIDDEN_BAMBOO_FIELD_PATTERN } from "./map-metadata";
+import { isForbiddenBambooField } from "./map-metadata";
 
 export const BAMBOO_COMPENSATION_TABLES = [
   { alias: "customTeamInformation", label: "Team information" },
@@ -36,8 +36,8 @@ export function stripForbiddenCompFields(
 ): Record<string, unknown> {
   const next: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (FORBIDDEN_BAMBOO_FIELD_PATTERN.test(key)) continue;
-    if (typeof value === "string" && FORBIDDEN_BAMBOO_FIELD_PATTERN.test(value)) {
+    if (isForbiddenBambooField(key)) continue;
+    if (typeof value === "string" && /^\d{3}-\d{2}-\d{4}$/.test(value.trim())) {
       continue;
     }
     next[key] = value;

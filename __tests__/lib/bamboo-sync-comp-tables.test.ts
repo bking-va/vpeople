@@ -40,6 +40,17 @@ describe("Bamboo compensation table mapping", () => {
     expect(stripForbiddenCompFields({ sin: "x", note: "ok" })).toEqual({
       note: "ok",
     });
+    expect(
+      stripForbiddenCompFields({
+        businessUnit: "Business Development",
+        type: "Signing bonus",
+        status: "Single",
+      })
+    ).toEqual({
+      businessUnit: "Business Development",
+      type: "Signing bonus",
+      status: "Single",
+    });
   });
 });
 
