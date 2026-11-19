@@ -1,5 +1,6 @@
 import {
   BAMBOO_SYNC_CACHE_VERSION,
+  assertSafeCacheLocation,
   bambooSyncCacheExists,
   readBambooSyncCache,
   writeBambooSyncCache,
@@ -410,6 +411,7 @@ export async function runBambooSync(
       balancesByBambooId: new Map(),
     };
   } else if (opts.cachePath) {
+    await assertSafeCacheLocation(opts.cachePath);
     if (await bambooSyncCacheExists(opts.cachePath)) {
       const cached = await readBambooSyncCache(opts.cachePath);
       if (cached.mode !== opts.mode) {

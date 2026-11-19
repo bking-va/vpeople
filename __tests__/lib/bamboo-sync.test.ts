@@ -18,7 +18,13 @@ import {
   parseRetryAfterMs,
 } from "@/lib/bamboo-sync/client";
 import { parseBambooSyncArgs } from "@/lib/bamboo-sync/cli";
-import { unlink, stat } from "node:fs/promises";
+import {
+  assertSafeCacheLocation,
+  readBambooSyncCache,
+  writeBambooSyncCache,
+  type BambooSyncSnapshot,
+} from "@/lib/bamboo-sync/cache";
+import { chmod, mkdtemp, rm, symlink, unlink, writeFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isDemoEmployee } from "@/lib/bamboo-sync/demo";
@@ -1644,10 +1650,9 @@ describe("BambooHR fast import", () => {
   });
 
   it("writes a mode-600 cache and reuses it without refetching", async () => {
-    const cachePath = path.join(
-      os.tmpdir(),
-      `bamboo-sync-test-${process.pid}-${Date.now()}.bamboo-cache.json`
-    );
+    const cacheDir = await mkdtemp(path.join(os.tmpdir(), "bamboo-sync-cache-"));
+    await chmod(cacheDir, 0o700);
+    const cachePath = path.join(cacheDir, "bamboo-sync.json");
     const employees = [
       bambooEmployee({ id: "7", workEmail: "cache@vendasta.com", firstName: "Cache" }),
     ];
@@ -1691,7 +1696,110 @@ describe("BambooHR fast import", () => {
       expect(store.employees).toHaveLength(1);
       expect(store.employees[0]?.bambooId).toBe("7");
     } finally {
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a cache file in a shared directory such as /tmp", async () => {
+    const cachePath = path.join(
+      os.tmpdir(),
+      `bamboo-forged-${process.pid}-${Date.now()}.json`
+    );
+    const forged: BambooSyncSnapshot = {
+      version: 1,
+      mode: "full",
+      fetchedAt: "2026-01-01T00:00:00Z",
+      employees: [
+        bambooEmployee({
+          id: "99",
+          firstName: "Forged",
+          lastName: "User",
+          workEmail: "forged@vendasta.com",
+        }),
+      ],
+      latestChanged: null,
+      deletedBambooIds: [],
+      tables: {
+        jobInfo: {},
+        employmentStatus: {},
+        compensation: {},
+        emergencyContacts: null,
+      },
+      timeOffTypes: [],
+      balances: {},
+    };
+    await writeFile(cachePath, JSON.stringify(forged), { mode: 0o666 });
+    await chmod(cachePath, 0o666);
+    const fetchMock = jest.fn(async () => {
+      throw new Error("should not fetch or import a shared /tmp cache");
+    });
+    try {
+      await expect(assertSafeCacheLocation(cachePath)).rejects.toThrow(
+        /0700|shared directory|owned by the current user/
+      );
+      const result = await runBambooSync({
+        client: new BambooHrClient({
+          apiKey: "test-key",
+          subdomain: "vendasta",
+          fetch: fetchMock,
+        }),
+        store: new MemoryStore(),
+        mode: "full",
+        cachePath,
+      });
+      expect(result.status).toBe("failed");
+      expect(result.errorMessage).toMatch(
+        /0700|shared directory|owned by the current user/
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
       await unlink(cachePath).catch(() => undefined);
+    }
+  });
+
+  it("refuses a world-writable cache file and a symlink even in a private directory", async () => {
+    const cacheDir = await mkdtemp(path.join(os.tmpdir(), "bamboo-sync-cache-"));
+    await chmod(cacheDir, 0o700);
+    const snapshot: BambooSyncSnapshot = {
+      version: 1,
+      mode: "full",
+      fetchedAt: "2026-01-01T00:00:00Z",
+      employees: [
+        bambooEmployee({
+          id: "8",
+          workEmail: "safe@vendasta.com",
+          firstName: "Safe",
+        }),
+      ],
+      latestChanged: null,
+      deletedBambooIds: [],
+      tables: {
+        jobInfo: {},
+        employmentStatus: {},
+        compensation: {},
+        emergencyContacts: null,
+      },
+      timeOffTypes: [],
+      balances: {},
+    };
+    try {
+      const writablePath = path.join(cacheDir, "writable.json");
+      await writeBambooSyncCache(writablePath, snapshot);
+      await chmod(writablePath, 0o666);
+      await expect(readBambooSyncCache(writablePath)).rejects.toThrow(/0600/);
+
+      const realPath = path.join(cacheDir, "real.json");
+      const linkPath = path.join(cacheDir, "link.json");
+      await writeBambooSyncCache(realPath, snapshot);
+      await symlink(realPath, linkPath);
+      await expect(readBambooSyncCache(linkPath)).rejects.toThrow(/symlink/);
+
+      await chmod(cacheDir, 0o755);
+      await expect(
+        assertSafeCacheLocation(path.join(cacheDir, "open.json"))
+      ).rejects.toThrow(/0700|shared directory/);
+    } finally {
+      await rm(cacheDir, { recursive: true, force: true });
     }
   });
 });

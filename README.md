@@ -375,13 +375,14 @@ npx tsx scripts/bamboo-sync.ts --dry-run /tmp/db_url.txt
 First production import (removes seeded demo employees, then upserts real records). Keep `bking@vendasta.com` as Admin and carry over E001's `vendasta_sub`. All BambooHR HTTP (custom report, bulk table `changed/tables/{table}` calls, and concurrent per-employee time-off calculator reads) finishes before the database transaction opens. Requests time out, retry on 429/503 with `Retry-After`, and log phase/progress counts (no PII). Expected runtime on a normal box is a few minutes for ~2400 employees, not hours:
 
 ```bash
-npx tsx scripts/bamboo-sync.ts --replace-demo --cache /tmp/bamboo-sync.bamboo-cache.json /tmp/db_url.txt
+mkdir -m 700 "$HOME/.cache/vpeople"
+npx tsx scripts/bamboo-sync.ts --replace-demo --cache "$HOME/.cache/vpeople/bamboo-sync.json" /tmp/db_url.txt
 ```
 
-`--cache` writes the fetched snapshot with mode `600` so a rerun after an interrupt does not refetch. The file contains employee PII (names, emails, addresses, compensation history). Keep it outside the repo (`.gitignore` already excludes `*.bamboo-cache.json`), never commit it, and delete it after a successful import:
+`--cache` must be a file inside a directory you own with mode `0700` (not `/tmp` or another shared directory). The importer opens it without following symlinks (`O_NOFOLLOW`) and refuses anything that is not a regular file owned by the current user with mode `0600`. Writes use an exclusive random temp file in that private directory, then rename. The file contains employee PII (names, emails, addresses, compensation history). Keep it outside the repo (`.gitignore` already excludes `*.bamboo-cache.json`), never commit it, and delete it after a successful import:
 
 ```bash
-rm -f /tmp/bamboo-sync.bamboo-cache.json
+rm -f "$HOME/.cache/vpeople/bamboo-sync.json"
 ```
 
 `DATABASE_URL` can also come from the environment instead of a file path. Do not print the API key or employee PII; the CLI logs counts and Bamboo ids only. Optional `BAMBOO_SYNC_CONCURRENCY` (1–16, default 6) and `BAMBOO_SYNC_TIMEOUT_MS` (default 20000) tune the importer.
