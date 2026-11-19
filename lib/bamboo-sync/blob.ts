@@ -12,6 +12,12 @@ export type PrivateBlobStore = {
 
 const SAFE_NAME = /[^A-Za-z0-9._-]+/g;
 
+export const BAMBOO_RESUME_UNAVAILABLE = "bamboo:unavailable";
+
+export function isStoredResumeBlobUrl(url: string | null | undefined): boolean {
+  return Boolean(url && /^https:\/\//i.test(url));
+}
+
 export function atsResumeBlobPath(applicationBambooId: string, filename: string): string {
   const id = applicationBambooId.replace(SAFE_NAME, "").slice(0, 64) || "unknown";
   const base = filename.replace(SAFE_NAME, "-").replace(/^\.+/, "").slice(0, 80) || "resume";

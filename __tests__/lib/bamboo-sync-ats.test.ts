@@ -9,9 +9,10 @@ import {
   mapCandidateSource,
 } from "@/lib/bamboo-sync/map-ats";
 import { runAtsApplicationsSync } from "@/lib/bamboo-sync/ats-applications";
-import { atsResumeBlobPath } from "@/lib/bamboo-sync/blob";
+import { atsResumeBlobPath, BAMBOO_RESUME_UNAVAILABLE, isStoredResumeBlobUrl } from "@/lib/bamboo-sync/blob";
 import { toPublicCareerOpening } from "@/lib/careers-public";
 import type { BambooSyncStore } from "@/lib/bamboo-sync/sync";
+import { isResumableAtsRun } from "@/lib/bamboo-sync/types";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -118,8 +119,16 @@ class FakeAtsStore {
     for (const row of rows) {
       this.writes += 1;
       const existing = this.candidates.find((item) => item.bambooId === row.bambooId);
-      if (existing) Object.assign(existing, row);
-      else this.candidates.push({ ...row, id: this.nextId++ });
+      const next = { ...row };
+      if (existing) {
+        if (next.atsDetailImportedAt == null) {
+          next.atsDetailImportedAt = existing.atsDetailImportedAt;
+        }
+        if (next.resumeBlobUrl == null) {
+          next.resumeBlobUrl = existing.resumeBlobUrl;
+        }
+        Object.assign(existing, next);
+      } else this.candidates.push({ ...next, id: this.nextId++ });
       const stored = this.candidates.find((item) => item.bambooId === row.bambooId)!;
       ids.set(String(row.bambooId), Number(stored.id));
     }
@@ -157,6 +166,16 @@ class FakeAtsStore {
     const row = this.candidates.find((item) => item.bambooId === bambooId);
     if (row) row.resumeBlobUrl = blobUrl;
   }
+  async requeueCandidateDetails() {
+    let count = 0;
+    for (const row of this.candidates) {
+      if (row.bambooId && row.atsDetailImportedAt) {
+        row.atsDetailImportedAt = null;
+        count += 1;
+      }
+    }
+    return count;
+  }
   async markCandidateDetailImported(bambooIds: string[]) {
     for (const id of bambooIds) {
       const row = this.candidates.find((item) => item.bambooId === id);
@@ -175,11 +194,7 @@ class FakeAtsStore {
   async lastIncompleteAtsCheckpoint() {
     const row = [...this.syncRuns]
       .reverse()
-      .find(
-        (item) =>
-          item.kind === "ats_applications" &&
-          (item.status === "running" || item.status === "checkpointed")
-      );
+      .find((item) => isResumableAtsRun(item.status, item.checkpoint) && item.kind === "ats_applications");
     if (!row) return null;
     return {
       id: Number(row.id),
@@ -391,6 +406,180 @@ describe("runAtsApplicationsSync", () => {
     });
     expect(["success", "checkpointed"]).toContain(second.status);
     expect(store.candidates.length).toBeGreaterThan(0);
+  });
+
+  test("page budget is relative to the checkpointed list page", async () => {
+    const store = new FakeAtsStore();
+    store.syncRuns.push({
+      id: 1,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "list",
+        listPage: 21,
+        lastListId: null,
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 2000,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: false,
+      },
+    });
+    const pages: number[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        const match = url.match(/page=(\d+)/);
+        if (url.includes("/applicant_tracking/applications?") && match) {
+          pages.push(Number(match[1]));
+          return jsonResponse({
+            applications: [
+              {
+                id: 30000 + Number(match[1]),
+                applicant: {
+                  firstName: "Pat",
+                  lastName: "Page",
+                  email: `unknown+app-${match[1]}@invalid.local`,
+                },
+                job: { id: 22, title: "Engineer" },
+              },
+            ],
+            paginationComplete: false,
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "incremental",
+      importResumes: false,
+      maxListPages: 20,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("checkpointed");
+    expect(pages[0]).toBe(21);
+    expect(pages).toHaveLength(20);
+    expect(pages[pages.length - 1]).toBe(40);
+  });
+
+  test("marks a 404 resume unavailable so the resume phase cannot loop", async () => {
+    const store = new FakeAtsStore();
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/files/99")) {
+          return jsonResponse({ error: "missing" }, 404);
+        }
+        return mockAtsFetch()(input);
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate() {
+          throw new Error("should not upload a missing resume");
+        },
+      },
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.candidates[0].resumeBlobUrl).toBe(BAMBOO_RESUME_UNAVAILABLE);
+    expect(isStoredResumeBlobUrl(String(store.candidates[0].resumeBlobUrl))).toBe(
+      false
+    );
+    const stillNeeded = await store.listCandidatesNeedingResume(10);
+    expect(stillNeeded).toHaveLength(0);
+  });
+
+  test("resumes a failed ATS run that still has a checkpoint", async () => {
+    const store = new FakeAtsStore();
+    store.syncRuns.push({
+      id: 7,
+      kind: "ats_applications",
+      status: "failed",
+      checkpoint: {
+        phase: "list",
+        listPage: 1,
+        lastListId: null,
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 0,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: false,
+      },
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockAtsFetch(),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.syncRuns[0].status).toBe("success");
+    expect(store.candidates).toHaveLength(1);
+  });
+
+  test("full import requeues details that ON CONFLICT would otherwise preserve", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 50,
+      bambooId: "40316",
+      jobOpeningId: 10,
+      atsDetailImportedAt: "2024-01-01T00:00:00Z",
+      resumeBambooFileId: "99",
+      resumeBlobUrl: null,
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockAtsFetch(),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.answers.length).toBeGreaterThan(0);
+    expect(store.candidates[0].coverLetter).toBe("I would like to apply");
   });
 });
 

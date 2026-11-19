@@ -58,6 +58,7 @@ import type {
   MappedEmployee,
   SyncEmployeeRow,
 } from "@/lib/bamboo-sync/types";
+import { isResumableAtsRun } from "@/lib/bamboo-sync/types";
 
 function bambooEmployee(
   overrides: Partial<BambooEmployeeRecord> & { id: string }
@@ -1021,6 +1022,17 @@ class MemoryStore implements BambooSyncStore {
     this.writes += 1;
   }
 
+  async requeueCandidateDetails(): Promise<number> {
+    let count = 0;
+    for (const row of this.candidates) {
+      if (row.bambooId && row.atsDetailImportedAt) {
+        row.atsDetailImportedAt = null;
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   async markCandidateDetailImported(bambooIds: string[]): Promise<void> {
     for (const id of bambooIds) {
       const row = this.candidates.find((item) => item.bambooId === id);
@@ -1047,7 +1059,7 @@ class MemoryStore implements BambooSyncStore {
       .find(
         (item) =>
           item.kind === "ats_applications" &&
-          (item.status === "running" || item.status === "checkpointed")
+          isResumableAtsRun(item.status, item.checkpoint)
       );
     if (!row) return null;
     return {

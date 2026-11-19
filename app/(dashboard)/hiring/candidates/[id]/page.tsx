@@ -66,7 +66,7 @@ export default async function CandidateDetailPage({
       email: candidates.email,
       phone: candidates.phone,
       resumeUrl: candidates.resumeUrl,
-      hasResumeBlob: sql<boolean>`${candidates.resumeBlobUrl} is not null`,
+      hasResumeBlob: sql<boolean>`${candidates.resumeBlobUrl} like 'https://%'`,
       coverLetter: candidates.coverLetter,
       linkedinUrl: candidates.linkedinUrl,
       source: candidates.source,

@@ -280,7 +280,22 @@ export type AtsSyncCheckpoint = {
   history: number;
   newSince: string | null;
   paginationComplete: boolean;
+  detailsRequeued?: boolean;
 };
+
+export function isResumableAtsRun(
+  status: unknown,
+  checkpoint: unknown
+): boolean {
+  if (status === "running" || status === "checkpointed") return true;
+  if (status !== "failed") return false;
+  return Boolean(
+    checkpoint &&
+      typeof checkpoint === "object" &&
+      !Array.isArray(checkpoint) &&
+      Object.keys(checkpoint as Record<string, unknown>).length > 0
+  );
+}
 
 export type BambooAtsSyncResult = {
   status: "success" | "skipped" | "failed" | "checkpointed";

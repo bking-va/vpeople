@@ -48,6 +48,7 @@ import type {
   MappedEmployee,
   SyncEmployeeRow,
 } from "./types";
+import { isResumableAtsRun } from "./types";
 
 type DbLike = {
   select: (...args: any[]) => any;
@@ -1594,6 +1595,14 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
         .where(eq(candidates.bambooId, bambooId));
     },
 
+    async requeueCandidateDetails() {
+      await executeSql(
+        db,
+        sql`UPDATE candidates SET ats_detail_imported_at = NULL, updated_at = now() WHERE bamboo_id IS NOT NULL`
+      );
+      return 0;
+    },
+
     async markCandidateDetailImported(bambooIds) {
       const ids = bambooIds.filter(Boolean);
       if (ids.length === 0) return;
@@ -1665,14 +1674,18 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
             eq(bambooSyncRuns.kind, "ats_applications"),
             or(
               eq(bambooSyncRuns.status, "running"),
-              eq(bambooSyncRuns.status, "checkpointed")
+              eq(bambooSyncRuns.status, "checkpointed"),
+              and(
+                eq(bambooSyncRuns.status, "failed"),
+                sql`coalesce(${bambooSyncRuns.checkpoint}, '{}'::jsonb) <> '{}'::jsonb`
+              )
             )
           )
         )
         .orderBy(sql`${bambooSyncRuns.id} desc`)
         .limit(1);
       const row = rows[0];
-      if (!row) return null;
+      if (!row || !isResumableAtsRun(row.status, row.checkpoint)) return null;
       return {
         id: row.id,
         checkpoint:
