@@ -999,6 +999,25 @@ class MemoryStore implements BambooSyncStore {
     return rows.length;
   }
 
+  async pruneImportedCustomFieldValues(
+    keep: Array<{ customFieldId: number; entityId: number }>,
+    fieldIds: number[],
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    const keepKeys = new Set(keep.map((row) => `${row.customFieldId}:${row.entityId}`));
+    const fieldSet = new Set(fieldIds);
+    const next = this.customFieldValues.filter((row) => {
+      if (!fieldSet.has(Number(row.customFieldId))) return true;
+      return keepKeys.has(`${row.customFieldId}:${row.entityId}`);
+    });
+    const removed = this.customFieldValues.length - next.length;
+    this.customFieldValues.length = 0;
+    this.customFieldValues.push(...next);
+    progress?.onProgress?.(keep.length, keep.length);
+    if (removed > 0) this.writes += 1;
+    return removed;
+  }
+
   async upsertAssetsBatch(
     rows: Array<Record<string, unknown>>,
     progress?: { onProgress?: (done: number, total: number) => void }

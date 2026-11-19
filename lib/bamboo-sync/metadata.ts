@@ -23,8 +23,11 @@ export type MetadataFetchPayload = {
   metaFields: unknown[];
   employeeExtras: Array<Record<string, unknown>>;
   customValues: Array<Record<string, unknown>>;
+  customValueAliasesFetched: string[];
   assets: Record<string, Array<Record<string, unknown>>>;
   dependents: Record<string, Array<Record<string, unknown>>>;
+  assetsFetched: boolean;
+  dependentsFetched: boolean;
 };
 
 export function emptyMetadataPayload(): MetadataFetchPayload {
@@ -32,8 +35,11 @@ export function emptyMetadataPayload(): MetadataFetchPayload {
     metaFields: [],
     employeeExtras: [],
     customValues: [],
+    customValueAliasesFetched: [],
     assets: {},
     dependents: {},
+    assetsFetched: false,
+    dependentsFetched: false,
   };
 }
 
@@ -116,6 +122,7 @@ export async function fetchMetadataPayload(
     });
 
   const customValues: Array<Record<string, unknown>> = [];
+  const customValueAliasesFetched: string[] = [];
   for (let i = 0; i < aliases.length; i += CUSTOM_REPORT_FIELD_CHUNK) {
     const chunk = aliases.slice(i, i + CUSTOM_REPORT_FIELD_CHUNK);
     const rows = await client
@@ -125,27 +132,37 @@ export async function fetchMetadataPayload(
       })
       .catch((error) => {
         if (error instanceof BambooHrHttpError && (error.status === 400 || error.status === 404)) {
-          return [];
+          return null;
         }
         throw error;
       });
+    if (!rows) continue;
     customValues.push(...rows);
+    customValueAliasesFetched.push(...chunk);
     log(`custom field value chunks ${Math.min(i + chunk.length, aliases.length)}/${aliases.length}`);
   }
 
   log("Phase fetch: assets");
   const assets: Record<string, Array<Record<string, unknown>>> = {};
+  let assetsFetched = false;
   for (const table of await resolveTableAliases(client, "assets")) {
     const rows = await fetchOptionalTable(client, table);
-    if (rows) mergeTableRows(assets, rows);
+    if (rows) {
+      assetsFetched = true;
+      mergeTableRows(assets, rows);
+    }
   }
   log(`assets employees ${Object.keys(assets).length}`);
 
   log("Phase fetch: dependents");
   const dependents: Record<string, Array<Record<string, unknown>>> = {};
+  let dependentsFetched = false;
   for (const table of await resolveTableAliases(client, "dependents")) {
     const rows = await fetchOptionalTable(client, table);
-    if (rows) mergeTableRows(dependents, rows);
+    if (rows) {
+      dependentsFetched = true;
+      mergeTableRows(dependents, rows);
+    }
   }
   log(`dependents employees ${Object.keys(dependents).length}`);
 
@@ -153,8 +170,11 @@ export async function fetchMetadataPayload(
     metaFields,
     employeeExtras,
     customValues,
+    customValueAliasesFetched,
     assets,
     dependents,
+    assetsFetched,
+    dependentsFetched,
   };
 }
 
@@ -228,6 +248,18 @@ export async function writeMetadataPayload(
     valueRows,
     progress("custom_field_values")
   );
+  const fetchedAliases = payload.customValueAliasesFetched ?? [];
+  if (fetchedAliases.length > 0) {
+    const fetchedFieldIds = fetchedAliases.flatMap((alias) => {
+      const id = fieldIds.get(alias);
+      return id == null ? [] : [id];
+    });
+    await store.pruneImportedCustomFieldValues(
+      valueRows,
+      fetchedFieldIds,
+      progress("prune custom_field_values")
+    );
+  }
 
   const assetRows = mapped.assets.flatMap((row) => {
     const employeeId = idByBambooId.get(row.employeeBambooId);
@@ -248,12 +280,14 @@ export async function writeMetadataPayload(
     progress("employee_dependents")
   );
 
-  if (mode === "full") {
+  if (payload.assetsFetched) {
     await store.pruneImportedRowsNotIn(
       "assets",
       assetRows.map((row) => row.bambooId),
       progress("prune assets")
     );
+  }
+  if (payload.dependentsFetched) {
     await store.pruneImportedRowsNotIn(
       "dependents",
       dependentRows.map((row) => row.bambooId),

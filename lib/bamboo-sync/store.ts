@@ -1402,6 +1402,38 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       return rows.length;
     },
 
+    async pruneImportedCustomFieldValues(keep, fieldIds, progress) {
+      const ids = fieldIds.filter((id) => Number.isInteger(id) && id > 0);
+      if (ids.length === 0) return 0;
+      const keepKeys = new Set(
+        keep.map((row) => `${row.customFieldId}:${row.entityId}`)
+      );
+      const existing: Array<{
+        id: number;
+        customFieldId: number;
+        entityId: number;
+      }> = await db
+        .select({
+          id: customFieldValues.id,
+          customFieldId: customFieldValues.customFieldId,
+          entityId: customFieldValues.entityId,
+        })
+        .from(customFieldValues)
+        .where(inArray(customFieldValues.customFieldId, ids));
+      const toDelete = existing
+        .filter((row) => !keepKeys.has(`${row.customFieldId}:${row.entityId}`))
+        .map((row) => row.id);
+      if (toDelete.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(toDelete, size)) {
+        await db.delete(customFieldValues).where(inArray(customFieldValues.id, chunk));
+        done += chunk.length;
+        reportChunkProgress(progress, done, toDelete.length);
+      }
+      return toDelete.length;
+    },
+
     async upsertAssetsBatch(rows, progress) {
       if (rows.length === 0) return 0;
       const size = chunkSizeOf(progress);

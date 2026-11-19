@@ -194,5 +194,24 @@ describe("BambooHR metadata batched writes (Real Postgres)", () => {
       .from(customFieldValues)
       .where(eq(customFieldValues.entityId, employee.id));
     expect(value.value).toBe("M");
+
+    await store.pruneImportedCustomFieldValues([], [fieldId!], { chunkSize: 50 });
+    const remaining = await db
+      .select()
+      .from(customFieldValues)
+      .where(eq(customFieldValues.entityId, employee.id));
+    expect(remaining).toHaveLength(0);
+
+    await store.pruneImportedRowsNotIn("assets", [], { chunkSize: 50 });
+    await store.pruneImportedRowsNotIn("dependents", [], { chunkSize: 50 });
+    expect(
+      await db.select().from(employeeAssets).where(eq(employeeAssets.employeeId, employee.id))
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(employeeDependents)
+        .where(eq(employeeDependents.employeeId, employee.id))
+    ).toHaveLength(0);
   });
 });
