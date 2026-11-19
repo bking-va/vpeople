@@ -47,9 +47,41 @@ describe("Bamboo metadata mapping", () => {
     expect(
       mapMetaField({ alias: "customShirtSize", name: "Shirt Size", type: "list" })
     ).toMatchObject({
-      visibility: "manager_hr",
+      visibility: "hr_only",
       section: "personal",
     });
+    expect(
+      mapMetaField({
+        alias: "customOTE",
+        name: "On Target Earnings",
+        type: "currency",
+      })
+    ).toMatchObject({
+      bambooId: "customOTE",
+      section: "compensation",
+      visibility: "hr_only",
+    });
+    expect(
+      mapMetaField({
+        alias: "customSocialInsuranceNumber",
+        name: "Social Insurance Number",
+        type: "text",
+      })
+    ).toBeNull();
+    expect(
+      mapMetaField({
+        alias: "customTaxId",
+        name: "Tax ID",
+        type: "text",
+      })
+    ).toBeNull();
+    expect(
+      mapMetaField({
+        alias: "customHomeEmail",
+        name: "Home Email",
+        type: "email",
+      })
+    ).toBeNull();
   });
 
   test("maps Bamboo field types onto vPeople custom field types", () => {
@@ -152,6 +184,7 @@ describe("metadata access rules", () => {
         isManager: false,
         isHROrAdmin: false,
         canViewCompensation: false,
+        canViewSensitivePersonalInfo: false,
       })
     ).toBe(false);
     expect(
@@ -160,6 +193,38 @@ describe("metadata access rules", () => {
         isViewingSelf: false,
         isManager: false,
         isHROrAdmin: true,
+        canViewCompensation: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "hr_only", section: "eeo" },
+        isViewingSelf: false,
+        isManager: false,
+        isHROrAdmin: true,
+        canViewCompensation: true,
+        canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
+  });
+
+  test("currency compensation fields require canViewCompensation for managers", () => {
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "manager_hr", section: "compensation" },
+        isViewingSelf: false,
+        isManager: true,
+        isHROrAdmin: false,
+        canViewCompensation: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "manager_hr", section: "compensation" },
+        isViewingSelf: false,
+        isManager: true,
+        isHROrAdmin: false,
         canViewCompensation: true,
       })
     ).toBe(true);
@@ -207,6 +272,38 @@ describe("metadata custom field import", () => {
       bambooId: "customTeamName",
       name: "Team (subfield)",
     });
+  });
+
+  test("does not request national identifier or home email custom fields", async () => {
+    const requested: string[][] = [];
+    const client = {
+      fetchMetaFields: async () => [
+        { alias: "customShirtSize", name: "Shirt Size", type: "list" },
+        {
+          alias: "customSocialInsuranceNumber",
+          name: "Social Insurance Number",
+          type: "text",
+        },
+        { alias: "homeEmail", name: "Home Email", type: "email" },
+        { alias: "customOTE", name: "On Target Earnings", type: "currency" },
+      ],
+      fetchCustomReport: async (opts: { title: string; fields: string[] }) => {
+        requested.push(opts.fields);
+        return [];
+      },
+      fetchMetaTables: async () => [],
+      fetchAllTableRows: async () => {
+        throw new BambooHrHttpError("GET", "/employees/all/tables/x", 404);
+      },
+      allowFullTable: () => undefined,
+    } as unknown as BambooHrClient;
+
+    await fetchMetadataPayload(client, () => undefined);
+    const fields = requested.flat();
+    expect(fields).toContain("customOTE");
+    expect(fields).toContain("customShirtSize");
+    expect(fields).not.toContain("customSocialInsuranceNumber");
+    expect(fields).not.toContain("homeEmail");
   });
 
   test("does not mark omitted custom-report fields as fetched", async () => {

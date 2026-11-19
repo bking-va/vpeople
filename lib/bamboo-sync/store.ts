@@ -1347,7 +1347,6 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
               options = EXCLUDED.options,
               is_required = CAST(EXCLUDED.is_required AS boolean),
               order_index = CAST(EXCLUDED.order_index AS int),
-              visibility = CAST(EXCLUDED.visibility AS custom_field_visibility),
               updated_at = now()
           `
         );

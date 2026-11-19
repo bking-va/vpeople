@@ -349,11 +349,14 @@ export function canViewCustomFieldValue(opts: {
   isManager: boolean;
   isHROrAdmin: boolean;
   canViewCompensation: boolean;
+  canViewSensitivePersonalInfo?: boolean | null;
 }): boolean {
   const { field } = opts;
   const section = (field.section || field.entityType || "").toLowerCase();
   if (section === "eeo") {
-    return opts.isHROrAdmin;
+    return canViewEeoDemographics({
+      canViewSensitivePersonalInfo: opts.canViewSensitivePersonalInfo,
+    });
   }
   if (section === "compensation" && !opts.isViewingSelf && !opts.canViewCompensation) {
     return false;

@@ -19,13 +19,31 @@ const FORBIDDEN_FIELD_TOKENS = new Set([
   "ssn",
   "sin",
   "nin",
+  "nino",
   "iban",
   "routing",
   "swift",
   "bank",
   "passport",
   "transit",
+  "tin",
+  "itin",
+  "nid",
 ]);
+
+const FORBIDDEN_FIELD_PHRASES = [
+  "national id",
+  "national identifier",
+  "national identification",
+  "social insurance",
+  "social security",
+  "tax id",
+  "tax identification",
+  "national insurance",
+  "credit card",
+  "account number",
+  "direct deposit",
+];
 
 const STANDARD_BAMBOO_FIELD_ALIASES = new Set<string>([
   ...IMPORTED_EMPLOYEE_FIELDS,
@@ -41,7 +59,15 @@ export function fieldNameTokens(value: string): string[] {
 }
 
 export const COMP_SENSITIVE_FIELD_PATTERN =
-  /pay|salary|bonus|commission|compensat|equity|stock|option|grant|wage|hourly|currency|flsa|exempt/;
+  /pay|salary|bonus|commission|compensat|equity|stock|option|grant|wage|hourly|currency|flsa|exempt|\bote\b|\bctc\b|on target|target earnings|total cash/;
+
+const CURRENCY_BAMBOO_TYPES = new Set([
+  "currency",
+  "money",
+  "usd",
+  "cad",
+  "monetary",
+]);
 
 export const EEO_FIELD_PATTERN = /ethnicity|eeo|race|hispanic|veteran|disability/;
 
@@ -112,22 +138,40 @@ export function emptyMetadataCounts(): MetadataDatasetCounts {
   };
 }
 
+export function isPrivateEmailBambooField(
+  alias: string,
+  name?: string | null,
+  type?: string | null
+): boolean {
+  const haystack = `${alias} ${name ?? ""}`.toLowerCase();
+  if (
+    ["homeemail", "personalemail", "privateemail", "bestemail"].includes(
+      alias.toLowerCase()
+    )
+  ) {
+    return true;
+  }
+  if (/(home|personal|private|best)\s*e-?mails?/.test(haystack)) return true;
+  const fieldType = (type ?? "").toLowerCase();
+  return fieldType === "email" && !/work/.test(haystack);
+}
+
+export function isCurrencyBambooType(type?: string | null): boolean {
+  return CURRENCY_BAMBOO_TYPES.has((type ?? "").toLowerCase());
+}
+
 export function isForbiddenBambooField(
   alias: string,
   name?: string | null,
   type?: string | null
 ): boolean {
   if (EXCLUDED_FIELD_SET.has(alias)) return true;
+  if (isPrivateEmailBambooField(alias, name, type)) return true;
   if ((type ?? "").toLowerCase() === "ssn") return true;
   const tokens = fieldNameTokens(`${alias} ${name ?? ""} ${type ?? ""}`);
   if (tokens.some((token) => FORBIDDEN_FIELD_TOKENS.has(token))) return true;
   const joined = tokens.join(" ");
-  return (
-    joined.includes("national id") ||
-    joined.includes("credit card") ||
-    joined.includes("account number") ||
-    joined.includes("direct deposit")
-  );
+  return FORBIDDEN_FIELD_PHRASES.some((phrase) => joined.includes(phrase));
 }
 
 export function isStandardBambooEmployeeField(alias: string): boolean {
@@ -158,21 +202,27 @@ export function mapBambooCustomFieldType(
   return "text";
 }
 
-export function customFieldSection(alias: string, name: string): string {
+export function customFieldSection(
+  alias: string,
+  name: string,
+  type?: string | null
+): string {
   const haystack = `${alias} ${name}`.toLowerCase();
   if (EEO_FIELD_PATTERN.test(haystack)) return "eeo";
-  if (COMP_SENSITIVE_FIELD_PATTERN.test(haystack)) return "compensation";
+  if (isCurrencyBambooType(type) || COMP_SENSITIVE_FIELD_PATTERN.test(haystack)) {
+    return "compensation";
+  }
   return "personal";
 }
 
 export function customFieldVisibility(
-  alias: string,
-  name: string
+  _alias?: string,
+  _name?: string,
+  _type?: string | null
 ): MappedCustomFieldWrite["visibility"] {
-  const haystack = `${alias} ${name}`.toLowerCase();
-  if (EEO_FIELD_PATTERN.test(haystack)) return "hr_only";
-  if (COMP_SENSITIVE_FIELD_PATTERN.test(haystack)) return "hr_only";
-  return "manager_hr";
+  // Imported Bamboo fields are HR-only until an admin tightens or loosens locally.
+  // Sync does not overwrite visibility, so a local hr_only restriction sticks.
+  return "hr_only";
 }
 
 function parseBoolean(value: unknown): boolean | null {
@@ -326,11 +376,11 @@ export function mapMetaField(rawInput: unknown): MappedCustomFieldWrite | null {
     name,
     fieldType: mapBambooCustomFieldType(type),
     entityType: "employee",
-    section: customFieldSection(alias, name),
+    section: customFieldSection(alias, name, type),
     options: optionList(raw.options ?? raw.listValues ?? raw.values),
     isRequired: parseBoolean(raw.required ?? raw.isRequired) === true,
     orderIndex: Number.parseInt(String(raw.id ?? "0"), 10) || 0,
-    visibility: customFieldVisibility(alias, name),
+    visibility: customFieldVisibility(alias, name, type),
   };
 }
 
@@ -344,7 +394,7 @@ export function mapCustomFieldValue(
   if (value == null || value === "") return null;
   const text = labeledValue(value) || blankToNull(value);
   if (!text) return null;
-  if (isForbiddenBambooField(field.bambooId)) return null;
+  if (isForbiddenBambooField(field.bambooId, field.name)) return null;
   if (/^\d{3}-\d{2}-\d{4}$/.test(text.trim())) return null;
   return {
     fieldBambooId: field.bambooId,

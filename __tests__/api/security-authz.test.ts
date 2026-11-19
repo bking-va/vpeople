@@ -218,6 +218,29 @@ describe("field-level authz helpers", () => {
     ).toBe(true);
   });
 
+  test("EEO custom fields require sensitive-personal permission, not user-management", () => {
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "hr_only", section: "eeo" },
+        isViewingSelf: false,
+        isManager: false,
+        isHROrAdmin: true,
+        canViewCompensation: true,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "hr_only", section: "eeo" },
+        isViewingSelf: false,
+        isManager: false,
+        isHROrAdmin: true,
+        canViewCompensation: true,
+        canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
+  });
+
   test("viewing roles cannot write settings", () => {
     expect(isViewingAccessLevel("global_view")).toBe(true);
     expect(canWriteSettings("global_view", "admin")).toBe(false);
