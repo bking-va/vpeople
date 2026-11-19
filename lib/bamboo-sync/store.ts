@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import {
   announcements,
   approvalRequestSteps,
@@ -29,6 +29,12 @@ import {
 } from "@/lib/db/schema";
 import { isBrendanWorkEmail } from "./map";
 import { DEMO_SEED_EMAILS, isDemoEmployee } from "./demo";
+import {
+  BAMBOO_WRITE_CHUNK_SIZE,
+  chunkRows,
+  reportChunkProgress,
+  type BatchProgress,
+} from "./chunks";
 import type { BambooSyncStore } from "./sync";
 import type {
   AccessLevel,
@@ -42,7 +48,13 @@ type DbLike = {
   insert: (...args: any[]) => any;
   update: (...args: any[]) => any;
   delete: (...args: any[]) => any;
+  execute?: (query: any) => Promise<any>;
   transaction?: <T>(fn: (tx: any) => Promise<T>) => Promise<T>;
+};
+
+type HistoryReplacement = {
+  employeeId: number;
+  rows: Array<Record<string, unknown>>;
 };
 
 function asAccessLevel(value: string | null | undefined): AccessLevel {
@@ -83,6 +95,82 @@ function toSyncRow(row: {
   };
 }
 
+function chunkSizeOf(progress?: BatchProgress): number {
+  return Math.max(1, progress?.chunkSize ?? BAMBOO_WRITE_CHUNK_SIZE);
+}
+
+function uniqueNames(values: Array<string | null | undefined>): string[] {
+  const names = new Set<string>();
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) names.add(trimmed);
+  }
+  return [...names];
+}
+
+function assignEmployeeNumber(
+  desired: string | null,
+  bambooId: string,
+  used: Set<string>,
+  own?: string | null
+): string | null {
+  if (desired && (own === desired || !used.has(desired))) return desired;
+  if (desired) {
+    const fallback = `B${bambooId}`;
+    if (own === fallback || !used.has(fallback)) return fallback;
+    return fallback;
+  }
+  return null;
+}
+
+function employeeWriteValues(
+  bambooId: string,
+  employee: MappedEmployee,
+  org: {
+    departmentId: number | null;
+    divisionId: number | null;
+    locationId: number | null;
+  },
+  employeeNumber: string | null
+) {
+  return {
+    bambooId,
+    employeeNumber,
+    firstName: employee.firstName,
+    middleName: employee.middleName,
+    lastName: employee.lastName,
+    preferredName: employee.preferredName,
+    email: employee.email,
+    personalEmail: employee.personalEmail,
+    workPhone: employee.workPhone,
+    extension: employee.extension,
+    mobilePhone: employee.mobilePhone,
+    homePhone: employee.homePhone,
+    jobTitle: employee.jobTitle,
+    departmentId: org.departmentId,
+    divisionId: org.divisionId,
+    locationId: org.locationId,
+    hireDate: employee.hireDate,
+    originalHireDate: employee.originalHireDate,
+    terminationDate: employee.terminationDate,
+    employmentStatus: employee.employmentStatus,
+    gender: employee.gender,
+    birthDate: employee.birthDate,
+    maritalStatus: employee.maritalStatus,
+    nationality: employee.nationality,
+    citizenship: employee.citizenship,
+    addressStreet1: employee.addressStreet1,
+    addressStreet2: employee.addressStreet2,
+    addressCity: employee.addressCity,
+    addressProvince: employee.addressProvince,
+    addressPostalCode: employee.addressPostalCode,
+    addressCountry: employee.addressCountry,
+    linkedInUrl: employee.linkedInUrl,
+    twitterUrl: employee.twitterUrl,
+    updatedAt: new Date(),
+  };
+}
+
 async function findByName(
   db: DbLike,
   table: typeof departments | typeof divisions | typeof locations | typeof jobTitles,
@@ -95,6 +183,116 @@ async function findByName(
     .where(sql`lower(${column}) = ${name.toLowerCase()}`)
     .limit(1);
   return row ?? null;
+}
+
+async function executeSql(db: DbLike, query: ReturnType<typeof sql>) {
+  if (typeof db.execute !== "function") {
+    throw new Error("Database adapter cannot execute batched SQL");
+  }
+  return db.execute(query);
+}
+
+export async function applyBambooWriteGuards(db: DbLike): Promise<void> {
+  if (typeof db.execute !== "function") return;
+  await db.execute(sql`SET LOCAL statement_timeout = '60s'`);
+  await db.execute(sql`SET LOCAL idle_in_transaction_session_timeout = '180s'`);
+  await db.execute(sql`SET LOCAL lock_timeout = '15s'`);
+}
+
+async function updateEmployeesChunk(
+  db: DbLike,
+  rows: Array<ReturnType<typeof employeeWriteValues> & { id: number }>
+) {
+  if (rows.length === 0) return;
+  const tuples = rows.map(
+    (row) => sql`(
+      ${row.id}::int,
+      ${row.bambooId},
+      ${row.employeeNumber},
+      ${row.firstName},
+      ${row.middleName},
+      ${row.lastName},
+      ${row.preferredName},
+      ${row.email},
+      ${row.personalEmail},
+      ${row.workPhone},
+      ${row.extension},
+      ${row.mobilePhone},
+      ${row.homePhone},
+      ${row.jobTitle},
+      ${row.departmentId}::int,
+      ${row.divisionId}::int,
+      ${row.locationId}::int,
+      ${row.hireDate},
+      ${row.originalHireDate},
+      ${row.terminationDate},
+      ${row.employmentStatus}::employment_status,
+      ${row.gender}::gender,
+      ${row.birthDate},
+      ${row.maritalStatus},
+      ${row.nationality},
+      ${row.citizenship},
+      ${row.addressStreet1},
+      ${row.addressStreet2},
+      ${row.addressCity},
+      ${row.addressProvince},
+      ${row.addressPostalCode},
+      ${row.addressCountry},
+      ${row.linkedInUrl},
+      ${row.twitterUrl}
+    )`
+  );
+  await executeSql(
+    db,
+    sql`
+      UPDATE employees AS e SET
+        bamboo_id = v.bamboo_id,
+        employee_number = v.employee_number,
+        first_name = v.first_name,
+        middle_name = v.middle_name,
+        last_name = v.last_name,
+        preferred_name = v.preferred_name,
+        email = v.email,
+        personal_email = v.personal_email,
+        work_phone = v.work_phone,
+        extension = v.extension,
+        mobile_phone = v.mobile_phone,
+        home_phone = v.home_phone,
+        job_title = v.job_title,
+        department_id = v.department_id,
+        division_id = v.division_id,
+        location_id = v.location_id,
+        hire_date = v.hire_date,
+        original_hire_date = v.original_hire_date,
+        termination_date = v.termination_date,
+        employment_status = v.employment_status,
+        gender = v.gender,
+        birth_date = v.birth_date,
+        marital_status = v.marital_status,
+        nationality = v.nationality,
+        citizenship = v.citizenship,
+        address_street1 = v.address_street1,
+        address_street2 = v.address_street2,
+        address_city = v.address_city,
+        address_province = v.address_province,
+        address_postal_code = v.address_postal_code,
+        address_country = v.address_country,
+        linkedin_url = v.linkedin_url,
+        twitter_url = v.twitter_url,
+        updated_at = now()
+      FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+        id, bamboo_id, employee_number, first_name, middle_name, last_name,
+        preferred_name, email, personal_email, work_phone, extension,
+        mobile_phone, home_phone, job_title, department_id, division_id,
+        location_id, hire_date, original_hire_date, termination_date,
+        employment_status, gender, birth_date, marital_status, nationality,
+        citizenship, address_street1, address_street2, address_city,
+        address_province, address_postal_code, address_country,
+        linkedin_url, twitter_url
+      )
+      WHERE e.id = v.id
+    `
+  );
 }
 
 export function createBambooSyncStore(db: DbLike): BambooSyncStore {
@@ -195,51 +393,96 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
     },
 
     async upsertOrgUnit(kind, name) {
-      const trimmed = name.trim();
-      if (!trimmed) return null;
+      const ids = await store.upsertOrgUnits(kind, [name]);
+      return ids.get(name.trim().toLowerCase()) ?? null;
+    },
+
+    async upsertOrgUnits(kind, names) {
+      const unique = uniqueNames(names);
+      const map = new Map<string, number>();
+      if (unique.length === 0) return map;
+
       if (kind === "department") {
-        const existing = await findByName(db, departments, departments.name, trimmed);
-        if (existing) return existing.id;
-        const [created] = await db
-          .insert(departments)
-          .values({ name: trimmed })
-          .onConflictDoNothing()
-          .returning();
-        if (created) return created.id;
-        const again = await findByName(db, departments, departments.name, trimmed);
-        return again?.id ?? null;
+        const existing: Array<{ id: number; name: string }> = await db
+          .select({ id: departments.id, name: departments.name })
+          .from(departments);
+        for (const row of existing) map.set(row.name.toLowerCase(), row.id);
+        const missing = unique.filter((name) => !map.has(name.toLowerCase()));
+        if (missing.length > 0) {
+          const inserted = await db
+            .insert(departments)
+            .values(missing.map((name) => ({ name })))
+            .onConflictDoNothing()
+            .returning({ id: departments.id, name: departments.name });
+          for (const row of inserted ?? []) map.set(row.name.toLowerCase(), row.id);
+        }
+      } else if (kind === "division") {
+        const existing: Array<{ id: number; name: string }> = await db
+          .select({ id: divisions.id, name: divisions.name })
+          .from(divisions);
+        for (const row of existing) map.set(row.name.toLowerCase(), row.id);
+        const missing = unique.filter((name) => !map.has(name.toLowerCase()));
+        if (missing.length > 0) {
+          const inserted = await db
+            .insert(divisions)
+            .values(missing.map((name) => ({ name })))
+            .onConflictDoNothing()
+            .returning({ id: divisions.id, name: divisions.name });
+          for (const row of inserted ?? []) map.set(row.name.toLowerCase(), row.id);
+        }
+      } else if (kind === "location") {
+        const existing: Array<{ id: number; name: string }> = await db
+          .select({ id: locations.id, name: locations.name })
+          .from(locations);
+        for (const row of existing) map.set(row.name.toLowerCase(), row.id);
+        const missing = unique.filter((name) => !map.has(name.toLowerCase()));
+        if (missing.length > 0) {
+          const inserted = await db
+            .insert(locations)
+            .values(missing.map((name) => ({ name, country: "Unknown" })))
+            .returning({ id: locations.id, name: locations.name });
+          for (const row of inserted ?? []) map.set(row.name.toLowerCase(), row.id);
+        }
+      } else {
+        const existing: Array<{ id: number; title: string }> = await db
+          .select({ id: jobTitles.id, title: jobTitles.title })
+          .from(jobTitles);
+        for (const row of existing) map.set(row.title.toLowerCase(), row.id);
+        const missing = unique.filter((name) => !map.has(name.toLowerCase()));
+        if (missing.length > 0) {
+          const inserted = await db
+            .insert(jobTitles)
+            .values(missing.map((title) => ({ title })))
+            .onConflictDoNothing()
+            .returning({ id: jobTitles.id, title: jobTitles.title });
+          for (const row of inserted ?? []) map.set(row.title.toLowerCase(), row.id);
+        }
       }
-      if (kind === "division") {
-        const existing = await findByName(db, divisions, divisions.name, trimmed);
-        if (existing) return existing.id;
-        const [created] = await db
-          .insert(divisions)
-          .values({ name: trimmed })
-          .onConflictDoNothing()
-          .returning();
-        if (created) return created.id;
-        const again = await findByName(db, divisions, divisions.name, trimmed);
-        return again?.id ?? null;
+
+      const unresolved = unique.filter((name) => !map.has(name.toLowerCase()));
+      if (unresolved.length === 0) return map;
+      for (const name of unresolved) {
+        const id = await findByName(
+          db,
+          kind === "department"
+            ? departments
+            : kind === "division"
+              ? divisions
+              : kind === "location"
+                ? locations
+                : jobTitles,
+          kind === "department"
+            ? departments.name
+            : kind === "division"
+              ? divisions.name
+              : kind === "location"
+                ? locations.name
+                : jobTitles.title,
+          name
+        );
+        if (id?.id) map.set(name.toLowerCase(), id.id);
       }
-      if (kind === "location") {
-        const existing = await findByName(db, locations, locations.name, trimmed);
-        if (existing) return existing.id;
-        const [created] = await db
-          .insert(locations)
-          .values({ name: trimmed, country: "Unknown" })
-          .returning();
-        return created?.id ?? null;
-      }
-      const existing = await findByName(db, jobTitles, jobTitles.title, trimmed);
-      if (existing) return existing.id;
-      const [created] = await db
-        .insert(jobTitles)
-        .values({ title: trimmed })
-        .onConflictDoNothing()
-        .returning();
-      if (created) return created.id;
-      const again = await findByName(db, jobTitles, jobTitles.title, trimmed);
-      return again?.id ?? null;
+      return map;
     },
 
     async upsertEmployee(bambooId, employee) {
@@ -252,117 +495,177 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       const locationId = employee.locationName
         ? await store.upsertOrgUnit("location", employee.locationName)
         : null;
+      const result = await store.upsertEmployeesBatch(
+        [{ bambooId, employee, departmentId, divisionId, locationId }],
+        { chunkSize: 1 }
+      );
+      const id = result.idByBambooId.get(bambooId);
+      if (id == null) throw new Error("Employee upsert did not return an id");
+      return { id, created: result.created > 0 };
+    },
 
-      const [byBamboo] = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .where(eq(employees.bambooId, bambooId))
-        .limit(1);
+    async upsertEmployeesBatch(rows, progress) {
+      const idByBambooId = new Map<string, number>();
+      if (rows.length === 0) {
+        return { idByBambooId, created: 0, updated: 0 };
+      }
+      const existing = await store.listEmployees();
+      const byBamboo = new Map(
+        existing
+          .filter((row) => row.bambooId)
+          .map((row) => [row.bambooId as string, row])
+      );
+      const byEmailUnbound = new Map(
+        existing
+          .filter((row) => !row.bambooId)
+          .map((row) => [row.email.toLowerCase(), row])
+      );
+      const usedNumbers = new Set(
+        existing
+          .map((row) => row.employeeNumber)
+          .filter((value): value is string => Boolean(value))
+      );
 
-      const values = {
-        bambooId,
-        employeeNumber: employee.employeeNumber,
-        firstName: employee.firstName,
-        middleName: employee.middleName,
-        lastName: employee.lastName,
-        preferredName: employee.preferredName,
-        email: employee.email,
-        personalEmail: employee.personalEmail,
-        workPhone: employee.workPhone,
-        extension: employee.extension,
-        mobilePhone: employee.mobilePhone,
-        homePhone: employee.homePhone,
-        jobTitle: employee.jobTitle,
-        departmentId,
-        divisionId,
-        locationId,
-        hireDate: employee.hireDate,
-        originalHireDate: employee.originalHireDate,
-        terminationDate: employee.terminationDate,
-        employmentStatus: employee.employmentStatus,
-        gender: employee.gender,
-        birthDate: employee.birthDate,
-        maritalStatus: employee.maritalStatus,
-        nationality: employee.nationality,
-        citizenship: employee.citizenship,
-        addressStreet1: employee.addressStreet1,
-        addressStreet2: employee.addressStreet2,
-        addressCity: employee.addressCity,
-        addressProvince: employee.addressProvince,
-        addressPostalCode: employee.addressPostalCode,
-        addressCountry: employee.addressCountry,
-        linkedInUrl: employee.linkedInUrl,
-        twitterUrl: employee.twitterUrl,
-        updatedAt: new Date(),
+      const updates: Array<ReturnType<typeof employeeWriteValues> & { id: number }> =
+        [];
+      const inserts: Array<ReturnType<typeof employeeWriteValues> & { accessLevel: "employee" }> =
+        [];
+
+      for (const row of rows) {
+        const matched =
+          byBamboo.get(row.bambooId) ??
+          byEmailUnbound.get(row.employee.email.toLowerCase()) ??
+          null;
+        const employeeNumber = assignEmployeeNumber(
+          row.employee.employeeNumber,
+          row.bambooId,
+          usedNumbers,
+          matched?.employeeNumber
+        );
+        if (matched?.employeeNumber && matched.employeeNumber !== employeeNumber) {
+          usedNumbers.delete(matched.employeeNumber);
+        }
+        if (employeeNumber) usedNumbers.add(employeeNumber);
+        const values = employeeWriteValues(
+          row.bambooId,
+          row.employee,
+          {
+            departmentId: row.departmentId,
+            divisionId: row.divisionId,
+            locationId: row.locationId,
+          },
+          employeeNumber
+        );
+        if (matched) {
+          updates.push({ ...values, id: matched.id });
+          idByBambooId.set(row.bambooId, matched.id);
+          byBamboo.set(row.bambooId, { ...matched, bambooId: row.bambooId });
+          byEmailUnbound.delete(row.employee.email.toLowerCase());
+        } else {
+          inserts.push({ ...values, accessLevel: "employee" });
+        }
+      }
+
+      const size = chunkSizeOf(progress);
+      const total = updates.length + inserts.length;
+      let done = 0;
+      for (const chunk of chunkRows(updates, size)) {
+        await updateEmployeesChunk(db, chunk);
+        done += chunk.length;
+        reportChunkProgress(progress, done, total);
+      }
+      for (const chunk of chunkRows(inserts, size)) {
+        const created: Array<{ id: number; bambooId: string | null }> = await db
+          .insert(employees)
+          .values(chunk)
+          .returning({ id: employees.id, bambooId: employees.bambooId });
+        for (const row of created) {
+          if (row.bambooId) idByBambooId.set(row.bambooId, row.id);
+        }
+        done += chunk.length;
+        reportChunkProgress(progress, done, total);
+      }
+      if (total === 0) reportChunkProgress(progress, 0, 0);
+      return {
+        idByBambooId,
+        created: inserts.length,
+        updated: updates.length,
       };
-
-      if (byBamboo) {
-        await db
-          .update(employees)
-          .set(values)
-          .where(eq(employees.id, byBamboo.id));
-        return { id: byBamboo.id, created: false };
-      }
-
-      const [byEmail] = await db
-        .select({ id: employees.id, bambooId: employees.bambooId })
-        .from(employees)
-        .where(eq(employees.email, employee.email))
-        .limit(1);
-      if (byEmail && !byEmail.bambooId) {
-        await db
-          .update(employees)
-          .set(values)
-          .where(eq(employees.id, byEmail.id));
-        return { id: byEmail.id, created: false };
-      }
-
-      try {
-        const [created] = await db
-          .insert(employees)
-          .values({
-            ...values,
-            accessLevel: "employee",
-          })
-          .returning({ id: employees.id });
-        return { id: created.id, created: true };
-      } catch {
-        const [created] = await db
-          .insert(employees)
-          .values({
-            ...values,
-            employeeNumber: `B${bambooId}`,
-            accessLevel: "employee",
-          })
-          .returning({ id: employees.id });
-        return { id: created.id, created: true };
-      }
     },
 
     async setManager(employeeId, managerId) {
-      await db
-        .update(employees)
-        .set({ managerId, updatedAt: new Date() })
-        .where(eq(employees.id, employeeId));
-      if (managerId != null) {
-        const { rebindPendingManagerApprovals } = await import("@/lib/approvals");
-        await rebindPendingManagerApprovals(employeeId, managerId, db);
+      await store.setManagersBatch([{ employeeId, managerId }]);
+    },
+
+    async setManagersBatch(links, progress) {
+      if (links.length === 0) return;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(links, size)) {
+        const tuples = chunk.map(
+          (link) => sql`(${link.employeeId}::int, ${link.managerId}::int)`
+        );
+        await executeSql(
+          db,
+          sql`
+            UPDATE employees AS e
+            SET manager_id = v.manager_id,
+                updated_at = now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(id, manager_id)
+            WHERE e.id = v.id
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, links.length);
+      }
+      const resolved = links.filter(
+        (link): link is { employeeId: number; managerId: number } =>
+          link.managerId != null
+      );
+      if (resolved.length > 0) {
+        const { rebindPendingManagerApprovalsMany } = await import(
+          "@/lib/approvals"
+        );
+        await rebindPendingManagerApprovalsMany(resolved, db);
       }
     },
 
     async setUnresolvedSupervisor(employeeId, supervisorBambooId) {
-      await db
-        .update(employees)
-        .set({
-          pendingSupervisorBambooId: supervisorBambooId,
-          updatedAt: new Date(),
-        })
-        .where(eq(employees.id, employeeId));
-      if (supervisorBambooId) {
-        const { unassignPendingManagerApprovals } = await import(
+      await store.setUnresolvedSupervisorsBatch([
+        { employeeId, supervisorBambooId },
+      ]);
+    },
+
+    async setUnresolvedSupervisorsBatch(links, progress) {
+      if (links.length === 0) return;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(links, size)) {
+        const tuples = chunk.map(
+          (link) =>
+            sql`(${link.employeeId}::int, ${link.supervisorBambooId})`
+        );
+        await executeSql(
+          db,
+          sql`
+            UPDATE employees AS e
+            SET pending_supervisor_bamboo_id = v.pending_supervisor_bamboo_id,
+                updated_at = now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(id, pending_supervisor_bamboo_id)
+            WHERE e.id = v.id
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, links.length);
+      }
+      const unresolved = links
+        .filter((link) => Boolean(link.supervisorBambooId))
+        .map((link) => link.employeeId);
+      if (unresolved.length > 0) {
+        const { unassignPendingManagerApprovalsMany } = await import(
           "@/lib/approvals"
         );
-        await unassignPendingManagerApprovals(employeeId, db);
+        await unassignPendingManagerApprovalsMany(unresolved, db);
       }
     },
 
@@ -390,159 +693,259 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
     },
 
     async markTerminated(bambooId) {
-      await db
-        .update(employees)
-        .set({
-          employmentStatus: "terminated",
-          updatedAt: new Date(),
-        })
-        .where(eq(employees.bambooId, bambooId));
+      await store.markTerminatedBatch([bambooId]);
+    },
+
+    async markTerminatedBatch(bambooIds, progress) {
+      const unique = [...new Set(bambooIds.filter(Boolean))];
+      if (unique.length === 0) return;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(unique, size)) {
+        await db
+          .update(employees)
+          .set({
+            employmentStatus: "terminated",
+            updatedAt: new Date(),
+          })
+          .where(inArray(employees.bambooId, chunk));
+        done += chunk.length;
+        reportChunkProgress(progress, done, unique.length);
+      }
     },
 
     async replaceJobHistory(employeeId, rows) {
-      await db.delete(jobHistory).where(eq(jobHistory.employeeId, employeeId));
-      const values = [];
-      for (const row of rows) {
-        const effectiveDate = String(row.effectiveDate || "");
-        if (!effectiveDate) continue;
-        const departmentId = row.departmentName
-          ? await store.upsertOrgUnit("department", String(row.departmentName))
-          : null;
-        const divisionId = row.divisionName
-          ? await store.upsertOrgUnit("division", String(row.divisionName))
-          : null;
-        const locationId = row.locationName
-          ? await store.upsertOrgUnit("location", String(row.locationName))
-          : null;
-        values.push({
-          employeeId,
-          effectiveDate,
-          jobTitle: row.jobTitle ? String(row.jobTitle) : null,
-          departmentId,
-          divisionId,
-          locationId,
-          comment: row.comment ? String(row.comment) : null,
-        });
-      }
-      if (values.length > 0) {
-        await db.insert(jobHistory).values(values);
-      }
+      await store.replaceJobHistoryMany([{ employeeId, rows }]);
+    },
+
+    async replaceJobHistoryMany(replacements, progress) {
+      await replaceChildTable(
+        db,
+        store,
+        replacements,
+        progress,
+        jobHistory,
+        async (employeeId, rows, org) => {
+          const values = [];
+          for (const row of rows) {
+            const effectiveDate = String(row.effectiveDate || "");
+            if (!effectiveDate) continue;
+            values.push({
+              employeeId,
+              effectiveDate,
+              jobTitle: row.jobTitle ? String(row.jobTitle) : null,
+              departmentId: org.idFor("department", row.departmentName),
+              divisionId: org.idFor("division", row.divisionName),
+              locationId: org.idFor("location", row.locationName),
+              comment: row.comment ? String(row.comment) : null,
+            });
+          }
+          return values;
+        }
+      );
     },
 
     async replaceEmploymentStatusHistory(employeeId, rows) {
-      await db
-        .delete(employmentStatusHistory)
-        .where(eq(employmentStatusHistory.employeeId, employeeId));
-      const values = rows
-        .filter((row) => row.effectiveDate && row.status)
-        .map((row) => ({
-          employeeId,
-          effectiveDate: String(row.effectiveDate),
-          status: row.status as MappedEmployee["employmentStatus"],
-          changeType: String(row.changeType || "status_change"),
-          comment: row.comment ? String(row.comment) : null,
-        }));
-      if (values.length > 0) {
-        await db.insert(employmentStatusHistory).values(values);
-      }
+      await store.replaceEmploymentStatusHistoryMany([{ employeeId, rows }]);
+    },
+
+    async replaceEmploymentStatusHistoryMany(replacements, progress) {
+      await replaceChildTable(
+        db,
+        store,
+        replacements,
+        progress,
+        employmentStatusHistory,
+        async (employeeId, rows) =>
+          rows
+            .filter((row) => row.effectiveDate && row.status)
+            .map((row) => ({
+              employeeId,
+              effectiveDate: String(row.effectiveDate),
+              status: row.status as MappedEmployee["employmentStatus"],
+              changeType: String(row.changeType || "status_change"),
+              comment: row.comment ? String(row.comment) : null,
+            }))
+      );
     },
 
     async replaceCompensationHistory(employeeId, rows) {
-      await db
-        .delete(compensationHistory)
-        .where(eq(compensationHistory.employeeId, employeeId));
-      const values = rows
-        .filter((row) => row.effectiveDate)
-        .map((row) => ({
-          employeeId,
-          effectiveDate: String(row.effectiveDate),
-          payRate: row.payRate ? String(row.payRate) : null,
-          payType: row.payType ? String(row.payType) : null,
-          paySchedule: row.paySchedule ? String(row.paySchedule) : null,
-          currency: row.currency ? String(row.currency) : "CAD",
-          changeReason: row.changeReason ? String(row.changeReason) : null,
-          comment: row.comment ? String(row.comment) : null,
-        }));
-      if (values.length > 0) {
-        await db.insert(compensationHistory).values(values);
-      }
+      await store.replaceCompensationHistoryMany([{ employeeId, rows }]);
+    },
+
+    async replaceCompensationHistoryMany(replacements, progress) {
+      await replaceChildTable(
+        db,
+        store,
+        replacements,
+        progress,
+        compensationHistory,
+        async (employeeId, rows) =>
+          rows
+            .filter((row) => row.effectiveDate)
+            .map((row) => ({
+              employeeId,
+              effectiveDate: String(row.effectiveDate),
+              payRate: row.payRate ? String(row.payRate) : null,
+              payType: row.payType ? String(row.payType) : null,
+              paySchedule: row.paySchedule ? String(row.paySchedule) : null,
+              currency: row.currency ? String(row.currency) : "CAD",
+              changeReason: row.changeReason ? String(row.changeReason) : null,
+              comment: row.comment ? String(row.comment) : null,
+            }))
+      );
     },
 
     async replaceEmergencyContacts(employeeId, rows) {
-      await db
-        .delete(emergencyContacts)
-        .where(eq(emergencyContacts.employeeId, employeeId));
-      const values = rows
-        .filter((row) => row.name && row.phone)
-        .map((row) => ({
-          employeeId,
-          name: String(row.name),
-          relationship: row.relationship ? String(row.relationship) : null,
-          phone: String(row.phone),
-          alternatePhone: row.alternatePhone ? String(row.alternatePhone) : null,
-          email: row.email ? String(row.email) : null,
-          isPrimary: Boolean(row.isPrimary),
-        }));
-      if (values.length > 0) {
-        await db.insert(emergencyContacts).values(values);
-      }
+      await store.replaceEmergencyContactsMany([{ employeeId, rows }]);
+    },
+
+    async replaceEmergencyContactsMany(replacements, progress) {
+      await replaceChildTable(
+        db,
+        store,
+        replacements,
+        progress,
+        emergencyContacts,
+        async (employeeId, rows) =>
+          rows
+            .filter((row) => row.name && row.phone)
+            .map((row) => ({
+              employeeId,
+              name: String(row.name),
+              relationship: row.relationship ? String(row.relationship) : null,
+              phone: String(row.phone),
+              alternatePhone: row.alternatePhone ? String(row.alternatePhone) : null,
+              email: row.email ? String(row.email) : null,
+              isPrimary: Boolean(row.isPrimary),
+            }))
+      );
     },
 
     async upsertTimeOffPolicy(name, policyType) {
-      const [existing] = await db
-        .select({ id: timeOffPolicies.id })
-        .from(timeOffPolicies)
-        .where(sql`lower(${timeOffPolicies.name}) = ${name.toLowerCase()}`)
-        .limit(1);
-      if (existing) return existing.id;
-      const [created] = await db
-        .insert(timeOffPolicies)
-        .values({
-          name,
-          policyType: policyType || name,
-        })
-        .returning({ id: timeOffPolicies.id });
-      return created.id;
+      const ids = await store.upsertTimeOffPoliciesBatch([
+        { name, policyType: policyType || name },
+      ]);
+      const id = ids.get(name.toLowerCase());
+      if (id == null) throw new Error("Time-off policy upsert did not return an id");
+      return id;
+    },
+
+    async upsertTimeOffPoliciesBatch(policies) {
+      const map = new Map<string, number>();
+      if (policies.length === 0) return map;
+      const existing: Array<{ id: number; name: string }> = await db
+        .select({ id: timeOffPolicies.id, name: timeOffPolicies.name })
+        .from(timeOffPolicies);
+      for (const row of existing) map.set(row.name.toLowerCase(), row.id);
+      const missing = [];
+      const seen = new Set<string>();
+      for (const policy of policies) {
+        const key = policy.name.toLowerCase();
+        if (map.has(key) || seen.has(key) || !policy.name.trim()) continue;
+        seen.add(key);
+        missing.push({
+          name: policy.name,
+          policyType: policy.policyType || policy.name,
+        });
+      }
+      if (missing.length > 0) {
+        const inserted = await db
+          .insert(timeOffPolicies)
+          .values(missing)
+          .returning({ id: timeOffPolicies.id, name: timeOffPolicies.name });
+        for (const row of inserted ?? []) map.set(row.name.toLowerCase(), row.id);
+      }
+      return map;
     },
 
     async upsertTimeOffBalance(employeeId, policyId, sourceBalance) {
-      const [existing] = await db
-        .select({ id: timeOffBalances.id })
-        .from(timeOffBalances)
-        .where(
-          and(
-            eq(timeOffBalances.employeeId, employeeId),
-            eq(timeOffBalances.policyId, policyId)
-          )
-        )
-        .limit(1);
-      if (!existing) {
-        await db.insert(timeOffBalances).values({
-          employeeId,
-          policyId,
-          sourceBalance,
-          balance: sourceBalance,
-        });
-        return;
+      await store.upsertTimeOffBalancesBatch([
+        { employeeId, policyId, sourceBalance },
+      ]);
+    },
+
+    async upsertTimeOffBalancesBatch(rows, progress) {
+      if (rows.length === 0) return;
+      const employeeIds = [...new Set(rows.map((row) => row.employeeId))];
+      const existing: Array<{
+        id: number;
+        employeeId: number;
+        policyId: number;
+      }> = [];
+      for (const ids of chunkRows(employeeIds, chunkSizeOf(progress))) {
+        const chunk = await db
+          .select({
+            id: timeOffBalances.id,
+            employeeId: timeOffBalances.employeeId,
+            policyId: timeOffBalances.policyId,
+          })
+          .from(timeOffBalances)
+          .where(inArray(timeOffBalances.employeeId, ids));
+        existing.push(...chunk);
+      }
+      const existingByKey = new Map(
+        existing.map((row) => [`${row.employeeId}:${row.policyId}`, row])
+      );
+      const updates: Array<{ id: number; sourceBalance: string }> = [];
+      const inserts: Array<{
+        employeeId: number;
+        policyId: number;
+        sourceBalance: string;
+        balance: string;
+      }> = [];
+      for (const row of rows) {
+        const current = existingByKey.get(`${row.employeeId}:${row.policyId}`);
+        if (current) {
+          updates.push({ id: current.id, sourceBalance: row.sourceBalance });
+        } else {
+          inserts.push({
+            employeeId: row.employeeId,
+            policyId: row.policyId,
+            sourceBalance: row.sourceBalance,
+            balance: row.sourceBalance,
+          });
+          existingByKey.set(`${row.employeeId}:${row.policyId}`, {
+            id: -1,
+            employeeId: row.employeeId,
+            policyId: row.policyId,
+          });
+        }
       }
 
-      // One UPDATE so a concurrent approval cannot insert a `used:` row
-      // after we read the ledger and then have its deduction overwritten.
-      const spendable = sql`${sourceBalance}::numeric + coalesce((
-        select sum(${timeOffBalanceAdjustments.amount}::numeric)
-        from ${timeOffBalanceAdjustments}
-        where ${timeOffBalanceAdjustments.balanceId} = ${timeOffBalances.id}
-          and lower(${timeOffBalanceAdjustments.reason}) not like 'accrual:%'
-          and lower(${timeOffBalanceAdjustments.reason}) not like 'carryover:%'
-      ), 0)`;
-      await db
-        .update(timeOffBalances)
-        .set({
-          sourceBalance,
-          balance: spendable,
-          updatedAt: new Date(),
-        })
-        .where(eq(timeOffBalances.id, existing.id));
+      const size = chunkSizeOf(progress);
+      const total = updates.length + inserts.length;
+      let done = 0;
+      for (const chunk of chunkRows(updates, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(${row.id}::int, ${row.sourceBalance})`
+        );
+        await executeSql(
+          db,
+          sql`
+            UPDATE time_off_balances AS b
+            SET
+              source_balance = v.source_balance::numeric,
+              balance = v.source_balance::numeric + coalesce((
+                select sum(${timeOffBalanceAdjustments.amount}::numeric)
+                from ${timeOffBalanceAdjustments}
+                where ${timeOffBalanceAdjustments.balanceId} = b.id
+                  and lower(${timeOffBalanceAdjustments.reason}) not like 'accrual:%'
+                  and lower(${timeOffBalanceAdjustments.reason}) not like 'carryover:%'
+              ), 0),
+              updated_at = now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(id, source_balance)
+            WHERE b.id = v.id
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, total);
+      }
+      for (const chunk of chunkRows(inserts, size)) {
+        await db.insert(timeOffBalances).values(chunk);
+        done += chunk.length;
+        reportChunkProgress(progress, done, total);
+      }
     },
 
     async applyBrendanCarryOver(opts) {
@@ -608,11 +1011,97 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
 
     async transaction(fn) {
       if (!db.transaction) return fn(store);
-      return db.transaction(async (tx: DbLike) => fn(createBambooSyncStore(tx)));
+      return db.transaction(async (tx: DbLike) => {
+        await applyBambooWriteGuards(tx);
+        return fn(createBambooSyncStore(tx));
+      });
     },
   };
 
   return store;
 }
 
+type OrgLookup = {
+  idFor(kind: "department" | "division" | "location", name: unknown): number | null;
+};
+
+async function replaceChildTable(
+  db: DbLike,
+  store: BambooSyncStore,
+  replacements: HistoryReplacement[],
+  progress: BatchProgress | undefined,
+  table:
+    | typeof jobHistory
+    | typeof employmentStatusHistory
+    | typeof compensationHistory
+    | typeof emergencyContacts,
+  mapRows: (
+    employeeId: number,
+    rows: Array<Record<string, unknown>>,
+    org: OrgLookup
+  ) => Promise<Array<Record<string, unknown>>>
+) {
+  if (replacements.length === 0) return;
+  const employeeIds = [...new Set(replacements.map((row) => row.employeeId))];
+  const size = chunkSizeOf(progress);
+  const departmentNames = uniqueNames(
+    replacements.flatMap((item) =>
+      item.rows.map((row) =>
+        row.departmentName ? String(row.departmentName) : null
+      )
+    )
+  );
+  const divisionNames = uniqueNames(
+    replacements.flatMap((item) =>
+      item.rows.map((row) => (row.divisionName ? String(row.divisionName) : null))
+    )
+  );
+  const locationNames = uniqueNames(
+    replacements.flatMap((item) =>
+      item.rows.map((row) => (row.locationName ? String(row.locationName) : null))
+    )
+  );
+  const [departmentsMap, divisionsMap, locationsMap] = await Promise.all([
+    store.upsertOrgUnits("department", departmentNames),
+    store.upsertOrgUnits("division", divisionNames),
+    store.upsertOrgUnits("location", locationNames),
+  ]);
+  const org: OrgLookup = {
+    idFor(kind, name) {
+      if (!name) return null;
+      const key = String(name).trim().toLowerCase();
+      if (!key) return null;
+      if (kind === "department") return departmentsMap.get(key) ?? null;
+      if (kind === "division") return divisionsMap.get(key) ?? null;
+      return locationsMap.get(key) ?? null;
+    },
+  };
+
+  let done = 0;
+  const deleteTotal = employeeIds.length;
+  for (const ids of chunkRows(employeeIds, size)) {
+    await db.delete(table).where(inArray(table.employeeId, ids));
+    done += ids.length;
+    reportChunkProgress(progress, done, deleteTotal);
+  }
+
+  const values: Array<Record<string, unknown>> = [];
+  for (const item of replacements) {
+    values.push(...(await mapRows(item.employeeId, item.rows, org)));
+  }
+  done = 0;
+  for (const chunk of chunkRows(values, size)) {
+    if (chunk.length === 0) continue;
+    await db.insert(table).values(chunk);
+    done += chunk.length;
+    reportChunkProgress(progress, done, values.length);
+  }
+}
+
 export { DEMO_SEED_EMAILS, isDemoEmployee };
+export {
+  BAMBOO_WRITE_CHUNK_SIZE,
+  BAMBOO_STATEMENT_TIMEOUT,
+  BAMBOO_IDLE_IN_TX_TIMEOUT,
+  BAMBOO_LOCK_TIMEOUT,
+} from "./chunks";
