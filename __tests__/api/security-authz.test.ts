@@ -1,5 +1,7 @@
 import {
   canViewCustomFieldValue,
+  canViewDependents,
+  canViewEeoDemographics,
   canViewImmigrationNumbers,
   canViewIssuedLetterBody,
   canViewPersonalEmail,
@@ -170,6 +172,27 @@ describe("field-level authz helpers", () => {
         search: "secret.personal",
         isSelf: false,
         canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
+  });
+
+  test("ethnicity/EEO is HR-admin only and dependents are self or HR", () => {
+    expect(canViewEeoDemographics({ canViewSensitivePersonalInfo: false })).toBe(
+      false
+    );
+    expect(canViewEeoDemographics({ canViewSensitivePersonalInfo: true })).toBe(
+      true
+    );
+    expect(
+      canViewDependents({
+        isViewingSelf: false,
+        canViewSensitivePersonalInfo: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewDependents({
+        isViewingSelf: true,
+        canViewSensitivePersonalInfo: false,
       })
     ).toBe(true);
   });

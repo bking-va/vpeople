@@ -141,6 +141,9 @@ export function filterEmployeeFields(
     delete filtered.ssn;
     delete filtered.passportNumber;
     delete filtered.nationalId;
+    delete filtered.ethnicity;
+    delete filtered.eeoJobCategory;
+    delete filtered.eeo;
   }
 
   if (!opts?.isSelf && !permissions.canViewSensitivePersonalInfo) {

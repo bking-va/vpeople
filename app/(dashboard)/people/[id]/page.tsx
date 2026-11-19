@@ -24,6 +24,8 @@ import {
   documents,
   employeeEducation,
   employeeVisas,
+  employeeAssets,
+  employeeDependents,
 } from "@/lib/db/schema";
 import { eq, desc, inArray } from "drizzle-orm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,6 +36,8 @@ import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getSessionUserPermissions } from "@/lib/permissions";
 import {
+  canViewDependents,
+  canViewEeoDemographics,
   canViewImmigrationNumbers,
   canViewIssuedLetterBody,
   canViewPrivateDocuments,
@@ -104,6 +108,10 @@ export default async function EmployeeProfilePage({
       photoUrl: employees.photoUrl,
       linkedInUrl: employees.linkedInUrl,
       twitterUrl: employees.twitterUrl,
+      payGroup: employees.payGroup,
+      flsaExempt: employees.flsaExempt,
+      standardHoursPerWeek: employees.standardHoursPerWeek,
+      timeTrackingEnabled: employees.timeTrackingEnabled,
       githubUrl: employees.githubUrl,
       addressStreet1: employees.addressStreet1,
       addressStreet2: employees.addressStreet2,
@@ -207,6 +215,13 @@ export default async function EmployeeProfilePage({
   const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
   const canEditCompensation = permissions.canEditCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
+  const canSeeEeo = canViewEeoDemographics({
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  });
+  const canSeeDependents = canViewDependents({
+    isViewingSelf,
+    canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+  });
   const canViewTermDetails = canViewTerminationDetails({
     isViewingSelf,
     canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
@@ -378,6 +393,38 @@ export default async function EmployeeProfilePage({
           .orderBy(desc(employeeVisas.expiryDate))
       ).map((row) => redactVisaDocumentNumber({ ...row, documentNumber: null }, false));
 
+  const eeoInfo = canSeeEeo
+    ? await db
+        .select({
+          ethnicity: employees.ethnicity,
+          eeoJobCategory: employees.eeoJobCategory,
+        })
+        .from(employees)
+        .where(eq(employees.id, employeeId))
+        .limit(1)
+        .then((rows) => rows[0] || { ethnicity: null, eeoJobCategory: null })
+    : { ethnicity: null, eeoJobCategory: null };
+
+  const assetRows = await db
+    .select()
+    .from(employeeAssets)
+    .where(eq(employeeAssets.employeeId, employeeId))
+    .orderBy(desc(employeeAssets.assignedDate));
+
+  const dependentRows = canSeeDependents
+    ? await db
+        .select({
+          id: employeeDependents.id,
+          firstName: employeeDependents.firstName,
+          lastName: employeeDependents.lastName,
+          relationship: employeeDependents.relationship,
+          birthDate: employeeDependents.birthDate,
+        })
+        .from(employeeDependents)
+        .where(eq(employeeDependents.employeeId, employeeId))
+        .orderBy(employeeDependents.lastName)
+    : [];
+
   const employeeTeamsList = await db
     .select({ team: teams })
     .from(employeeTeams)
@@ -500,6 +547,8 @@ export default async function EmployeeProfilePage({
               <InfoField label="Citizenship" value={employee.citizenship} />
               {canViewSensitivePersonalInfo && <InfoField label="SIN" value={sensitivePersonalInfo.sin} />}
               {canViewSensitivePersonalInfo && <InfoField label="SSN" value={sensitivePersonalInfo.ssn} />}
+              {canSeeEeo && <InfoField label="Ethnicity" value={eeoInfo.ethnicity} />}
+              {canSeeEeo && <InfoField label="EEO job category" value={eeoInfo.eeoJobCategory} />}
             </CardContent>
           </Card>
 
@@ -602,6 +651,20 @@ export default async function EmployeeProfilePage({
               <InfoField label="Division" value={div[0]?.name} />
               <InfoField label="Location" value={loc[0]?.name} />
               <InfoField label="Job Family" value={family[0]?.name} />
+              <InfoField
+                label="Standard hours / week"
+                value={employee.standardHoursPerWeek}
+              />
+              <InfoField
+                label="Time tracking"
+                value={
+                  employee.timeTrackingEnabled == null
+                    ? null
+                    : employee.timeTrackingEnabled
+                      ? "Enabled"
+                      : "Disabled"
+                }
+              />
               <InfoField label="Job Level" value={level[0]?.code} />
               <InfoField label="Employment Status" value={formatEmploymentStatus(employee.employmentStatus)} />
               <InfoField label="Hire Date" value={formatDate(employee.hireDate)} />
@@ -735,6 +798,24 @@ export default async function EmployeeProfilePage({
 
         {canViewCompensation && (
           <TabsContent value="compensation" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Pay settings</CardTitle>
+              </CardHeader>
+              <CardContent className="grid md:grid-cols-2 gap-4">
+                <InfoField label="Pay group" value={employee.payGroup} />
+                <InfoField
+                  label="FLSA exempt"
+                  value={
+                    employee.flsaExempt == null
+                      ? null
+                      : employee.flsaExempt
+                        ? "Exempt"
+                        : "Non-exempt"
+                  }
+                />
+              </CardContent>
+            </Card>
             {compHistory.length > 0 && (
               <Card>
                 <CardHeader>
@@ -1027,9 +1108,35 @@ export default async function EmployeeProfilePage({
               <CardTitle>Benefits</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground">Benefits enrollment coming soon. Will include policy numbers, member IDs, and dependent information.</p>
+              <p className="text-muted-foreground">Benefits enrollment coming soon. Will include policy numbers and member IDs.</p>
             </CardContent>
           </Card>
+          {canSeeDependents && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Dependents</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {dependentRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No dependents on file</p>
+                ) : (
+                  dependentRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="border rounded-lg p-3 text-sm grid md:grid-cols-2 gap-2"
+                    >
+                      <InfoField
+                        label="Name"
+                        value={[row.firstName, row.lastName].filter(Boolean).join(" ")}
+                      />
+                      <InfoField label="Relationship" value={row.relationship} />
+                      <InfoField label="Birth date" value={formatDate(row.birthDate)} />
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="assets" className="space-y-4">
@@ -1037,8 +1144,23 @@ export default async function EmployeeProfilePage({
             <CardHeader>
               <CardTitle>Assets & Equipment</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">Asset tracking coming soon. Will include company equipment, credit cards, and other assigned assets.</p>
+            <CardContent className="space-y-3">
+              {assetRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No assigned assets</p>
+              ) : (
+                assetRows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="border rounded-lg p-3 text-sm grid md:grid-cols-2 gap-2"
+                  >
+                    <InfoField label="Name" value={row.name} />
+                    <InfoField label="Category" value={row.category} />
+                    <InfoField label="Serial" value={row.serialNumber} />
+                    <InfoField label="Assigned" value={formatDate(row.assignedDate)} />
+                    <InfoField label="Notes" value={row.notes} />
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
         </TabsContent>

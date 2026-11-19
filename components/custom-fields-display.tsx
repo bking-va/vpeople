@@ -56,7 +56,7 @@ export function CustomFieldsDisplay({
     setIsLoading(true);
     try {
       const [fieldsRes, valuesRes] = await Promise.all([
-        fetch("/api/custom-fields"),
+        fetch(`/api/custom-fields?entityId=${entityId}`),
         fetch(`/api/custom-fields/values?entityId=${entityId}&section=${section}`),
       ]);
 
