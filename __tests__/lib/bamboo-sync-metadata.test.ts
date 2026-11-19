@@ -8,6 +8,14 @@ import {
   mapMetaField,
 } from "@/lib/bamboo-sync/map-metadata";
 import {
+  fetchMetadataPayload,
+  mapMetadataPayload,
+} from "@/lib/bamboo-sync/metadata";
+import {
+  BambooHrClient,
+  BambooHrHttpError,
+} from "@/lib/bamboo-sync/client";
+import {
   canViewCustomFieldValue,
   canViewDependents,
   canViewEeoDemographics,
@@ -176,6 +184,51 @@ describe("metadata access rules", () => {
         canViewSensitivePersonalInfo: true,
       })
     ).toBe(true);
+  });
+});
+
+describe("metadata custom field import", () => {
+  test("dedupes meta fields that share a Bamboo alias so upserts do not abort", () => {
+    const mapped = mapMetadataPayload({
+      metaFields: [
+        { alias: "customTeamName", name: "Team", type: "text" },
+        { alias: "customTeamName", name: "Team (subfield)", type: "text" },
+      ],
+      employeeExtras: [],
+      customValues: [],
+      customValueAliasesFetched: [],
+      assets: {},
+      dependents: {},
+      assetsFetched: false,
+      dependentsFetched: false,
+    });
+    expect(mapped.customFields).toHaveLength(1);
+    expect(mapped.customFields[0]).toMatchObject({
+      bambooId: "customTeamName",
+      name: "Team (subfield)",
+    });
+  });
+
+  test("does not mark omitted custom-report fields as fetched", async () => {
+    const client = {
+      fetchMetaFields: async () => [
+        { alias: "customShirtSize", name: "Shirt Size", type: "list" },
+        { alias: "customRestrictedNote", name: "Restricted note", type: "text" },
+      ],
+      fetchCustomReport: async (opts: { title: string; fields: string[] }) => {
+        if (opts.title.includes("extras")) return [];
+        return [{ id: "12", customShirtSize: "M" }];
+      },
+      fetchMetaTables: async () => [],
+      fetchAllTableRows: async () => {
+        throw new BambooHrHttpError("GET", "/employees/all/tables/x", 404);
+      },
+      allowFullTable: () => undefined,
+    } as unknown as BambooHrClient;
+
+    const payload = await fetchMetadataPayload(client, () => undefined);
+    expect(payload.customValueAliasesFetched).toEqual(["customShirtSize"]);
+    expect(payload.customValueAliasesFetched).not.toContain("customRestrictedNote");
   });
 });
 

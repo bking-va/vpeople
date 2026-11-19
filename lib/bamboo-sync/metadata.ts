@@ -138,7 +138,16 @@ export async function fetchMetadataPayload(
       });
     if (!rows) continue;
     customValues.push(...rows);
-    customValueAliasesFetched.push(...chunk);
+    const returnedKeys = new Set<string>();
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      for (const key of Object.keys(row)) returnedKeys.add(key);
+    }
+    // Bamboo can 200 a custom report while omitting fields the API key cannot
+    // read. Only prune aliases that actually came back as keys.
+    for (const alias of chunk) {
+      if (returnedKeys.has(alias)) customValueAliasesFetched.push(alias);
+    }
     log(`custom field value chunks ${Math.min(i + chunk.length, aliases.length)}/${aliases.length}`);
   }
 
@@ -202,10 +211,14 @@ export function mapMetadataPayload(payload: MetadataFetchPayload): {
       if (mapped) dependents.push(mapped);
     }
   }
-  const customFields = payload.metaFields
-    .map((row) => mapMetaField(row))
-    .filter((row): row is MappedCustomFieldWrite => Boolean(row));
-  const fieldsByAlias = new Map(customFields.map((field) => [field.bambooId, field]));
+  const customFieldsByAlias = new Map<string, MappedCustomFieldWrite>();
+  for (const row of payload.metaFields) {
+    const mapped = mapMetaField(row);
+    if (!mapped) continue;
+    customFieldsByAlias.set(mapped.bambooId, mapped);
+  }
+  const customFields = [...customFieldsByAlias.values()];
+  const fieldsByAlias = customFieldsByAlias;
   const customFieldValues: MappedCustomFieldValueWrite[] = [];
   for (const row of payload.customValues) {
     for (const field of fieldsByAlias.values()) {
