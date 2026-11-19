@@ -1,5 +1,6 @@
 import {
   BAMBOO_COMPENSATION_TABLES,
+  isVisibleCompensationTableField,
   mapCompensationTableRow,
   stripForbiddenCompFields,
 } from "@/lib/bamboo-sync/map-comp-tables";
@@ -51,6 +52,17 @@ describe("Bamboo compensation table mapping", () => {
       type: "Signing bonus",
       status: "Single",
     });
+  });
+
+  test("profile display keeps businessUnit and housing allowance keys", () => {
+    expect(isVisibleCompensationTableField("businessUnit")).toBe(true);
+    expect(isVisibleCompensationTableField("customHousingAllowance")).toBe(
+      true
+    );
+    expect(isVisibleCompensationTableField("ssn")).toBe(false);
+    expect(isVisibleCompensationTableField("bankAccount")).toBe(false);
+    expect(isVisibleCompensationTableField("id")).toBe(false);
+    expect(isVisibleCompensationTableField("employeeId")).toBe(false);
   });
 });
 

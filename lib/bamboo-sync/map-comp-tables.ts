@@ -31,6 +31,11 @@ export function compensationTableLabel(alias: string): string {
   );
 }
 
+export function isVisibleCompensationTableField(key: string): boolean {
+  if (key === "id" || key === "employeeId") return false;
+  return !isForbiddenBambooField(key);
+}
+
 export function stripForbiddenCompFields(
   raw: Record<string, unknown>
 ): Record<string, unknown> {

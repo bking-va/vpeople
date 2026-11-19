@@ -51,7 +51,10 @@ import {
 } from "@/lib/authz";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 import Link from "next/link";
-import { compensationTableLabel } from "@/lib/bamboo-sync/map-comp-tables";
+import {
+  compensationTableLabel,
+  isVisibleCompensationTableField,
+} from "@/lib/bamboo-sync/map-comp-tables";
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 import { CompensationEditForm } from "@/components/compensation-edit-form";
@@ -923,11 +926,8 @@ export default async function EmployeeProfilePage({
                       </p>
                       <div className="grid md:grid-cols-2 gap-2 text-sm">
                         {Object.entries(row.rowData ?? {})
-                          .filter(
-                            ([key]) =>
-                              key !== "id" &&
-                              key !== "employeeId" &&
-                              !/ssn|sin|bank|iban|routing|credit/i.test(key)
+                          .filter(([key]) =>
+                            isVisibleCompensationTableField(key)
                           )
                           .map(([key, value]) => (
                             <InfoField
