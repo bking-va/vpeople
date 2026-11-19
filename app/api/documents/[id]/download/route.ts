@@ -3,6 +3,9 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { documents, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getUserPermissions } from "@/lib/permissions";
+import { canViewEmployeeDocument } from "@/lib/document-access";
+import type { AccessLevel } from "@/lib/authz";
 
 export async function GET(
   request: NextRequest,
@@ -44,10 +47,19 @@ export async function GET(
       );
     }
 
-    const isAdmin = employee.accessLevel === "full_admin";
-    const isOwner = employee.id === document.employeeId;
+    const permissions = await getUserPermissions(session.user.email);
+    const allowed = canViewEmployeeDocument({
+      viewerId: employee.id,
+      accessLevel: employee.accessLevel as AccessLevel,
+      canManageUsers: permissions.canManageUsers,
+      document: {
+        employeeId: document.employeeId,
+        restricted: Boolean(document.restricted),
+        containsCompensation: Boolean(document.containsCompensation),
+      },
+    });
 
-    if (!isAdmin && !isOwner) {
+    if (!allowed) {
       return NextResponse.json(
         { error: "You do not have permission to access this document" },
         { status: 403 }

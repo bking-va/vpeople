@@ -1061,6 +1061,37 @@ class MemoryStore implements BambooSyncStore {
     return typeof success?.latestChanged === "string" ? success.latestChanged : null;
   }
 
+  async lastIncompleteKindCheckpoint(kind: string) {
+    const row = [...this.syncRuns]
+      .reverse()
+      .find(
+        (item) =>
+          item.kind === kind &&
+          (item.status === "running" || item.status === "checkpointed")
+      );
+    if (!row) return null;
+    return {
+      id: Number(row.id),
+      checkpoint:
+        row.checkpoint && typeof row.checkpoint === "object"
+          ? (row.checkpoint as Record<string, unknown>)
+          : null,
+      latestChanged: typeof row.latestChanged === "string" ? row.latestChanged : null,
+    };
+  }
+
+  async upsertEmployeeDocumentsBatch() {
+    return 0;
+  }
+
+  async upsertCompanyFilesBatch() {
+    return 0;
+  }
+
+  async listImportedFileBambooIds() {
+    return new Set<string>();
+  }
+
   async pruneImportedRowsNotIn(
     kind: "time_off_requests" | "job_openings" | "education" | "visas" | "candidates",
     keepBambooIds: string[],
@@ -2071,6 +2102,8 @@ describe("CLI args and demo detection", () => {
       incremental: false,
       atsApplications: false,
       skipResumes: false,
+      files: false,
+      skipBlobs: false,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
     });
@@ -2090,6 +2123,24 @@ describe("CLI args and demo detection", () => {
       incremental: true,
       atsApplications: true,
       skipResumes: true,
+      files: false,
+      skipBlobs: false,
+      dbUrlFile: "/tmp/db_url.txt",
+      cacheFile: null,
+    });
+  });
+
+  it("parses --files and --skip-blobs", () => {
+    expect(
+      parseBambooSyncArgs(["--files", "--skip-blobs", "/tmp/db_url.txt"])
+    ).toEqual({
+      dryRun: false,
+      replaceDemo: false,
+      incremental: false,
+      atsApplications: false,
+      skipResumes: false,
+      files: true,
+      skipBlobs: true,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
     });
@@ -2109,6 +2160,8 @@ describe("CLI args and demo detection", () => {
       incremental: false,
       atsApplications: false,
       skipResumes: false,
+      files: false,
+      skipBlobs: false,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: "/tmp/bamboo-sync.bamboo-cache.json",
     });

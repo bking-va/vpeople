@@ -290,6 +290,39 @@ export interface BambooSyncStore {
     latestChanged: string | null;
   } | null>;
   lastSuccessfulAtsCursor(): Promise<string | null>;
+  lastIncompleteKindCheckpoint(kind: string): Promise<{
+    id: number;
+    checkpoint: Record<string, unknown> | null;
+    latestChanged: string | null;
+  } | null>;
+  upsertEmployeeDocumentsBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      title: string;
+      category: "contract" | "tax_form" | "benefits" | "performance" | "policy" | "other" | "letter";
+      bambooCategory: string | null;
+      restricted: boolean;
+      containsCompensation: boolean;
+      fileUrl: string | null;
+      uploadedBy: number;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertCompanyFilesBatch(
+    rows: Array<{
+      bambooId: string;
+      title: string;
+      category: "contract" | "tax_form" | "benefits" | "performance" | "policy" | "other" | "letter";
+      bambooCategory: string | null;
+      restricted: boolean;
+      containsCompensation: boolean;
+      fileUrl: string | null;
+      sizeBytes: number | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  listImportedFileBambooIds(kind: "employee" | "company"): Promise<Set<string>>;
   transaction?<T>(fn: (store: BambooSyncStore) => Promise<T>): Promise<T>;
 }
 

@@ -1081,11 +1081,14 @@ export const documentStatusEnum = pgEnum("document_status", [
 
 export const documents = pgTable("documents", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   employeeId: integer("employee_id")
     .notNull()
     .references(() => employees.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   category: documentCategoryEnum("category").notNull(),
+  bambooCategory: text("bamboo_category"),
+  restricted: boolean("restricted").default(false).notNull(),
   status: documentStatusEnum("status").default("draft").notNull(),
   fileUrl: text("file_url"),
   body: text("body"),
@@ -1098,6 +1101,20 @@ export const documents = pgTable("documents", {
   uploadedBy: integer("uploaded_by")
     .notNull()
     .references(() => employees.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const companyFiles = pgTable("company_files", {
+  id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").notNull().unique(),
+  title: text("title").notNull(),
+  bambooCategory: text("bamboo_category"),
+  category: documentCategoryEnum("category").notNull(),
+  restricted: boolean("restricted").default(false).notNull(),
+  containsCompensation: boolean("contains_compensation").default(false).notNull(),
+  fileUrl: text("file_url"),
+  sizeBytes: integer("size_bytes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

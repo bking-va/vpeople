@@ -10,6 +10,7 @@ import {
   candidateNotes,
   candidateStatusHistory,
   candidates,
+  companyFiles,
   compensationHistory,
   customFieldValues,
   departments,
@@ -1639,6 +1640,166 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
             : null,
         latestChanged: row.latestChanged,
       };
+    },
+
+    async lastIncompleteKindCheckpoint(kind) {
+      const rows = await db
+        .select({
+          id: bambooSyncRuns.id,
+          checkpoint: bambooSyncRuns.checkpoint,
+          latestChanged: bambooSyncRuns.latestChanged,
+        })
+        .from(bambooSyncRuns)
+        .where(
+          and(
+            eq(bambooSyncRuns.kind, kind),
+            or(
+              eq(bambooSyncRuns.status, "running"),
+              eq(bambooSyncRuns.status, "checkpointed")
+            )
+          )
+        )
+        .orderBy(sql`${bambooSyncRuns.id} desc`)
+        .limit(1);
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        checkpoint:
+          row.checkpoint && typeof row.checkpoint === "object"
+            ? row.checkpoint
+            : null,
+        latestChanged: row.latestChanged,
+      };
+    },
+
+    async upsertEmployeeDocumentsBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            CAST(${row.employeeId} AS int),
+            ${row.title},
+            CAST(${row.category} AS document_category),
+            ${row.bambooCategory},
+            CAST(${row.restricted} AS boolean),
+            CAST(${row.containsCompensation} AS boolean),
+            ${row.fileUrl},
+            CAST(${row.uploadedBy} AS int)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO documents (
+              bamboo_id, employee_id, title, category, bamboo_category,
+              restricted, contains_compensation, file_url, status, uploaded_by,
+              created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              CAST(v.employee_id AS int),
+              v.title,
+              CAST(v.category AS document_category),
+              v.bamboo_category,
+              CAST(v.restricted AS boolean),
+              CAST(v.contains_compensation AS boolean),
+              v.file_url,
+              CAST('archived' AS document_status),
+              CAST(v.uploaded_by AS int),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, employee_id, title, category, bamboo_category,
+              restricted, contains_compensation, file_url, uploaded_by
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              title = EXCLUDED.title,
+              category = CAST(EXCLUDED.category AS document_category),
+              bamboo_category = EXCLUDED.bamboo_category,
+              restricted = CAST(EXCLUDED.restricted AS boolean),
+              contains_compensation = CAST(EXCLUDED.contains_compensation AS boolean),
+              file_url = COALESCE(EXCLUDED.file_url, documents.file_url),
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async upsertCompanyFilesBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            ${row.title},
+            CAST(${row.category} AS document_category),
+            ${row.bambooCategory},
+            CAST(${row.restricted} AS boolean),
+            CAST(${row.containsCompensation} AS boolean),
+            ${row.fileUrl},
+            CAST(${row.sizeBytes} AS int)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO company_files (
+              bamboo_id, title, category, bamboo_category, restricted,
+              contains_compensation, file_url, size_bytes, created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              v.title,
+              CAST(v.category AS document_category),
+              v.bamboo_category,
+              CAST(v.restricted AS boolean),
+              CAST(v.contains_compensation AS boolean),
+              v.file_url,
+              CAST(v.size_bytes AS int),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, title, category, bamboo_category, restricted,
+              contains_compensation, file_url, size_bytes
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              title = EXCLUDED.title,
+              category = CAST(EXCLUDED.category AS document_category),
+              bamboo_category = EXCLUDED.bamboo_category,
+              restricted = CAST(EXCLUDED.restricted AS boolean),
+              contains_compensation = CAST(EXCLUDED.contains_compensation AS boolean),
+              file_url = COALESCE(EXCLUDED.file_url, company_files.file_url),
+              size_bytes = COALESCE(CAST(EXCLUDED.size_bytes AS int), company_files.size_bytes),
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
+    async listImportedFileBambooIds(kind) {
+      if (kind === "company") {
+        const rows: Array<{ bambooId: string }> = await db
+          .select({ bambooId: companyFiles.bambooId })
+          .from(companyFiles);
+        return new Set(rows.map((row) => row.bambooId));
+      }
+      const rows: Array<{ bambooId: string | null }> = await db
+        .select({ bambooId: documents.bambooId })
+        .from(documents)
+        .where(isNotNull(documents.bambooId));
+      return new Set(rows.flatMap((row) => (row.bambooId ? [row.bambooId] : [])));
     },
 
     async lastSuccessfulAtsCursor() {
