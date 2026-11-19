@@ -24,6 +24,7 @@ import {
   mapVisaRow,
   timeOffRequestYears,
 } from "@/lib/bamboo-sync/map-extended";
+import { isBambooImportedTimeOff } from "@/lib/time-off-imported";
 import {
   BambooHrClient,
   parseRetryAfterMs,
@@ -334,6 +335,9 @@ describe("BambooHR field mapping", () => {
 
 describe("BambooHR extended dataset mapping", () => {
   it("maps time-off request statuses including canceled/superceded without creating pending approvals", () => {
+    expect(isBambooImportedTimeOff({ bambooId: "88" })).toBe(true);
+    expect(isBambooImportedTimeOff({ bambooId: null })).toBe(false);
+    expect(isBambooImportedTimeOff({})).toBe(false);
     expect(mapTimeOffRequestStatus("requested")).toBe("pending");
     expect(mapTimeOffRequestStatus({ status: "approved" })).toBe("approved");
     expect(mapTimeOffRequestStatus("denied")).toBe("denied");
@@ -412,6 +416,7 @@ describe("BambooHR extended dataset mapping", () => {
         visaType: "TN",
         country: "Canada",
         documentNumber: "VISA-1",
+        issued: "2020-01-01",
         ssn: "111-22-3333",
       },
       "101"
@@ -421,6 +426,7 @@ describe("BambooHR extended dataset mapping", () => {
       visaType: "TN",
       country: "Canada",
       documentNumber: "VISA-1",
+      issuedDate: "2020-01-01",
     });
     expect(visa).not.toHaveProperty("ssn");
     expect(
@@ -1304,19 +1310,15 @@ describe("BambooHR client", () => {
     expect(urls.every((url) => url.includes("/time_off/requests/"))).toBe(true);
   });
 
-  it("paginates ATS jobs with statusGroups=ALL until paginationComplete", async () => {
+  it("fetches ATS jobs once without a page param because Get Job Summaries is unpaginated", async () => {
     const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("page=1")) {
+      if (url.includes("/applicant_tracking/jobs") && url.includes("statusGroups=ALL")) {
         return jsonResponse({
-          jobs: [{ id: 1, title: { label: "One" } }],
-          paginationComplete: false,
-        });
-      }
-      if (url.includes("page=2")) {
-        return jsonResponse({
-          jobs: [{ id: 2, title: { label: "Two" } }],
-          paginationComplete: true,
+          jobs: [
+            { id: 1, title: { label: "One" } },
+            { id: 2, title: { label: "Two" } },
+          ],
         });
       }
       return jsonResponse({}, 404);
@@ -1329,7 +1331,8 @@ describe("BambooHR client", () => {
     const jobs = await client.fetchAtsJobs();
     expect(jobs).toHaveLength(2);
     expect(String(fetchMock.mock.calls[0][0])).toContain("statusGroups=ALL");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("page=");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

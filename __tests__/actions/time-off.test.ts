@@ -91,6 +91,52 @@ describe("Time Off Actions", () => {
       expect(result.error).toContain("permission");
     });
 
+    it("should refuse to approve a Bamboo-imported request", async () => {
+      mockAuth.mockResolvedValue({
+        user: { id: "user-1", role: "admin", employeeId: 100 },
+      } as any);
+
+      mockDb.select = jest
+        .fn()
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            leftJoin: jest.fn().mockReturnValue({
+              where: jest.fn().mockReturnValue({
+                limit: jest.fn().mockResolvedValue([
+                  {
+                    request: {
+                      id: 1,
+                      employeeId: 2,
+                      status: "pending",
+                      policyId: 1,
+                      daysRequested: "5",
+                      bambooId: "tor:99",
+                    },
+                    employee: { id: 2, managerId: 100 },
+                  },
+                ]),
+              }),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            where: jest.fn().mockReturnValue({
+              limit: jest.fn().mockResolvedValue([
+                { id: 100, accessLevel: "full_admin" },
+              ]),
+            }),
+          }),
+        });
+      mockDb.update = jest.fn();
+
+      const result = await approveTimeOffRequest(1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("BambooHR is the system of record");
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
     it("should approve request if user is the manager", async () => {
       mockAuth.mockResolvedValue({
         user: { id: "user-1", role: "employee" },
@@ -196,6 +242,50 @@ describe("Time Off Actions", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("already been processed");
+    });
+
+    it("should refuse to deny a Bamboo-imported request", async () => {
+      mockAuth.mockResolvedValue({
+        user: { id: "user-1", role: "admin", employeeId: 100 },
+      } as any);
+
+      mockDb.select = jest
+        .fn()
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            leftJoin: jest.fn().mockReturnValue({
+              where: jest.fn().mockReturnValue({
+                limit: jest.fn().mockResolvedValue([
+                  {
+                    request: {
+                      id: 1,
+                      employeeId: 2,
+                      status: "pending",
+                      policyId: 1,
+                      daysRequested: "5",
+                      bambooId: "tor:99",
+                    },
+                    employee: { id: 2, managerId: 100 },
+                  },
+                ]),
+              }),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            where: jest.fn().mockReturnValue({
+              limit: jest.fn().mockResolvedValue([
+                { id: 100, accessLevel: "full_admin" },
+              ]),
+            }),
+          }),
+        });
+
+      const result = await denyTimeOffRequest(1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("BambooHR is the system of record");
     });
   });
 });
