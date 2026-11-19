@@ -330,7 +330,10 @@ export function mapVisaRow(
       blankToNull(raw.nationality) ||
       "Unknown",
     documentNumber,
-    issuedDate: blankToNull(raw.issuedDate) || blankToNull(raw.issueDate),
+    issuedDate:
+      blankToNull(raw.issued) ||
+      blankToNull(raw.issuedDate) ||
+      blankToNull(raw.issueDate),
     expiryDate:
       blankToNull(raw.expiryDate) ||
       blankToNull(raw.expirationDate) ||

@@ -9,6 +9,7 @@ import { createAuditLog } from "@/lib/audit";
 import { approveStep, rejectStep, getApprovalRequestForEntity } from "@/lib/approvals";
 import { findConfiguredTimeOffWorkflow } from "@/lib/time-off-workflow";
 import { recordTimeOffUsageAdjustment } from "@/lib/time-off-adjustments";
+import { isBambooImportedTimeOff } from "@/lib/time-off-imported";
 
 export async function approveTimeOffRequest(requestId: number) {
   const session = await auth();
@@ -48,6 +49,13 @@ export async function approveTimeOffRequest(requestId: number) {
     return {
       success: false,
       error: "You do not have permission to approve this request",
+    };
+  }
+
+  if (isBambooImportedTimeOff(request.request)) {
+    return {
+      success: false,
+      error: "BambooHR is the system of record for this request",
     };
   }
 
@@ -237,6 +245,13 @@ export async function denyTimeOffRequest(requestId: number, reason?: string) {
     return {
       success: false,
       error: "You do not have permission to deny this request",
+    };
+  }
+
+  if (isBambooImportedTimeOff(request.request)) {
+    return {
+      success: false,
+      error: "BambooHR is the system of record for this request",
     };
   }
 

@@ -352,6 +352,7 @@ export interface BambooSyncStore {
     afterBambooId?: string | null
   ): Promise<Array<{ id: number; bambooId: string; resumeBambooFileId: string }>>;
   setCandidateResumeBlob(bambooId: string, blobUrl: string): Promise<void>;
+  requeueCandidateDetails(): Promise<number>;
   markCandidateDetailImported(bambooIds: string[]): Promise<void>;
   startSyncRun(run: Record<string, unknown>): Promise<number>;
   updateSyncRun(id: number, run: Record<string, unknown>): Promise<void>;

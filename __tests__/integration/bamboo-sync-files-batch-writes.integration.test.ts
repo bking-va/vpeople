@@ -91,6 +91,8 @@ describe("BambooHR file batched writes (Real Postgres)", () => {
     expect(doc.restricted).toBe(true);
     expect(doc.status).toBe("archived");
     expect(doc.bambooCategory).toBe("I-9");
+    expect((await store.listImportedFileBambooIds("employee")).has(docBamboo)).toBe(false);
+    expect((await store.listImportedFileBambooIds("company")).has(companyBamboo)).toBe(false);
 
     await store.upsertEmployeeDocumentsBatch(
       [
@@ -114,7 +116,27 @@ describe("BambooHR file batched writes (Real Postgres)", () => {
 
     const ids = await store.listImportedFileBambooIds("employee");
     expect(ids.has(docBamboo)).toBe(true);
-    const company = await store.listImportedFileBambooIds("company");
-    expect(company.has(companyBamboo)).toBe(true);
+    expect((await store.listImportedFileBambooIds("company")).has(companyBamboo)).toBe(
+      false
+    );
+
+    await store.upsertCompanyFilesBatch(
+      [
+        {
+          bambooId: companyBamboo,
+          title: "handbook.pdf",
+          category: "policy",
+          bambooCategory: "Policies",
+          restricted: false,
+          containsCompensation: false,
+          fileUrl: "https://blob.vercel-storage.com/private/handbook",
+          sizeBytes: 2048,
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    expect((await store.listImportedFileBambooIds("company")).has(companyBamboo)).toBe(
+      true
+    );
   });
 });
