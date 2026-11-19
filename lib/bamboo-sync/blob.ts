@@ -15,11 +15,13 @@ const SAFE_NAME = /[^A-Za-z0-9._-]+/g;
 export const BAMBOO_BLOB_UNAVAILABLE = "bamboo:unavailable";
 export const BAMBOO_RESUME_UNAVAILABLE = BAMBOO_BLOB_UNAVAILABLE;
 
-export function isStoredBlobUrl(url: string | null | undefined): boolean {
+export function isStoredBlobUrl(url: string | null | undefined): url is string {
   return Boolean(url && /^https:\/\//i.test(url));
 }
 
-export function isStoredResumeBlobUrl(url: string | null | undefined): boolean {
+export function isStoredResumeBlobUrl(
+  url: string | null | undefined
+): url is string {
   return isStoredBlobUrl(url);
 }
 
