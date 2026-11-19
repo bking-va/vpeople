@@ -3,8 +3,9 @@ import { constants as fsConstants } from "node:fs";
 import { open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { BambooEmployeeRecord, BambooSyncMode } from "./types";
+import type { ExtendedFetchPayload } from "./extended";
 
-export const BAMBOO_SYNC_CACHE_VERSION = 1;
+export const BAMBOO_SYNC_CACHE_VERSION = 2;
 
 export type BambooSyncTableSnapshot = {
   jobInfo: Record<string, Array<Record<string, unknown>>>;
@@ -23,6 +24,7 @@ export type BambooSyncSnapshot = {
   tables: BambooSyncTableSnapshot;
   timeOffTypes: Array<{ id: string; name: string; units?: string }>;
   balances: Record<string, Array<{ name: string; balance: string }>>;
+  extended: ExtendedFetchPayload;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,7 +58,8 @@ export function parseBambooSyncSnapshot(value: unknown): BambooSyncSnapshot {
   if (
     !Array.isArray(value.employees) ||
     !isRecord(value.tables) ||
-    !isRecord(value.balances)
+    !isRecord(value.balances) ||
+    !isRecord(value.extended)
   ) {
     throw new Error("Bamboo sync cache is invalid or unsupported");
   }

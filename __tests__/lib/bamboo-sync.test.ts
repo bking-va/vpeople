@@ -14,6 +14,17 @@ import {
   resolveLoginEmails,
 } from "@/lib/bamboo-sync/map";
 import {
+  BAMBOO_TIME_OFF_REQUEST_END_YEAR,
+  BAMBOO_TIME_OFF_REQUEST_START_YEAR,
+  mapAtsJob,
+  mapEducationRow,
+  mapJobOpeningStatus,
+  mapTimeOffRequest,
+  mapTimeOffRequestStatus,
+  mapVisaRow,
+  timeOffRequestYears,
+} from "@/lib/bamboo-sync/map-extended";
+import {
   BambooHrClient,
   parseRetryAfterMs,
 } from "@/lib/bamboo-sync/client";
@@ -321,6 +332,115 @@ describe("BambooHR field mapping", () => {
   });
 });
 
+describe("BambooHR extended dataset mapping", () => {
+  it("maps time-off request statuses including canceled/superceded without creating pending approvals", () => {
+    expect(mapTimeOffRequestStatus("requested")).toBe("pending");
+    expect(mapTimeOffRequestStatus({ status: "approved" })).toBe("approved");
+    expect(mapTimeOffRequestStatus("denied")).toBe("denied");
+    expect(mapTimeOffRequestStatus("canceled")).toBe("cancelled");
+    expect(mapTimeOffRequestStatus("superceded")).toBe("cancelled");
+    const mapped = mapTimeOffRequest({
+      id: "88",
+      employeeId: "101",
+      start: "2024-01-02",
+      end: "2024-01-03",
+      status: { status: "approved", lastChanged: "2024-01-01" },
+      type: { id: "7", name: "Vacation" },
+      amount: { unit: "hours", amount: "16" },
+      notes: { employee: "Trip", manager: "ok" },
+      created: "2024-01-01",
+    });
+    expect(mapped).toMatchObject({
+      bambooId: "88",
+      employeeBambooId: "101",
+      typeName: "Vacation",
+      daysRequested: "2.00",
+      status: "approved",
+      notes: "Trip",
+      reviewNotes: "ok",
+    });
+  });
+
+  it("maps ATS job statuses from the 117-status list onto job_opening_status", () => {
+    const statuses = new Map([
+      ["4", { code: 2, name: "Open - Engineering" }],
+      ["9", { code: 5, name: "Cancelled - Budget" }],
+    ]);
+    expect(mapJobOpeningStatus({ id: "4", label: "Open - Engineering" }, statuses)).toBe(
+      "open"
+    );
+    expect(mapJobOpeningStatus({ id: "9", label: "Cancelled - Budget" }, statuses)).toBe(
+      "canceled"
+    );
+    expect(mapJobOpeningStatus({ label: "On Hold" })).toBe("on_hold");
+    const job = mapAtsJob(
+      {
+        id: 12,
+        title: { label: "Staff Engineer" },
+        department: { label: "Technology" },
+        location: { label: "Saskatoon HQ" },
+        hiringLead: { employeeId: 100 },
+        status: { id: 4, label: "Open - Engineering", code: 2 },
+        postedDate: "2024-02-01",
+      },
+      statuses
+    );
+    expect(job).toMatchObject({
+      bambooId: "12",
+      title: "Staff Engineer",
+      departmentName: "Technology",
+      hiringLeadBambooId: "100",
+      status: "open",
+      bambooStatusLabel: "Open - Engineering",
+    });
+  });
+
+  it("maps education and visas and drops bank-like visa fields", () => {
+    const education = mapEducationRow(
+      { id: "3", college: "USask", degree: "BSc", major: "Computer Science" },
+      "101"
+    );
+    expect(education).toMatchObject({
+      bambooId: "edu:3",
+      employeeBambooId: "101",
+      institution: "USask",
+      fieldOfStudy: "Computer Science",
+    });
+    const visa = mapVisaRow(
+      {
+        id: "9",
+        visaType: "TN",
+        country: "Canada",
+        documentNumber: "VISA-1",
+        ssn: "111-22-3333",
+      },
+      "101"
+    );
+    expect(visa).toMatchObject({
+      bambooId: "visa:9",
+      visaType: "TN",
+      country: "Canada",
+      documentNumber: "VISA-1",
+    });
+    expect(visa).not.toHaveProperty("ssn");
+    expect(
+      mapVisaRow({ id: "10", visaType: "H-1B", documentNumber: "ssn-secret" }, "101")
+        ?.documentNumber
+    ).toBeNull();
+  });
+
+  it("uses 2020-2027 for full time-off request years and a recent window for incremental", () => {
+    expect(timeOffRequestYears("full", new Date("2026-11-19T00:00:00Z"))).toEqual(
+      [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027]
+    );
+    expect(BAMBOO_TIME_OFF_REQUEST_START_YEAR).toBe(2020);
+    expect(BAMBOO_TIME_OFF_REQUEST_END_YEAR).toBe(2027);
+    expect(timeOffRequestYears("incremental", new Date("2026-11-19T00:00:00Z"))).toEqual(
+      [2025, 2026, 2027]
+    );
+  });
+});
+
 describe("Brendan identity", () => {
   it("recognizes the real Bamboo work email and the demo seed email", () => {
     expect(isBrendanWorkEmail("bking@vendasta.com")).toBe(true);
@@ -360,6 +480,11 @@ class MemoryStore implements BambooSyncStore {
     reason: string;
   }> = [];
   syncRuns: Array<Record<string, unknown>> = [];
+  timeOffRequests: Array<Record<string, unknown>> = [];
+  jobOpenings: Array<Record<string, unknown>> = [];
+  education: Array<Record<string, unknown>> = [];
+  visas: Array<Record<string, unknown>> = [];
+  approvalRequests: Array<Record<string, unknown>> = [];
   writes = 0;
   nextId = 1;
   webhookCalls = 0;
@@ -727,6 +852,98 @@ class MemoryStore implements BambooSyncStore {
     }
   }
 
+  async upsertTimeOffRequestsBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.timeOffRequests.find((item) => item.bambooId === bambooId);
+      const next = { ...row, workflowId: null };
+      if (existing) Object.assign(existing, next);
+      else this.timeOffRequests.push(next);
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async upsertJobOpeningsBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.jobOpenings.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else this.jobOpenings.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async upsertEducationBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.education.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else this.education.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async upsertVisasBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.visas.find((item) => item.bambooId === bambooId);
+      if (existing) Object.assign(existing, row);
+      else this.visas.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
+  async pruneImportedRowsNotIn(
+    kind: "time_off_requests" | "job_openings" | "education" | "visas",
+    keepBambooIds: string[],
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    const keep = new Set(keepBambooIds);
+    const collection =
+      kind === "time_off_requests"
+        ? this.timeOffRequests
+        : kind === "job_openings"
+          ? this.jobOpenings
+          : kind === "education"
+            ? this.education
+            : this.visas;
+    const next = collection.filter((row) => keep.has(String(row.bambooId)));
+    const removed = collection.length - next.length;
+    collection.length = 0;
+    collection.push(...next);
+    progress?.onProgress?.(keepBambooIds.length, keepBambooIds.length);
+    if (removed > 0) this.writes += 1;
+    return removed;
+  }
+
   async transaction<T>(fn: (store: BambooSyncStore) => Promise<T>): Promise<T> {
     return fn(this);
   }
@@ -754,7 +971,13 @@ function mockBambooFetch(handlers: {
   tables?: Record<string, unknown>;
   tableStatus?: Record<string, number>;
   timeOffTypes?: unknown;
+  timeOffPolicies?: unknown;
+  timeOffRequests?: unknown;
   balances?: Record<string, unknown>;
+  atsStatuses?: unknown;
+  atsJobs?: unknown;
+  metaTables?: unknown;
+  allTables?: Record<string, unknown>;
 }): jest.Mock {
   return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -771,6 +994,10 @@ function mockBambooFetch(handlers: {
     if (url.includes("/employees/directory")) {
       return jsonResponse(handlers.directory ?? { employees: [] });
     }
+    if (url.includes("/employees/all/tables/")) {
+      const table = url.split("/tables/")[1]?.split("?")[0] ?? "";
+      return jsonResponse(handlers.allTables?.[table] ?? {});
+    }
     if (url.includes("/employees/changed/tables/")) {
       const table = url.split("/tables/")[1]?.split("?")[0] ?? "";
       const status = handlers.tableStatus?.[table];
@@ -784,12 +1011,34 @@ function mockBambooFetch(handlers: {
         handlers.changed ?? { latest: "2026-01-01T00:00:00Z", employees: {} }
       );
     }
-    if (url.includes("/meta/time_off/types") || url.includes("/time_off/types")) {
+    if (url.includes("/time_off/types") && !url.includes("/meta/time_off/types")) {
+      return jsonResponse({ error: "not found" }, 404);
+    }
+    if (url.includes("/meta/time_off/types")) {
       return jsonResponse(handlers.timeOffTypes ?? { timeOffTypes: [] });
+    }
+    if (url.includes("/meta/time_off/policies")) {
+      return jsonResponse(handlers.timeOffPolicies ?? { timeOffPolicies: [] });
+    }
+    if (url.includes("/time_off/requests")) {
+      return jsonResponse(handlers.timeOffRequests ?? []);
     }
     if (url.includes("/time_off/calculator") || url.includes("/time_off/balances")) {
       const id = url.match(/employees\/(\d+)\//)?.[1] ?? "0";
       return jsonResponse(handlers.balances?.[id] ?? []);
+    }
+    if (url.includes("/applicant_tracking/statuses")) {
+      return jsonResponse(
+        handlers.atsStatuses ?? { jobOpeningStatuses: [], applicationStatuses: [] }
+      );
+    }
+    if (url.includes("/applicant_tracking/jobs")) {
+      return jsonResponse(
+        handlers.atsJobs ?? { jobs: [], paginationComplete: true }
+      );
+    }
+    if (url.includes("/meta/tables")) {
+      return jsonResponse(handlers.metaTables ?? { tables: [] });
     }
     if (/\/employees\/\d+/.test(url) && method === "GET") {
       const id = url.match(/\/employees\/(\d+)/)?.[1] ?? "0";
@@ -869,6 +1118,76 @@ describe("BambooHR client", () => {
     expect(fetchMock.mock.calls.map((call) => String(call[0])).join("\n")).not.toContain(
       "?x=1"
     );
+  });
+
+  it("reads time-off types and policies from /meta and never from /time_off/types", async () => {
+    const fetchMock = mockBambooFetch({
+      timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation", units: "days" }] },
+      timeOffPolicies: { timeOffPolicies: [{ id: "9", name: "FT Vacation", timeOffTypeId: "1" }] },
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    await client.fetchTimeOffTypes();
+    await client.fetchTimeOffPolicies();
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls.some((url) => url.includes("/meta/time_off/types"))).toBe(true);
+    expect(urls.some((url) => url.includes("/meta/time_off/policies"))).toBe(true);
+    expect(
+      urls.some((url) => url.includes("/time_off/types") && !url.includes("/meta/"))
+    ).toBe(false);
+  });
+
+  it("fetches time-off requests one calendar year at a time", async () => {
+    const fetchMock = mockBambooFetch({
+      timeOffRequests: [{ id: "1", employeeId: "101" }],
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    await client.fetchTimeOffRequestsForYears([2020, 2021]);
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("start=2020-01-01"),
+        expect.stringContaining("end=2020-12-31"),
+        expect.stringContaining("start=2021-01-01"),
+        expect.stringContaining("end=2021-12-31"),
+      ])
+    );
+    expect(urls.every((url) => url.includes("/time_off/requests/"))).toBe(true);
+  });
+
+  it("paginates ATS jobs with statusGroups=ALL until paginationComplete", async () => {
+    const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("page=1")) {
+        return jsonResponse({
+          jobs: [{ id: 1, title: { label: "One" } }],
+          paginationComplete: false,
+        });
+      }
+      if (url.includes("page=2")) {
+        return jsonResponse({
+          jobs: [{ id: 2, title: { label: "Two" } }],
+          paginationComplete: true,
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: fetchMock,
+    });
+    const jobs = await client.fetchAtsJobs();
+    expect(jobs).toHaveLength(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("statusGroups=ALL");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1105,6 +1424,91 @@ describe("runBambooSync", () => {
   it("does not fire webhooks or emails while importing", async () => {
     const store = new MemoryStore();
     await runBambooSync({ client: clientFor([ceo]), store, mode: "full" });
+    expect(store.webhookCalls).toBe(0);
+    expect(store.emailsSent).toBe(0);
+  });
+
+  it("imports historical time-off, jobs, education, and visas without approvals or email", async () => {
+    const store = new MemoryStore();
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockBambooFetch({
+        report: { employees: [ceo, report] },
+        timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation", units: "days" }] },
+        timeOffPolicies: {
+          timeOffPolicies: [{ id: "4", name: "FT Vacation", timeOffTypeId: "1" }],
+        },
+        timeOffRequests: [
+          {
+            id: "501",
+            employeeId: "101",
+            start: "2024-06-03",
+            end: "2024-06-04",
+            status: { status: "approved", lastChanged: "2024-06-01" },
+            type: { id: "1", name: "Vacation" },
+            amount: { unit: "days", amount: "2" },
+            notes: { employee: "Holiday" },
+          },
+          {
+            id: "502",
+            employeeId: "101",
+            start: "2026-12-01",
+            end: "2026-12-02",
+            status: { status: "requested" },
+            type: { id: "1", name: "Vacation" },
+            amount: { unit: "days", amount: "2" },
+          },
+        ],
+        atsStatuses: {
+          jobOpeningStatuses: [{ id: "4", name: "Open", code: 2 }],
+        },
+        atsJobs: {
+          paginationComplete: true,
+          jobs: [
+            {
+              id: 77,
+              title: { label: "Platform Engineer" },
+              department: { label: "Technology" },
+              hiringLead: { employeeId: 100 },
+              status: { id: "4", label: "Open", code: 2 },
+              postedDate: "2024-01-15",
+            },
+          ],
+        },
+        metaTables: { tables: [{ alias: "education" }, { alias: "visas" }] },
+        allTables: {
+          education: {
+            "101": [{ id: "3", college: "USask", degree: "BSc", major: "CS" }],
+          },
+          visas: {
+            "101": [{ id: "9", visaType: "TN", country: "Canada", documentNumber: "TN-1" }],
+          },
+        },
+      }),
+    });
+    const result = await runBambooSync({ client, store, mode: "full" });
+    expect(result.status).toBe("success");
+    expect(result.datasetCounts).toEqual({
+      timeOffRequests: 2,
+      jobOpenings: 1,
+      education: 1,
+      visas: 1,
+    });
+    expect(store.timeOffRequests).toHaveLength(2);
+    expect(store.timeOffRequests.every((row) => row.workflowId == null)).toBe(true);
+    expect(store.timeOffRequests.map((row) => row.status).sort()).toEqual([
+      "approved",
+      "pending",
+    ]);
+    expect(store.jobOpenings[0]).toMatchObject({
+      bambooId: "77",
+      title: "Platform Engineer",
+      status: "open",
+    });
+    expect(store.education[0]).toMatchObject({ institution: "USask" });
+    expect(store.visas[0]).toMatchObject({ visaType: "TN", country: "Canada" });
+    expect(store.approvalRequests).toHaveLength(0);
     expect(store.webhookCalls).toBe(0);
     expect(store.emailsSent).toBe(0);
   });
@@ -1868,7 +2272,7 @@ describe("BambooHR fast import", () => {
       `bamboo-forged-${process.pid}-${Date.now()}.json`
     );
     const forged: BambooSyncSnapshot = {
-      version: 1,
+      version: 2,
       mode: "full",
       fetchedAt: "2026-01-01T00:00:00Z",
       employees: [
@@ -1889,6 +2293,14 @@ describe("BambooHR fast import", () => {
       },
       timeOffTypes: [],
       balances: {},
+      extended: {
+        timeOffPolicies: [],
+        timeOffRequests: [],
+        atsStatuses: [],
+        atsJobs: [],
+        education: {},
+        visas: {},
+      },
     };
     await writeFile(cachePath, JSON.stringify(forged), { mode: 0o666 });
     await chmod(cachePath, 0o666);
@@ -1923,7 +2335,7 @@ describe("BambooHR fast import", () => {
     const cacheDir = await mkdtemp(path.join(os.tmpdir(), "bamboo-sync-cache-"));
     await chmod(cacheDir, 0o700);
     const snapshot: BambooSyncSnapshot = {
-      version: 1,
+      version: 2,
       mode: "full",
       fetchedAt: "2026-01-01T00:00:00Z",
       employees: [
@@ -1943,6 +2355,14 @@ describe("BambooHR fast import", () => {
       },
       timeOffTypes: [],
       balances: {},
+      extended: {
+        timeOffPolicies: [],
+        timeOffRequests: [],
+        atsStatuses: [],
+        atsJobs: [],
+        education: {},
+        visas: {},
+      },
     };
     try {
       const writablePath = path.join(cacheDir, "writable.json");
@@ -2061,6 +2481,10 @@ function createRecordingDb() {
     compensation_history: [],
     emergency_contacts: [],
     bamboo_sync_runs: [],
+    time_off_requests: [],
+    job_openings: [],
+    employee_education: [],
+    employee_visas: [],
   };
 
   function tableName(table: unknown): string {
@@ -2345,5 +2769,105 @@ describe("BambooHR batched writes", () => {
     await store.upsertEmployeesBatch(rows);
     expect(recorded.insertSizes("employees")).toEqual([500, 500, 500, 500, 409]);
     expect(recorded.roundTrips()).toBeLessThan(12);
+  });
+
+  it("upserts time-off requests with explicit casts and never sets workflow_id", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    await store.upsertTimeOffRequestsBatch(
+      [
+        {
+          bambooId: "501",
+          employeeId: 1,
+          policyId: 2,
+          startDate: "2024-06-03",
+          endDate: "2024-06-04",
+          daysRequested: "2.00",
+          status: "approved",
+          notes: "Holiday",
+          reviewNotes: null,
+          reviewedAt: "2024-06-01",
+          createdAt: "2024-06-01",
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    const sqlText = recorded.calls
+      .filter((call) => call.op === "execute")
+      .map((call) => call.sql)
+      .join("\n");
+    expect(sqlText).toContain("CAST(");
+    expect(sqlText).toContain("AS date");
+    expect(sqlText).toContain("AS time_off_request_status");
+    expect(sqlText).toContain("AS numeric");
+    expect(sqlText).toContain("CAST(NULL AS int)");
+    expect(sqlText).toContain("workflow_id = NULL");
+    expect(sqlText).toContain("ON CONFLICT");
+  });
+
+  it("upserts job openings, education, and visas with explicit casts", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    await store.upsertJobOpeningsBatch(
+      [
+        {
+          bambooId: "77",
+          title: "Engineer",
+          departmentId: 1,
+          locationId: 2,
+          hiringLeadId: 3,
+          status: "open",
+          bambooStatusId: "4",
+          bambooStatusLabel: "Open",
+          employmentType: "full_time",
+          description: null,
+          requirements: null,
+          openDate: "2024-01-15",
+          closeDate: null,
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    await store.upsertEducationBatch(
+      [
+        {
+          bambooId: "edu:3",
+          employeeId: 1,
+          institution: "USask",
+          degree: "BSc",
+          fieldOfStudy: "CS",
+          startDate: "2010-09-01",
+          endDate: "2014-05-01",
+          notes: null,
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    await store.upsertVisasBatch(
+      [
+        {
+          bambooId: "visa:9",
+          employeeId: 1,
+          visaType: "TN",
+          country: "Canada",
+          documentNumber: "TN-1",
+          issuedDate: "2020-01-01",
+          expiryDate: "2026-01-01",
+          status: "active",
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    const sqlText = recorded.calls
+      .filter((call) => call.op === "execute")
+      .map((call) => call.sql)
+      .join("\n");
+    expect(sqlText).toContain("AS job_opening_status");
+    expect(sqlText).toContain("CAST(v.open_date AS date)");
+    expect(sqlText).toContain("employee_education");
+    expect(sqlText).toContain("employee_visas");
+    expect(sqlText).toContain("CAST(v.start_date AS date)");
+    expect(sqlText).toContain("CAST(v.issued_date AS date)");
+    expect(sqlText).toContain("ON CONFLICT");
   });
 });

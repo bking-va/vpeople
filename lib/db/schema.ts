@@ -415,6 +415,7 @@ export const equityGrants = pgTable("equity_grants", {
 
 export const timeOffPolicies = pgTable("time_off_policies", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   name: text("name").notNull(),
   policyType: text("policy_type").notNull(),
   country: text("country"),
@@ -460,6 +461,7 @@ export const timeOffBalancesRelations = relations(
 
 export const timeOffRequests = pgTable("time_off_requests", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   employeeId: integer("employee_id")
     .notNull()
     .references(() => employees.id, { onDelete: "cascade" }),
@@ -604,11 +606,14 @@ export const candidateSourceEnum = pgEnum("candidate_source", [
 
 export const jobOpenings = pgTable("job_openings", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   title: text("title").notNull(),
   departmentId: integer("department_id").references(() => departments.id),
   locationId: integer("location_id").references(() => locations.id),
   hiringLeadId: integer("hiring_lead_id").references(() => employees.id),
   status: jobOpeningStatusEnum("status").default("draft").notNull(),
+  bambooStatusId: text("bamboo_status_id"),
+  bambooStatusLabel: text("bamboo_status_label"),
   employmentType: text("employment_type").notNull(), // full_time, part_time, contractor
   description: text("description"),
   requirements: text("requirements"),
@@ -936,6 +941,7 @@ export const timeOffAccrualRuns = pgTable(
 
 export const employeeEducation = pgTable("employee_education", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   employeeId: integer("employee_id")
     .notNull()
     .references(() => employees.id, { onDelete: "cascade" }),
@@ -951,6 +957,7 @@ export const employeeEducation = pgTable("employee_education", {
 
 export const employeeVisas = pgTable("employee_visas", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   employeeId: integer("employee_id")
     .notNull()
     .references(() => employees.id, { onDelete: "cascade" }),
@@ -1211,6 +1218,7 @@ export const bambooSyncRuns = pgTable("bamboo_sync_runs", {
   demoRemoved: integer("demo_removed").default(0).notNull(),
   latestChanged: text("latest_changed"),
   unmappedFields: jsonb("unmapped_fields").$type<string[]>(),
+  datasetCounts: jsonb("dataset_counts").$type<Record<string, number>>(),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
