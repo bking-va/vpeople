@@ -15,8 +15,28 @@ const SAFE_NAME = /[^A-Za-z0-9._-]+/g;
 export const BAMBOO_BLOB_UNAVAILABLE = "bamboo:unavailable";
 export const BAMBOO_RESUME_UNAVAILABLE = BAMBOO_BLOB_UNAVAILABLE;
 
+function isVercelBlobHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === "blob.vercel-storage.com" ||
+    host.endsWith(".blob.vercel-storage.com")
+  );
+}
+
 export function isStoredBlobUrl(url: string | null | undefined): url is string {
-  return Boolean(url && /^https:\/\//i.test(url));
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.port === "" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      isVercelBlobHostname(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function isStoredResumeBlobUrl(

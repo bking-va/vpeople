@@ -8,8 +8,11 @@ import { canViewEmployeeDocument } from "@/lib/document-access";
 import { isStoredBlobUrl } from "@/lib/bamboo-sync/blob";
 import type { AccessLevel } from "@/lib/authz";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
@@ -19,7 +22,10 @@ export async function GET(
 
   try {
     const { id: idStr } = await params;
-    const id = parseInt(idStr);
+    const id = Number(idStr);
+    if (!Number.isInteger(id) || id < 1) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
 
     const [document] = await db
       .select()
@@ -76,10 +82,17 @@ export async function GET(
       );
     }
 
-    // Fetch blob with server-side token and stream to client
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!token) {
+      return NextResponse.json(
+        { error: "Document file not available" },
+        { status: 404 }
+      );
+    }
+
     const blobResponse = await fetch(fileUrl, {
       headers: {
-        Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -91,11 +104,9 @@ export async function GET(
       );
     }
 
-    // Get filename from document or blob URL
-    const filename = document.title || "download";
+    const filename = (document.title || "download").replace(/["\\\r\n]+/g, "_");
     const contentType = blobResponse.headers.get("content-type") || "application/octet-stream";
 
-    // Stream response with proper headers
     return new NextResponse(blobResponse.body, {
       headers: {
         "Content-Type": contentType,
@@ -103,11 +114,8 @@ export async function GET(
         "Cache-Control": "private, max-age=0",
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Document download failed:", error);
-    return NextResponse.json(
-      { error: "Download failed", message: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Download failed" }, { status: 500 });
   }
 }
