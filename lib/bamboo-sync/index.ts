@@ -25,7 +25,14 @@ export {
   parsePayRate,
   resolveLoginEmails,
 } from "./map";
-export { createBambooSyncStore } from "./store";
+export { createBambooSyncStore, applyBambooWriteGuards } from "./store";
+export {
+  BAMBOO_WRITE_CHUNK_SIZE,
+  BAMBOO_STATEMENT_TIMEOUT,
+  BAMBOO_IDLE_IN_TX_TIMEOUT,
+  BAMBOO_LOCK_TIMEOUT,
+  chunkRows,
+} from "./chunks";
 export { formatSyncSummary, runBambooSync } from "./sync";
 export type { BambooSyncStore } from "./sync";
 export type { BambooSyncResult } from "./types";

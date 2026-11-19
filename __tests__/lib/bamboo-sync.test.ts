@@ -29,6 +29,18 @@ import os from "node:os";
 import path from "node:path";
 import { isDemoEmployee } from "@/lib/bamboo-sync/demo";
 import { runBambooSync, type BambooSyncStore } from "@/lib/bamboo-sync/sync";
+import {
+  applyBambooWriteGuards,
+  createBambooSyncStore,
+} from "@/lib/bamboo-sync/store";
+import {
+  BAMBOO_IDLE_IN_TX_TIMEOUT,
+  BAMBOO_LOCK_TIMEOUT,
+  BAMBOO_STATEMENT_TIMEOUT,
+  BAMBOO_WRITE_CHUNK_SIZE,
+  chunkRows,
+} from "@/lib/bamboo-sync/chunks";
+import { getTableName } from "drizzle-orm";
 import type {
   BambooEmployeeRecord,
   MappedEmployee,
@@ -563,6 +575,156 @@ class MemoryStore implements BambooSyncStore {
       .reverse()
       .find((run) => run.status === "success" && run.latestChanged);
     return typeof success?.latestChanged === "string" ? success.latestChanged : null;
+  }
+
+  async upsertOrgUnits(
+    kind: "department" | "division" | "location" | "jobTitle",
+    names: string[]
+  ): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    for (const name of names) {
+      const id = await this.upsertOrgUnit(kind, name);
+      if (id != null) map.set(name.trim().toLowerCase(), id);
+    }
+    return map;
+  }
+
+  async upsertEmployeesBatch(
+    rows: Array<{
+      bambooId: string;
+      employee: MappedEmployee;
+      departmentId: number | null;
+      divisionId: number | null;
+      locationId: number | null;
+    }>,
+    progress?: { chunkSize?: number; onProgress?: (done: number, total: number) => void }
+  ): Promise<{
+    idByBambooId: Map<string, number>;
+    created: number;
+    updated: number;
+  }> {
+    const idByBambooId = new Map<string, number>();
+    let created = 0;
+    let updated = 0;
+    let done = 0;
+    for (const row of rows) {
+      const result = await this.upsertEmployee(row.bambooId, row.employee);
+      idByBambooId.set(row.bambooId, result.id);
+      if (result.created) created += 1;
+      else updated += 1;
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    if (rows.length === 0) progress?.onProgress?.(0, 0);
+    return { idByBambooId, created, updated };
+  }
+
+  async setManagersBatch(
+    links: Array<{ employeeId: number; managerId: number | null }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const link of links) {
+      await this.setManager(link.employeeId, link.managerId);
+      done += 1;
+      progress?.onProgress?.(done, links.length);
+    }
+  }
+
+  async setUnresolvedSupervisorsBatch(
+    links: Array<{ employeeId: number; supervisorBambooId: string | null }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const link of links) {
+      await this.setUnresolvedSupervisor(link.employeeId, link.supervisorBambooId);
+      done += 1;
+      progress?.onProgress?.(done, links.length);
+    }
+  }
+
+  async markTerminatedBatch(
+    bambooIds: string[],
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const bambooId of bambooIds) {
+      await this.markTerminated(bambooId);
+      done += 1;
+      progress?.onProgress?.(done, bambooIds.length);
+    }
+  }
+
+  async replaceJobHistoryMany(
+    replacements: Array<{ employeeId: number; rows: Array<Record<string, unknown>> }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const item of replacements) {
+      await this.replaceJobHistory(item.employeeId, item.rows);
+      done += 1;
+      progress?.onProgress?.(done, replacements.length);
+    }
+  }
+
+  async replaceEmploymentStatusHistoryMany(
+    replacements: Array<{ employeeId: number; rows: Array<Record<string, unknown>> }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const item of replacements) {
+      await this.replaceEmploymentStatusHistory(item.employeeId, item.rows);
+      done += 1;
+      progress?.onProgress?.(done, replacements.length);
+    }
+  }
+
+  async replaceCompensationHistoryMany(
+    replacements: Array<{ employeeId: number; rows: Array<Record<string, unknown>> }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const item of replacements) {
+      await this.replaceCompensationHistory(item.employeeId, item.rows);
+      done += 1;
+      progress?.onProgress?.(done, replacements.length);
+    }
+  }
+
+  async replaceEmergencyContactsMany(
+    replacements: Array<{ employeeId: number; rows: Array<Record<string, unknown>> }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const item of replacements) {
+      await this.replaceEmergencyContacts(item.employeeId, item.rows);
+      done += 1;
+      progress?.onProgress?.(done, replacements.length);
+    }
+  }
+
+  async upsertTimeOffPoliciesBatch(
+    policies: Array<{ name: string; policyType: string }>
+  ): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    for (const policy of policies) {
+      const id = await this.upsertTimeOffPolicy(policy.name, policy.policyType);
+      map.set(policy.name.toLowerCase(), id);
+      map.set(policy.name, id);
+    }
+    return map;
+  }
+
+  async upsertTimeOffBalancesBatch(
+    rows: Array<{ employeeId: number; policyId: number; sourceBalance: string }>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<void> {
+    let done = 0;
+    for (const row of rows) {
+      await this.upsertTimeOffBalance(row.employeeId, row.policyId, row.sourceBalance);
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
   }
 
   async transaction<T>(fn: (store: BambooSyncStore) => Promise<T>): Promise<T> {
@@ -1801,5 +1963,387 @@ describe("BambooHR fast import", () => {
     } finally {
       await rm(cacheDir, { recursive: true, force: true });
     }
+  });
+
+  it("logs write-phase table progress without PII", async () => {
+    const logs: string[] = [];
+    const employees = Array.from({ length: 6 }, (_, index) =>
+      bambooEmployee({
+        id: String(index + 1),
+        firstName: "Secret",
+        lastName: "Name",
+        workEmail: `secret${index + 1}@vendasta.com`,
+        address1: "9 Secret Lane",
+        ssn: "111-22-3333",
+      })
+    );
+    await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        fetch: mockBambooFetch({
+          report: { employees },
+          tables: { jobInfo: {}, employmentStatus: {}, compensation: {} },
+          timeOffTypes: { timeOffTypes: [{ id: "1", name: "Vacation" }] },
+        }),
+      }),
+      store: new MemoryStore(),
+      mode: "full",
+      writeChunkSize: 4,
+      log: (message) => logs.push(message),
+    });
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        "Phase write: starting database transaction",
+        "Phase write: employees",
+        "Phase write: managers",
+        "Phase write: time_off_balances",
+        "Phase write: complete",
+      ])
+    );
+    expect(logs.some((row) => row.startsWith("employees "))).toBe(true);
+    const joined = logs.join("\n");
+    expect(joined).not.toContain("secret1@vendasta.com");
+    expect(joined).not.toContain("111-22-3333");
+    expect(joined).not.toContain("9 Secret Lane");
+    expect(joined).not.toContain("Secret");
+  });
+});
+
+type RecordedCall = {
+  op: string;
+  table?: string;
+  size: number;
+  sql?: string;
+};
+
+function serializeSql(query: unknown): string {
+  const parts: string[] = [];
+  const walk = (value: unknown, depth = 0) => {
+    if (value == null || depth > 12) return;
+    if (typeof value === "string") {
+      parts.push(value);
+      return;
+    }
+    if (typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    const record = value as {
+      sql?: string;
+      queryChunks?: unknown;
+      value?: unknown;
+    };
+    if (typeof record.sql === "string") parts.push(record.sql);
+    walk(record.queryChunks, depth + 1);
+    if (record.value !== undefined && record.value !== record) {
+      walk(record.value, depth + 1);
+    }
+  };
+  walk(query);
+  return parts.join("");
+}
+
+function createRecordingDb() {
+  const calls: RecordedCall[] = [];
+  let nextId = 1;
+  const tables: Record<string, Array<Record<string, unknown>>> = {
+    employees: [],
+    departments: [],
+    divisions: [],
+    locations: [],
+    job_titles: [],
+    time_off_policies: [],
+    time_off_balances: [],
+    job_history: [],
+    employment_status_history: [],
+    compensation_history: [],
+    emergency_contacts: [],
+    bamboo_sync_runs: [],
+  };
+
+  function tableName(table: unknown): string {
+    try {
+      return getTableName(table as never);
+    } catch {
+      return "unknown";
+    }
+  }
+
+  function createQuery(op: string, table?: unknown) {
+    const state: { op: string; table?: string; values?: Array<Record<string, unknown>> } = {
+      op,
+      table: table ? tableName(table) : undefined,
+    };
+    const chain: Record<string, unknown> = {};
+    const self = () => chain;
+    Object.assign(chain, {
+      from(nextTable: unknown) {
+        state.table = tableName(nextTable);
+        return self();
+      },
+      where: self,
+      values(value: Record<string, unknown> | Array<Record<string, unknown>>) {
+        state.values = Array.isArray(value) ? value : [value];
+        return self();
+      },
+      set: self,
+      returning: self,
+      onConflictDoNothing: self,
+      onConflictDoUpdate: self,
+      limit: self,
+      orderBy: self,
+      innerJoin: self,
+      leftJoin: self,
+      then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
+        return Promise.resolve()
+          .then(() => run(state))
+          .then(resolve, reject);
+      },
+    });
+    return chain;
+  }
+
+  function run(state: {
+    op: string;
+    table?: string;
+    values?: Array<Record<string, unknown>>;
+  }) {
+    calls.push({
+      op: state.op,
+      table: state.table,
+      size: state.values?.length ?? 0,
+    });
+    const rows = tables[state.table ?? ""] ?? [];
+    if (state.op === "select") return rows.map((row) => ({ ...row }));
+    if (state.op === "insert") {
+      const created = (state.values ?? []).map((value) => {
+        const row = { id: nextId++, ...value };
+        rows.push(row);
+        return row;
+      });
+      tables[state.table ?? ""] = rows;
+      return created;
+    }
+    if (state.op === "delete") {
+      tables[state.table ?? ""] = [];
+      return [];
+    }
+    return [];
+  }
+
+  type RecordingDb = {
+    select: () => ReturnType<typeof createQuery>;
+    insert: (table: unknown) => ReturnType<typeof createQuery>;
+    update: (table: unknown) => ReturnType<typeof createQuery>;
+    delete: (table: unknown) => ReturnType<typeof createQuery>;
+    execute: (query: unknown) => Promise<unknown[]>;
+    transaction: <T>(fn: (tx: RecordingDb) => Promise<T>) => Promise<T>;
+  };
+  const db: RecordingDb = {
+    select: () => createQuery("select"),
+    insert: (table: unknown) => createQuery("insert", table),
+    update: (table: unknown) => createQuery("update", table),
+    delete: (table: unknown) => createQuery("delete", table),
+    execute: async (query: unknown) => {
+      calls.push({ op: "execute", size: 0, sql: serializeSql(query) });
+      return [];
+    },
+    transaction: async <T>(fn: (tx: RecordingDb) => Promise<T>) => fn(db),
+  };
+
+  return {
+    db,
+    calls,
+    roundTrips: () => calls.length,
+    insertSizes: (table?: string) =>
+      calls
+        .filter((call) => call.op === "insert" && (!table || call.table === table))
+        .map((call) => call.size),
+  };
+}
+
+function batchEmployee(bambooId: string): {
+  bambooId: string;
+  employee: MappedEmployee;
+  departmentId: number | null;
+  divisionId: number | null;
+  locationId: number | null;
+} {
+  return {
+    bambooId,
+    employee: {
+      employeeNumber: `V-${bambooId}`,
+      firstName: "Test",
+      middleName: null,
+      lastName: "User",
+      preferredName: null,
+      email: `user${bambooId}@vendasta.com`,
+      personalEmail: null,
+      workPhone: null,
+      extension: null,
+      mobilePhone: null,
+      homePhone: null,
+      jobTitle: "Engineer",
+      departmentName: "Technology",
+      divisionName: null,
+      locationName: null,
+      hireDate: "2020-01-01",
+      originalHireDate: "2020-01-01",
+      terminationDate: null,
+      employmentStatus: "full_time",
+      accessLevel: "employee",
+      gender: null,
+      birthDate: null,
+      maritalStatus: null,
+      nationality: null,
+      citizenship: null,
+      addressStreet1: null,
+      addressStreet2: null,
+      addressCity: null,
+      addressProvince: null,
+      addressPostalCode: null,
+      addressCountry: null,
+      linkedInUrl: null,
+      twitterUrl: null,
+    },
+    departmentId: null,
+    divisionId: null,
+    locationId: null,
+  };
+}
+
+describe("BambooHR batched writes", () => {
+  it("splits arrays into write chunks", () => {
+    expect(chunkRows([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+    expect(BAMBOO_WRITE_CHUNK_SIZE).toBe(500);
+  });
+
+  it("sets statement and idle-in-transaction timeouts on the write transaction", async () => {
+    const recorded = createRecordingDb();
+    await applyBambooWriteGuards(recorded.db);
+    const sqlText = recorded.calls
+      .filter((call) => call.op === "execute")
+      .map((call) => call.sql)
+      .join("\n");
+    expect(sqlText).toContain("statement_timeout");
+    expect(sqlText).toContain(BAMBOO_STATEMENT_TIMEOUT);
+    expect(sqlText).toContain("idle_in_transaction_session_timeout");
+    expect(sqlText).toContain(BAMBOO_IDLE_IN_TX_TIMEOUT);
+    expect(sqlText).toContain("lock_timeout");
+    expect(sqlText).toContain(BAMBOO_LOCK_TIMEOUT);
+
+    const store = createBambooSyncStore(recorded.db);
+    expect(store.transaction).toBeDefined();
+    await store.transaction!(async () => "ok");
+    expect(
+      recorded.calls.filter((call) => call.op === "execute").length
+    ).toBeGreaterThanOrEqual(6);
+  });
+
+  it("upserts employees in chunked inserts, not one statement per row", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const rows = Array.from({ length: 1200 }, (_, index) =>
+      batchEmployee(String(index + 1))
+    );
+    const result = await store.upsertEmployeesBatch(rows, { chunkSize: 500 });
+    expect(result.created).toBe(1200);
+    expect(result.updated).toBe(0);
+    expect(result.idByBambooId.size).toBe(1200);
+    expect(recorded.insertSizes("employees")).toEqual([500, 500, 200]);
+    expect(recorded.roundTrips()).toBeLessThan(10);
+    expect(recorded.roundTrips()).toBeLessThan(1200 / 50);
+  });
+
+  it("keeps child-table replace round trips O(chunks) for thousands of rows", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const replacements = Array.from({ length: 1000 }, (_, index) => ({
+      employeeId: index + 1,
+      rows: [
+        {
+          effectiveDate: "2020-01-01",
+          jobTitle: "Engineer",
+          departmentName: "Technology",
+        },
+      ],
+    }));
+    await store.replaceJobHistoryMany(replacements, { chunkSize: 500 });
+    expect(recorded.insertSizes("job_history")).toEqual([500, 500]);
+    expect(recorded.calls.filter((call) => call.op === "delete").length).toBe(2);
+    expect(recorded.roundTrips()).toBeLessThan(20);
+    expect(recorded.roundTrips()).toBeLessThan(1000 / 20);
+  });
+
+  it("updates time-off balances with the spendable adjustment subquery", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const rows = Array.from({ length: 40 }, (_, index) => ({
+      employeeId: index + 1,
+      policyId: 1,
+      sourceBalance: "10.50",
+    }));
+    await store.upsertTimeOffBalancesBatch(rows, { chunkSize: 20 });
+    await store.upsertTimeOffBalancesBatch(rows, { chunkSize: 20 });
+    const sqlText = recorded.calls
+      .filter((call) => call.op === "execute")
+      .map((call) => call.sql)
+      .join("\n");
+    expect(sqlText).toMatch(/source_balance/i);
+    expect(sqlText).toContain("CAST(");
+    expect(sqlText).toContain("AS numeric");
+    expect(sqlText).toContain("accrual:%");
+    expect(sqlText).toContain("carryover:%");
+    expect(recorded.insertSizes("time_off_balances")).toEqual([20, 20]);
+    expect(recorded.calls.filter((call) => call.op === "execute").length).toBe(2);
+  });
+
+  it("casts date columns in the batched employee UPDATE", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const row = batchEmployee("1");
+    await store.upsertEmployeesBatch([row], { chunkSize: 10 });
+    await store.upsertEmployeesBatch([row], { chunkSize: 10 });
+    const sqlText = recorded.calls
+      .filter((call) => call.op === "execute")
+      .map((call) => call.sql)
+      .join("\n");
+    expect(sqlText).toMatch(/hire_date/i);
+    expect(sqlText).toContain("CAST(");
+    expect(sqlText).toContain("AS date");
+    expect(sqlText).toContain("AS employment_status");
+    expect(sqlText).toContain("AS gender");
+    expect(sqlText).toContain("CAST(v.hire_date AS date)");
+    expect(sqlText).toContain("CAST(v.original_hire_date AS date)");
+    expect(sqlText).toContain("CAST(v.termination_date AS date)");
+    expect(sqlText).toContain("CAST(v.birth_date AS date)");
+    expect(sqlText).toContain("CAST(v.employment_status AS employment_status)");
+  });
+
+  it("dedupes org-unit names case-insensitively before insert", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const ids = await store.upsertOrgUnits("department", [
+      "Sales",
+      "sales",
+      "SALES",
+      "Engineering",
+    ]);
+    expect(recorded.insertSizes("departments")).toEqual([2]);
+    expect(ids.get("sales")).toBe(ids.get("Sales".toLowerCase()));
+    expect(ids.size).toBe(2);
+  });
+
+  it("bounds a 2409-employee employee upsert to a handful of round trips", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const rows = Array.from({ length: 2409 }, (_, index) =>
+      batchEmployee(String(index + 1))
+    );
+    await store.upsertEmployeesBatch(rows);
+    expect(recorded.insertSizes("employees")).toEqual([500, 500, 500, 500, 409]);
+    expect(recorded.roundTrips()).toBeLessThan(12);
   });
 });

@@ -897,88 +897,175 @@ export type ApprovalQueryExecutor = {
   update: (...args: any[]) => any;
 };
 
-async function pendingManagerRoleStepsForEmployee(
-  employeeId: number,
+function chunkIds(ids: readonly number[], size = 500): number[][] {
+  const chunks: number[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function employeeIdForManagerStep(request: {
+  entityType: string;
+  entityId: number;
+  requesterId: number;
+}): number | null {
+  if (
+    (REQUESTER_OWNED_ENTITY_TYPES as readonly string[]).includes(request.entityType)
+  ) {
+    return request.requesterId;
+  }
+  if (
+    (AFFECTED_EMPLOYEE_ENTITY_TYPES as readonly string[]).includes(request.entityType)
+  ) {
+    return request.entityId;
+  }
+  return null;
+}
+
+async function pendingManagerRoleStepsForEmployees(
+  employeeIds: number[],
   executor: ApprovalQueryExecutor
 ) {
-  return executor
-    .select({
-      step: approvalRequestSteps,
-      request: approvalRequests,
-      workflowStep: approvalWorkflowSteps,
-    })
-    .from(approvalRequestSteps)
-    .innerJoin(
-      approvalRequests,
-      eq(approvalRequestSteps.approvalRequestId, approvalRequests.id)
-    )
-    .innerJoin(
-      approvalWorkflowSteps,
-      and(
-        eq(approvalWorkflowSteps.workflowId, approvalRequests.workflowId),
-        eq(approvalWorkflowSteps.stepOrder, approvalRequestSteps.stepOrder)
+  if (employeeIds.length === 0) return [];
+  const rows: Array<{
+    step: { id: number };
+    request: {
+      entityType: string;
+      entityId: number;
+      requesterId: number;
+    };
+    workflowStep: { approverRole: string | null };
+  }> = [];
+  for (const ids of chunkIds(employeeIds)) {
+    const chunk = await executor
+      .select({
+        step: approvalRequestSteps,
+        request: approvalRequests,
+        workflowStep: approvalWorkflowSteps,
+      })
+      .from(approvalRequestSteps)
+      .innerJoin(
+        approvalRequests,
+        eq(approvalRequestSteps.approvalRequestId, approvalRequests.id)
       )
-    )
-    .where(
-      and(
-        eq(approvalRequests.status, "pending"),
-        eq(approvalRequestSteps.status, "pending"),
-        inArray(approvalWorkflowSteps.approverRole, [...MANAGER_ROLE_STEP_ROLES]),
-        or(
-          and(
-            inArray(approvalRequests.entityType, [...REQUESTER_OWNED_ENTITY_TYPES]),
-            eq(approvalRequests.requesterId, employeeId)
-          ),
-          and(
-            inArray(approvalRequests.entityType, AFFECTED_EMPLOYEE_ENTITY_TYPES),
-            eq(approvalRequests.entityId, employeeId)
-          )
+      .innerJoin(
+        approvalWorkflowSteps,
+        and(
+          eq(approvalWorkflowSteps.workflowId, approvalRequests.workflowId),
+          eq(approvalWorkflowSteps.stepOrder, approvalRequestSteps.stepOrder)
         )
       )
-    );
+      .where(
+        and(
+          eq(approvalRequests.status, "pending"),
+          eq(approvalRequestSteps.status, "pending"),
+          inArray(approvalWorkflowSteps.approverRole, [...MANAGER_ROLE_STEP_ROLES]),
+          or(
+            and(
+              inArray(approvalRequests.entityType, [...REQUESTER_OWNED_ENTITY_TYPES]),
+              inArray(approvalRequests.requesterId, ids)
+            ),
+            and(
+              inArray(approvalRequests.entityType, AFFECTED_EMPLOYEE_ENTITY_TYPES),
+              inArray(approvalRequests.entityId, ids)
+            )
+          )
+        )
+      );
+    rows.push(...chunk);
+  }
+  return rows;
+}
+
+async function updateApproverIds(
+  executor: ApprovalQueryExecutor,
+  updates: Array<{ stepId: number; approverId: number | null }>
+) {
+  const byApprover = new Map<number | "null", number[]>();
+  for (const update of updates) {
+    const key = update.approverId ?? "null";
+    const ids = byApprover.get(key) ?? [];
+    ids.push(update.stepId);
+    byApprover.set(key, ids);
+  }
+  for (const [key, stepIds] of byApprover) {
+    const approverId = key === "null" ? null : key;
+    for (const ids of chunkIds(stepIds)) {
+      await executor
+        .update(approvalRequestSteps)
+        .set({ approverId })
+        .where(inArray(approvalRequestSteps.id, ids));
+    }
+  }
 }
 
 /** Drop the former manager from still-pending manager-role steps. Never auto-approve. */
+export async function unassignPendingManagerApprovalsMany(
+  employeeIds: number[],
+  executor: ApprovalQueryExecutor = db
+) {
+  const uniqueIds = [...new Set(employeeIds)];
+  const rows = await pendingManagerRoleStepsForEmployees(uniqueIds, executor);
+  if (rows.length === 0) return;
+  await updateApproverIds(
+    executor,
+    rows.map((row) => ({ stepId: row.step.id, approverId: null }))
+  );
+}
+
 export async function unassignPendingManagerApprovals(
   employeeId: number,
   executor: ApprovalQueryExecutor = db
 ) {
-  const rows = await pendingManagerRoleStepsForEmployee(employeeId, executor);
-  for (const row of rows) {
-    await executor
-      .update(approvalRequestSteps)
-      .set({ approverId: null })
-      .where(eq(approvalRequestSteps.id, row.step.id));
-  }
+  await unassignPendingManagerApprovalsMany([employeeId], executor);
 }
 
 /** Point still-pending manager-role steps at the newly resolved supervisor. */
+export async function rebindPendingManagerApprovalsMany(
+  links: Array<{ employeeId: number; managerId: number }>,
+  executor: ApprovalQueryExecutor = db
+) {
+  if (links.length === 0) return;
+  const byEmployee = new Map<number, number>();
+  for (const link of links) {
+    byEmployee.set(link.employeeId, link.managerId);
+  }
+  const employeeIds = [...byEmployee.keys()];
+  const rows = await pendingManagerRoleStepsForEmployees(employeeIds, executor);
+  if (rows.length === 0) return;
+
+  const managerIds = [...new Set(byEmployee.values())];
+  const skipLevel = new Map<number, number | null>();
+  for (const ids of chunkIds(managerIds)) {
+    const managers: Array<{ id: number; managerId: number | null }> = await executor
+      .select({ id: employees.id, managerId: employees.managerId })
+      .from(employees)
+      .where(inArray(employees.id, ids));
+    for (const manager of managers) {
+      skipLevel.set(manager.id, manager.managerId ?? null);
+    }
+  }
+
+  const updates: Array<{ stepId: number; approverId: number | null }> = [];
+  for (const row of rows) {
+    const role = row.workflowStep.approverRole;
+    if (role !== "manager" && role !== "manager_manager") continue;
+    const employeeId = employeeIdForManagerStep(row.request);
+    if (employeeId == null) continue;
+    const managerId = byEmployee.get(employeeId);
+    if (managerId == null) continue;
+    const nextApproverId =
+      role === "manager" ? managerId : skipLevel.get(managerId) ?? null;
+    updates.push({ stepId: row.step.id, approverId: nextApproverId });
+  }
+  await updateApproverIds(executor, updates);
+}
+
 export async function rebindPendingManagerApprovals(
   employeeId: number,
   managerId: number,
   executor: ApprovalQueryExecutor = db
 ) {
-  const rows = await pendingManagerRoleStepsForEmployee(employeeId, executor);
-  let skipLevelManagerId: number | null | undefined;
-
-  for (const row of rows) {
-    const role = row.workflowStep.approverRole;
-    if (role !== "manager" && role !== "manager_manager") continue;
-
-    if (role === "manager_manager" && skipLevelManagerId === undefined) {
-      const [manager] = await executor
-        .select({ managerId: employees.managerId })
-        .from(employees)
-        .where(eq(employees.id, managerId))
-        .limit(1);
-      skipLevelManagerId = manager?.managerId ?? null;
-    }
-
-    const nextApproverId =
-      role === "manager" ? managerId : skipLevelManagerId ?? null;
-    await executor
-      .update(approvalRequestSteps)
-      .set({ approverId: nextApproverId })
-      .where(eq(approvalRequestSteps.id, row.step.id));
-  }
+  await rebindPendingManagerApprovalsMany([{ employeeId, managerId }], executor);
 }

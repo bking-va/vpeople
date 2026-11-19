@@ -7,6 +7,10 @@ import {
   type BambooSyncSnapshot,
 } from "./cache";
 import {
+  BAMBOO_WRITE_CHUNK_SIZE,
+  type BatchProgress,
+} from "./chunks";
+import {
   BambooHrClient,
   BambooHrHttpError,
   BAMBOO_PROGRESS_EVERY,
@@ -32,6 +36,19 @@ import type {
 
 export type BambooSyncLogger = (message: string) => void;
 
+export type EmployeeBatchInput = {
+  bambooId: string;
+  employee: MappedEmployee;
+  departmentId: number | null;
+  divisionId: number | null;
+  locationId: number | null;
+};
+
+export type HistoryReplacement = {
+  employeeId: number;
+  rows: Array<Record<string, unknown>>;
+};
+
 export interface BambooSyncStore {
   listEmployees(): Promise<SyncEmployeeRow[]>;
   replaceDemoEmployees(): Promise<{
@@ -42,40 +59,87 @@ export interface BambooSyncStore {
     kind: "department" | "division" | "location" | "jobTitle",
     name: string
   ): Promise<number | null>;
+  upsertOrgUnits(
+    kind: "department" | "division" | "location" | "jobTitle",
+    names: string[]
+  ): Promise<Map<string, number>>;
   upsertEmployee(
     bambooId: string,
     employee: MappedEmployee
   ): Promise<{ id: number; created: boolean }>;
+  upsertEmployeesBatch(
+    rows: EmployeeBatchInput[],
+    progress?: BatchProgress
+  ): Promise<{
+    idByBambooId: Map<string, number>;
+    created: number;
+    updated: number;
+  }>;
   setManager(employeeId: number, managerId: number | null): Promise<void>;
+  setManagersBatch(
+    links: Array<{ employeeId: number; managerId: number | null }>,
+    progress?: BatchProgress
+  ): Promise<void>;
   setUnresolvedSupervisor(
     employeeId: number,
     supervisorBambooId: string | null
+  ): Promise<void>;
+  setUnresolvedSupervisorsBatch(
+    links: Array<{ employeeId: number; supervisorBambooId: string | null }>,
+    progress?: BatchProgress
   ): Promise<void>;
   listUnresolvedSupervisors(): Promise<
     Array<{ employeeId: number; supervisorBambooId: string }>
   >;
   markTerminated(bambooId: string): Promise<void>;
+  markTerminatedBatch(
+    bambooIds: string[],
+    progress?: BatchProgress
+  ): Promise<void>;
   replaceJobHistory(
     employeeId: number,
     rows: Array<Record<string, unknown>>
+  ): Promise<void>;
+  replaceJobHistoryMany(
+    replacements: HistoryReplacement[],
+    progress?: BatchProgress
   ): Promise<void>;
   replaceEmploymentStatusHistory(
     employeeId: number,
     rows: Array<Record<string, unknown>>
   ): Promise<void>;
+  replaceEmploymentStatusHistoryMany(
+    replacements: HistoryReplacement[],
+    progress?: BatchProgress
+  ): Promise<void>;
   replaceCompensationHistory(
     employeeId: number,
     rows: Array<Record<string, unknown>>
+  ): Promise<void>;
+  replaceCompensationHistoryMany(
+    replacements: HistoryReplacement[],
+    progress?: BatchProgress
   ): Promise<void>;
   replaceEmergencyContacts(
     employeeId: number,
     rows: Array<Record<string, unknown>>
   ): Promise<void>;
+  replaceEmergencyContactsMany(
+    replacements: HistoryReplacement[],
+    progress?: BatchProgress
+  ): Promise<void>;
   upsertTimeOffPolicy(name: string, policyType: string): Promise<number>;
+  upsertTimeOffPoliciesBatch(
+    policies: Array<{ name: string; policyType: string }>
+  ): Promise<Map<string, number>>;
   upsertTimeOffBalance(
     employeeId: number,
     policyId: number,
     balance: string
+  ): Promise<void>;
+  upsertTimeOffBalancesBatch(
+    rows: Array<{ employeeId: number; policyId: number; sourceBalance: string }>,
+    progress?: BatchProgress
   ): Promise<void>;
   applyBrendanCarryOver(opts: BrendanSnapshot): Promise<boolean>;
   recordSyncRun(run: Record<string, unknown>): Promise<void>;
@@ -94,6 +158,7 @@ export type RunBambooSyncOptions = {
   cachePath?: string | null;
   concurrency?: number;
   progressEvery?: number;
+  writeChunkSize?: number;
 };
 
 const PII_LOG_PATTERN =
@@ -493,10 +558,19 @@ export async function runBambooSync(
   }
 
   log("Phase write: starting database transaction");
+  const writeChunkSize = opts.writeChunkSize ?? BAMBOO_WRITE_CHUNK_SIZE;
+  const writeProgress = (label: string): BatchProgress => ({
+    chunkSize: writeChunkSize,
+    onProgress: (done, total) => {
+      if (total === 0) return;
+      log(`${label} ${done}/${total}`);
+    },
+  });
   return await inStoreTransaction(opts.store, async (store) => {
     let demoRemoved = 0;
     let appliedSnapshot = snapshot;
     if (opts.replaceDemo) {
+      log("Phase write: demo removal");
       const replaced = await store.replaceDemoEmployees();
       demoRemoved = replaced.removed;
       if (replaced.brendanSnapshot) {
@@ -511,86 +585,144 @@ export async function runBambooSync(
     const idByBambooId = new Map<string, number>(
       [...existingByBambooId.entries()].map(([bambooId, row]) => [bambooId, row.id])
     );
-    let created = 0;
-    let updated = 0;
-    const policyIds = new Map<string, number>();
-    for (const type of timeOffTypes) {
-      policyIds.set(type.name, await store.upsertTimeOffPolicy(type.name, type.name));
-    }
 
-    for (const bundle of mapped) {
-      if (bundle.employee.departmentName) {
-        await store.upsertOrgUnit("department", bundle.employee.departmentName);
-      }
-      if (bundle.employee.divisionName) {
-        await store.upsertOrgUnit("division", bundle.employee.divisionName);
-      }
-      if (bundle.employee.locationName) {
-        await store.upsertOrgUnit("location", bundle.employee.locationName);
-      }
-      if (bundle.employee.jobTitle) {
-        await store.upsertOrgUnit("jobTitle", bundle.employee.jobTitle);
-      }
-      const result = await store.upsertEmployee(bundle.bambooId, bundle.employee);
-      idByBambooId.set(bundle.bambooId, result.id);
-      if (result.created) created += 1;
-      else updated += 1;
-    }
+    log("Phase write: org units");
+    const departmentNames = mapped
+      .map((row) => row.employee.departmentName)
+      .concat(
+        Object.values(jobInfo).flatMap((rows) =>
+          rows.map((row) => blankToNull(row.department))
+        )
+      );
+    const divisionNames = mapped
+      .map((row) => row.employee.divisionName)
+      .concat(
+        Object.values(jobInfo).flatMap((rows) =>
+          rows.map((row) => blankToNull(row.division))
+        )
+      );
+    const locationNames = mapped
+      .map((row) => row.employee.locationName)
+      .concat(
+        Object.values(jobInfo).flatMap((rows) =>
+          rows.map((row) => blankToNull(row.location))
+        )
+      );
+    const jobTitleNames = mapped.map((row) => row.employee.jobTitle);
+    const [departmentsMap, divisionsMap, locationsMap] = await Promise.all([
+      store.upsertOrgUnits("department", departmentNames.filter((name): name is string => Boolean(name))),
+      store.upsertOrgUnits("division", divisionNames.filter((name): name is string => Boolean(name))),
+      store.upsertOrgUnits("location", locationNames.filter((name): name is string => Boolean(name))),
+      store.upsertOrgUnits(
+        "jobTitle",
+        jobTitleNames.filter((name): name is string => Boolean(name))
+      ),
+    ]);
+    const orgId = (
+      map: Map<string, number>,
+      name: string | null | undefined
+    ): number | null => {
+      if (!name) return null;
+      return map.get(name.trim().toLowerCase()) ?? null;
+    };
 
+    log("Phase write: employees");
+    const upserted = await store.upsertEmployeesBatch(
+      mapped.map((bundle) => ({
+        bambooId: bundle.bambooId,
+        employee: bundle.employee,
+        departmentId: orgId(departmentsMap, bundle.employee.departmentName),
+        divisionId: orgId(divisionsMap, bundle.employee.divisionName),
+        locationId: orgId(locationsMap, bundle.employee.locationName),
+      })),
+      writeProgress("employees")
+    );
+    for (const [bambooId, id] of upserted.idByBambooId) {
+      idByBambooId.set(bambooId, id);
+    }
+    const created = upserted.created;
+    const updated = upserted.updated;
+
+    log("Phase write: time-off policies");
+    const policyIds = await store.upsertTimeOffPoliciesBatch(
+      timeOffTypes.map((type) => ({ name: type.name, policyType: type.name }))
+    );
+
+    const managerLinks = new Map<number, number | null>();
+    const unresolvedLinks = new Map<number, string | null>();
     let reportsToResolved = 0;
     for (const bundle of mapped) {
       const employeeId = idByBambooId.get(bundle.bambooId);
       if (!employeeId) continue;
       if (!bundle.supervisorBambooId) {
-        await store.setManager(employeeId, null);
-        await store.setUnresolvedSupervisor(employeeId, null);
+        managerLinks.set(employeeId, null);
+        unresolvedLinks.set(employeeId, null);
         continue;
       }
       const managerId = idByBambooId.get(bundle.supervisorBambooId);
       if (managerId === undefined) {
-        await store.setManager(employeeId, null);
-        await store.setUnresolvedSupervisor(
-          employeeId,
-          bundle.supervisorBambooId
-        );
+        managerLinks.set(employeeId, null);
+        unresolvedLinks.set(employeeId, bundle.supervisorBambooId);
         continue;
       }
-      await store.setManager(employeeId, managerId);
-      await store.setUnresolvedSupervisor(employeeId, null);
+      managerLinks.set(employeeId, managerId);
+      unresolvedLinks.set(employeeId, null);
       reportsToResolved += 1;
     }
 
     for (const pending of await store.listUnresolvedSupervisors()) {
+      if (managerLinks.has(pending.employeeId)) continue;
       const managerId = idByBambooId.get(pending.supervisorBambooId);
       if (managerId === undefined) continue;
-      await store.setManager(pending.employeeId, managerId);
-      await store.setUnresolvedSupervisor(pending.employeeId, null);
+      managerLinks.set(pending.employeeId, managerId);
+      unresolvedLinks.set(pending.employeeId, null);
       reportsToResolved += 1;
     }
 
+    log("Phase write: managers");
+    await store.setManagersBatch(
+      [...managerLinks.entries()].map(([employeeId, managerId]) => ({
+        employeeId,
+        managerId,
+      })),
+      writeProgress("managers")
+    );
+    log("Phase write: unresolved supervisors");
+    await store.setUnresolvedSupervisorsBatch(
+      [...unresolvedLinks.entries()].map(([employeeId, supervisorBambooId]) => ({
+        employeeId,
+        supervisorBambooId,
+      })),
+      writeProgress("unresolved supervisors")
+    );
+
+    const jobReplacements: HistoryReplacement[] = [];
+    const statusReplacements: HistoryReplacement[] = [];
+    const payReplacements: HistoryReplacement[] = [];
+    const contactReplacements: HistoryReplacement[] = [];
     for (const bundle of mapped) {
       const employeeId = idByBambooId.get(bundle.bambooId);
       if (!employeeId) continue;
       const jobs = tableRowsForEmployee(jobInfo, bundle.bambooId, opts.mode);
       if (jobs.replace) {
-        await store.replaceJobHistory(
+        jobReplacements.push({
           employeeId,
-          jobs.rows.map((row) => ({
+          rows: jobs.rows.map((row) => ({
             effectiveDate: tableRowDate(row),
             jobTitle: blankToNull(row.jobTitle),
             departmentName: blankToNull(row.department),
             divisionName: blankToNull(row.division),
             locationName: blankToNull(row.location),
             comment: blankToNull(row.comment),
-          }))
-        );
+          })),
+        });
       }
 
       const statuses = tableRowsForEmployee(statusInfo, bundle.bambooId, opts.mode);
       if (statuses.replace) {
-        await store.replaceEmploymentStatusHistory(
+        statusReplacements.push({
           employeeId,
-          statuses.rows.map((row) => {
+          rows: statuses.rows.map((row) => {
             const status = mapEmploymentStatus({
               employmentHistoryStatus: blankToNull(row.employmentStatus),
               employmentStatus: blankToNull(row.employmentStatus),
@@ -604,15 +736,15 @@ export async function runBambooSync(
               terminationType:
                 blankToNull(row.terminationTypeId) || blankToNull(row.terminationType),
             };
-          })
-        );
+          }),
+        });
       }
 
       const pay = tableRowsForEmployee(compensation, bundle.bambooId, opts.mode);
       if (pay.replace) {
-        await store.replaceCompensationHistory(
+        payReplacements.push({
           employeeId,
-          pay.rows.map((row) => {
+          rows: pay.rows.map((row) => {
             const parsed = parsePayRate(
               (row.rate as string | number | null) ?? (row.payRate as string | number | null)
             );
@@ -625,37 +757,87 @@ export async function runBambooSync(
               changeReason: blankToNull(row.reason),
               comment: blankToNull(row.comment),
             };
-          })
-        );
+          }),
+        });
       }
 
       const emergency = tableRowsForEmployee(contacts, bundle.bambooId, opts.mode);
       if (emergency.replace) {
-        await store.replaceEmergencyContacts(
+        contactReplacements.push({
           employeeId,
-          emergency.rows
+          rows: emergency.rows
             .map((row) => mapEmergencyContact(row))
-            .filter((row): row is NonNullable<typeof row> => Boolean(row))
-        );
+            .filter((row): row is NonNullable<typeof row> => Boolean(row)),
+        });
       }
     }
 
+    log("Phase write: job_history");
+    await store.replaceJobHistoryMany(jobReplacements, writeProgress("job_history"));
+    log("Phase write: employment_status_history");
+    await store.replaceEmploymentStatusHistoryMany(
+      statusReplacements,
+      writeProgress("employment_status_history")
+    );
+    log("Phase write: compensation_history");
+    await store.replaceCompensationHistoryMany(
+      payReplacements,
+      writeProgress("compensation_history")
+    );
+    log("Phase write: emergency_contacts");
+    await store.replaceEmergencyContactsMany(
+      contactReplacements,
+      writeProgress("emergency_contacts")
+    );
+
+    const missingPolicyNames = new Set<string>();
+    for (const balances of balancesByBambooId.values()) {
+      for (const balance of balances) {
+        if (
+          !policyIds.has(balance.name.toLowerCase()) &&
+          !policyIds.has(balance.name)
+        ) {
+          missingPolicyNames.add(balance.name);
+        }
+      }
+    }
+    if (missingPolicyNames.size > 0) {
+      const extraPolicies = await store.upsertTimeOffPoliciesBatch(
+        [...missingPolicyNames].map((name) => ({ name, policyType: name }))
+      );
+      for (const [name, id] of extraPolicies) policyIds.set(name, id);
+    }
+
+    const balanceRows: Array<{
+      employeeId: number;
+      policyId: number;
+      sourceBalance: string;
+    }> = [];
     for (const [bambooId, balances] of balancesByBambooId) {
       const employeeId = idByBambooId.get(bambooId);
       if (!employeeId) continue;
       for (const balance of balances) {
         const policyId =
-          policyIds.get(balance.name) ??
-          (await store.upsertTimeOffPolicy(balance.name, balance.name));
-        policyIds.set(balance.name, policyId);
-        await store.upsertTimeOffBalance(employeeId, policyId, balance.balance);
+          policyIds.get(balance.name.toLowerCase()) ?? policyIds.get(balance.name);
+        if (policyId == null) continue;
+        balanceRows.push({
+          employeeId,
+          policyId,
+          sourceBalance: balance.balance,
+        });
       }
     }
+    log("Phase write: time_off_balances");
+    await store.upsertTimeOffBalancesBatch(
+      balanceRows,
+      writeProgress("time_off_balances")
+    );
 
-    for (const deletedId of deletedBambooIds) {
-      if (!existingByBambooId.has(deletedId)) continue;
-      await store.markTerminated(deletedId);
-    }
+    const deletedExisting = deletedBambooIds.filter((id) =>
+      existingByBambooId.has(id)
+    );
+    log("Phase write: terminated");
+    await store.markTerminatedBatch(deletedExisting, writeProgress("terminated"));
 
     const brendanAdminBound = await store.applyBrendanCarryOver({
       accessLevel: "full_admin" as AccessLevel,
@@ -678,6 +860,7 @@ export async function runBambooSync(
 
     log(`Upserted ${created} created, ${updated} updated`);
     log(`Reports-to resolved: ${reportsToResolved}`);
+    log("Phase write: complete");
 
     return {
       status: "success" as const,

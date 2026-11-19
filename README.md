@@ -372,7 +372,7 @@ Dry run (fetch + map, print counts and Bamboo ids, write nothing):
 npx tsx scripts/bamboo-sync.ts --dry-run /tmp/db_url.txt
 ```
 
-First production import (removes seeded demo employees, then upserts real records). Keep `bking@vendasta.com` as Admin and carry over E001's `vendasta_sub`. All BambooHR HTTP (custom report, bulk table `changed/tables/{table}` calls, and concurrent per-employee time-off calculator reads) finishes before the database transaction opens. Requests time out, retry on 429/503 with `Retry-After`, and log phase/progress counts (no PII). Expected runtime on a normal box is a few minutes for ~2400 employees, not hours:
+First production import (removes seeded demo employees, then upserts real records). Keep `bking@vendasta.com` as Admin and carry over E001's `vendasta_sub`. All BambooHR HTTP (custom report, bulk table `changed/tables/{table}` calls, and concurrent per-employee time-off calculator reads) finishes before the database transaction opens. The write phase then preloads existing rows and applies chunked multi-row `INSERT`/`UPDATE`/`DELETE` statements (default 500 rows) so round trips stay O(tables × chunks), not O(employees). The transaction sets `statement_timeout`, `lock_timeout`, and `idle_in_transaction_session_timeout` so a hung statement fails fast instead of sitting open for hours. Requests time out, retry on 429/503 with `Retry-After`, and log fetch/write phase and chunk counts (no PII). Expected runtime on a normal box is a few minutes for ~2400 employees, with the write phase well under 5 minutes:
 
 ```bash
 mkdir -m 700 "$HOME/.cache/vpeople"
