@@ -47,11 +47,24 @@ export function isStoredResumeBlobUrl(
 
 export function storedBlobPathname(url: string | null | undefined): string | null {
   if (!isStoredBlobUrl(url)) return null;
-  const pathname = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, "");
-  if (!pathname || pathname.includes("\\")) return null;
-  const parts = pathname.split("/");
+  const encodedPath = new URL(url).pathname.replace(/^\/+/, "");
+  if (!encodedPath) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(encodedPath);
+  } catch {
+    return null;
+  }
+  if (decoded.includes("\\")) return null;
+  const parts = decoded.split("/");
   if (parts.some((part) => part === ".." || part === "." || part === "")) return null;
-  return pathname;
+  return encodedPath;
+}
+
+export function storedBlobGetUrl(url: string | null | undefined): string | null {
+  const pathname = storedBlobPathname(url);
+  if (!pathname || !url) return null;
+  return `https://${new URL(url).hostname.toLowerCase()}/${pathname}`;
 }
 
 export type StoredPrivateBlob = {
@@ -63,12 +76,12 @@ export async function getStoredPrivateBlob(
   url: string | null | undefined,
   token: string
 ): Promise<StoredPrivateBlob | null> {
-  const pathname = storedBlobPathname(url);
+  const safeUrl = storedBlobGetUrl(url);
   const secret = token.trim();
-  if (!pathname || !secret) return null;
+  if (!safeUrl || !secret) return null;
   try {
     const { get } = await import("@vercel/blob");
-    const result = await get(pathname, { access: "private", token: secret });
+    const result = await get(safeUrl, { access: "private", token: secret });
     if (!result || result.statusCode !== 200 || !result.stream) return null;
     return {
       stream: result.stream,
