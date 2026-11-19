@@ -31,6 +31,17 @@ describe("Bamboo metadata mapping", () => {
       section: "compensation",
       visibility: "hr_only",
     });
+    expect(isForbiddenBambooField("businessUnit")).toBe(false);
+    expect(isForbiddenBambooField("customTeamName")).toBe(false);
+    expect(mapMetaField({ alias: "homeEmail", name: "Home Email", type: "email" })).toBeNull();
+    expect(mapMetaField({ alias: "dateOfBirth", name: "Birth Date", type: "date" })).toBeNull();
+    expect(mapMetaField({ alias: "address1", name: "Address", type: "text" })).toBeNull();
+    expect(
+      mapMetaField({ alias: "customShirtSize", name: "Shirt Size", type: "list" })
+    ).toMatchObject({
+      visibility: "manager_hr",
+      section: "personal",
+    });
   });
 
   test("maps Bamboo field types onto vPeople custom field types", () => {

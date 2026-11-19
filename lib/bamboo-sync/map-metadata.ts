@@ -1,6 +1,10 @@
 import { blankToNull } from "./map";
 import { asRecord, labeledValue, nestedId } from "./map-extended";
-import { EXCLUDED_BAMBOO_FIELDS } from "./map";
+import {
+  EXCLUDED_BAMBOO_FIELDS,
+  IMPORTED_EMPLOYEE_FIELDS,
+  UNMAPPED_KNOWN_BAMBOO_FIELDS,
+} from "./map";
 
 export const METADATA_EMPLOYEE_FIELDS = [
   "ethnicity",
@@ -11,8 +15,30 @@ export const METADATA_EMPLOYEE_FIELDS = [
   "timeTrackingEnabled",
 ] as const;
 
-export const FORBIDDEN_BAMBOO_FIELD_PATTERN =
-  /ssn|sin|national.?id|nin|passport|bank|iban|routing|swift|credit.?card|account.?number|transit|direct.?deposit/i;
+const FORBIDDEN_FIELD_TOKENS = new Set([
+  "ssn",
+  "sin",
+  "nin",
+  "iban",
+  "routing",
+  "swift",
+  "bank",
+  "passport",
+  "transit",
+]);
+
+const STANDARD_BAMBOO_FIELD_ALIASES = new Set<string>([
+  ...IMPORTED_EMPLOYEE_FIELDS,
+  ...UNMAPPED_KNOWN_BAMBOO_FIELDS,
+]);
+
+export function fieldNameTokens(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
 
 export const COMP_SENSITIVE_FIELD_PATTERN =
   /pay|salary|bonus|commission|compensat|equity|stock|option|grant|wage|hourly|currency|flsa|exempt/;
@@ -91,10 +117,21 @@ export function isForbiddenBambooField(
   name?: string | null,
   type?: string | null
 ): boolean {
-  const haystack = `${alias} ${name ?? ""} ${type ?? ""}`;
-  if (FORBIDDEN_BAMBOO_FIELD_PATTERN.test(haystack)) return true;
+  if (EXCLUDED_FIELD_SET.has(alias)) return true;
   if ((type ?? "").toLowerCase() === "ssn") return true;
-  return EXCLUDED_FIELD_SET.has(alias);
+  const tokens = fieldNameTokens(`${alias} ${name ?? ""} ${type ?? ""}`);
+  if (tokens.some((token) => FORBIDDEN_FIELD_TOKENS.has(token))) return true;
+  const joined = tokens.join(" ");
+  return (
+    joined.includes("national id") ||
+    joined.includes("credit card") ||
+    joined.includes("account number") ||
+    joined.includes("direct deposit")
+  );
+}
+
+export function isStandardBambooEmployeeField(alias: string): boolean {
+  return STANDARD_BAMBOO_FIELD_ALIASES.has(alias);
 }
 
 export function mapBambooCustomFieldType(
@@ -135,7 +172,7 @@ export function customFieldVisibility(
   const haystack = `${alias} ${name}`.toLowerCase();
   if (EEO_FIELD_PATTERN.test(haystack)) return "hr_only";
   if (COMP_SENSITIVE_FIELD_PATTERN.test(haystack)) return "hr_only";
-  return "everyone";
+  return "manager_hr";
 }
 
 function parseBoolean(value: unknown): boolean | null {
@@ -282,6 +319,7 @@ export function mapMetaField(rawInput: unknown): MappedCustomFieldWrite | null {
   const type = blankToNull(raw.type);
   if (!alias || !name) return null;
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(alias)) return null;
+  if (isStandardBambooEmployeeField(alias)) return null;
   if (isForbiddenBambooField(alias, name, type)) return null;
   return {
     bambooId: alias,
@@ -306,7 +344,8 @@ export function mapCustomFieldValue(
   if (value == null || value === "") return null;
   const text = labeledValue(value) || blankToNull(value);
   if (!text) return null;
-  if (isForbiddenBambooField(field.bambooId, text)) return null;
+  if (isForbiddenBambooField(field.bambooId)) return null;
+  if (/^\d{3}-\d{2}-\d{4}$/.test(text.trim())) return null;
   return {
     fieldBambooId: field.bambooId,
     employeeBambooId,
