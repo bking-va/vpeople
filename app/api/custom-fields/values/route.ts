@@ -81,6 +81,7 @@ export async function GET(request: NextRequest) {
         isManager,
         isHROrAdmin,
         canViewCompensation: permissions.canViewCompensation,
+        canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
       });
     });
 

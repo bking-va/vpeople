@@ -214,4 +214,57 @@ describe("BambooHR metadata batched writes (Real Postgres)", () => {
         .where(eq(employeeDependents.employeeId, employee.id))
     ).toHaveLength(0);
   });
+
+  test("incremental sync keeps a locally tightened hr_only visibility", async () => {
+    const bambooId = `customNote_${runId}`;
+    const store = createBambooSyncStore(db);
+    const created = await store.upsertCustomFieldsBatch(
+      [
+        {
+          bambooId,
+          name: "Team Note",
+          fieldType: "text",
+          entityType: "employee",
+          section: "personal",
+          options: null,
+          isRequired: false,
+          orderIndex: 4,
+          visibility: "manager_hr",
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    const noteId = created.get(bambooId);
+    expect(noteId).toBeDefined();
+
+    await db
+      .update(customFields)
+      .set({ visibility: "hr_only" })
+      .where(eq(customFields.id, noteId!));
+
+    await store.upsertCustomFieldsBatch(
+      [
+        {
+          bambooId,
+          name: "Team Note",
+          fieldType: "text",
+          entityType: "employee",
+          section: "personal",
+          options: null,
+          isRequired: false,
+          orderIndex: 4,
+          visibility: "manager_hr",
+        },
+      ],
+      { chunkSize: 50 }
+    );
+
+    const [updated] = await db
+      .select({ visibility: customFields.visibility })
+      .from(customFields)
+      .where(eq(customFields.id, noteId!));
+    expect(updated.visibility).toBe("hr_only");
+
+    await db.delete(customFields).where(eq(customFields.id, noteId!));
+  });
 });
