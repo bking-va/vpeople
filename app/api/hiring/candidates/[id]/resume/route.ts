@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { candidates } from "@/lib/db/schema";
 import { hiringAccessForCandidate } from "@/lib/hiring-access";
-import { isStoredResumeBlobUrl } from "@/lib/bamboo-sync/blob";
+import { getStoredPrivateBlob } from "@/lib/bamboo-sync/blob";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,28 +40,19 @@ export async function GET(
     .where(eq(candidates.id, id))
     .limit(1);
 
-  const resumeUrl = candidate?.resumeBlobUrl;
-  if (!isStoredResumeBlobUrl(resumeUrl)) {
-    return NextResponse.json({ error: "Resume not available" }, { status: 404 });
-  }
-
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
     return NextResponse.json({ error: "Resume not available" }, { status: 404 });
   }
 
-  const blobResponse = await fetch(resumeUrl, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!blobResponse.ok) {
+  const stored = await getStoredPrivateBlob(candidate?.resumeBlobUrl, token);
+  if (!stored) {
     return NextResponse.json({ error: "Resume not available" }, { status: 404 });
   }
 
-  const contentType =
-    blobResponse.headers.get("content-type") || "application/octet-stream";
-  return new NextResponse(blobResponse.body, {
+  return new NextResponse(stored.stream, {
     headers: {
-      "Content-Type": contentType,
+      "Content-Type": stored.contentType,
       "Content-Disposition": `attachment; filename="resume-${id}"`,
       "Cache-Control": "private, max-age=0",
     },
