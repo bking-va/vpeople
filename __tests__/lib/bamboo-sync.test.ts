@@ -1461,6 +1461,47 @@ describe("BambooHR fast import", () => {
     ]);
   });
 
+  it("does not multiply retries when 429 persists", async () => {
+    const fetchMock = jest.fn(
+      async () =>
+        new Response("", {
+          status: 429,
+          headers: { "Retry-After": "0" },
+        })
+    );
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      maxRetries: 2,
+      fetch: fetchMock,
+    });
+    await expect(client.fetchAllEmployees()).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("times out if the response body never arrives", async () => {
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      timeoutMs: 20,
+      maxRetries: 0,
+      fetch: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            text: () => new Promise<string>(() => {}),
+          }) as Response
+      ),
+    });
+    await expect(client.fetchAllEmployees()).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+  });
+
   it("fetches time-off balances with bounded concurrency", async () => {
     const employees = Array.from({ length: 8 }, (_, index) =>
       bambooEmployee({

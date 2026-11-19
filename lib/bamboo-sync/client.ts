@@ -107,6 +107,35 @@ function isRetryableAbortOrNetwork(error: unknown): boolean {
   );
 }
 
+function timeoutError(): Error {
+  const error = new Error("BambooHR request timed out");
+  error.name = "TimeoutError";
+  return error;
+}
+
+async function awaitUntilAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal
+): Promise<T> {
+  if (signal.aborted) {
+    throw timeoutError();
+  }
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(timeoutError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
 export function parseBoundedConcurrency(
   raw: string | undefined,
   fallback = BAMBOO_BALANCE_CONCURRENCY
@@ -182,67 +211,60 @@ export class BambooHrClient {
 
   private async request(
     path: string,
-    init: RequestInit = {},
-    attempt = 0
+    init: RequestInit = {}
   ): Promise<unknown> {
     const method = (init.method || "GET").toUpperCase();
     if (method !== "GET" && !(method === "POST" && path.startsWith("/reports/custom"))) {
       throw new Error(`BambooHR client is read-only; refused ${method} ${path}`);
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-    let settled = false;
-    try {
-      const fetchPromise = this.fetchImpl(`${this.baseUrl}${path}`, {
-        ...init,
-        method,
-        redirect: "error",
-        signal: controller.signal,
-        headers: this.headers(init.headers as Record<string, string> | undefined),
-      });
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        const fail = () => {
-          if (settled) return;
-          const error = new Error("BambooHR request timed out");
-          error.name = "TimeoutError";
-          reject(error);
-        };
-        if (controller.signal.aborted) {
-          fail();
-          return;
-        }
-        controller.signal.addEventListener("abort", fail, { once: true });
-      });
-      const response = await Promise.race([fetchPromise, timeoutPromise]);
-      settled = true;
-      clearTimeout(timeout);
-      if (isRetryableStatus(response.status) && attempt < this.maxRetries) {
-        await sleep(parseRetryAfterMs(response.headers.get("retry-after"), attempt));
-        return this.request(path, init, attempt + 1);
-      }
-      if (!response.ok) {
-        throw new BambooHrHttpError(method, path, response.status);
-      }
-      if (response.status === 204) return null;
-      const text = await response.text();
-      if (!text) return null;
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
-        return JSON.parse(text);
-      } catch {
-        return text;
-      }
-    } catch (error) {
-      settled = true;
-      clearTimeout(timeout);
-      if (attempt < this.maxRetries && isRetryableAbortOrNetwork(error)) {
+        const response = await awaitUntilAbort(
+          this.fetchImpl(`${this.baseUrl}${path}`, {
+            ...init,
+            method,
+            redirect: "error",
+            signal: controller.signal,
+            headers: this.headers(init.headers as Record<string, string> | undefined),
+          }),
+          controller.signal
+        );
+        if (isRetryableStatus(response.status)) {
+          lastError = new BambooHrHttpError(method, path, response.status);
+          if (attempt === this.maxRetries) {
+            throw lastError;
+          }
+          await sleep(parseRetryAfterMs(response.headers.get("retry-after"), attempt));
+          continue;
+        }
+        if (!response.ok) {
+          throw new BambooHrHttpError(method, path, response.status);
+        }
+        if (response.status === 204) {
+          return null;
+        }
+        const text = await awaitUntilAbort(response.text(), controller.signal);
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return text;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt === this.maxRetries || !isRetryableAbortOrNetwork(error)) {
+          throw error;
+        }
         await sleep(parseRetryAfterMs(null, attempt));
-        return this.request(path, init, attempt + 1);
+      } finally {
+        clearTimeout(timeout);
       }
-      throw error;
-    } finally {
-      settled = true;
-      clearTimeout(timeout);
     }
+    throw lastError;
   }
 
   async fetchAllEmployees(): Promise<BambooEmployeeRecord[]> {
