@@ -2018,30 +2018,31 @@ type RecordedCall = {
 };
 
 function serializeSql(query: unknown): string {
-  if (query && typeof query === "object") {
-    const value = query as { queryChunks?: unknown[]; sql?: string };
-    if (typeof value.sql === "string") return value.sql;
-    if (Array.isArray(value.queryChunks)) {
-      return value.queryChunks
-        .map((chunk) => {
-          if (typeof chunk === "string") return chunk;
-          if (
-            chunk &&
-            typeof chunk === "object" &&
-            "value" in (chunk as { value?: unknown })
-          ) {
-            return String((chunk as { value?: unknown }).value ?? "");
-          }
-          return "";
-        })
-        .join("");
+  const parts: string[] = [];
+  const walk = (value: unknown, depth = 0) => {
+    if (value == null || depth > 12) return;
+    if (typeof value === "string") {
+      parts.push(value);
+      return;
     }
-  }
-  try {
-    return JSON.stringify(query);
-  } catch {
-    return String(query);
-  }
+    if (typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    const record = value as {
+      sql?: string;
+      queryChunks?: unknown;
+      value?: unknown;
+    };
+    if (typeof record.sql === "string") parts.push(record.sql);
+    walk(record.queryChunks, depth + 1);
+    if (record.value !== undefined && record.value !== record) {
+      walk(record.value, depth + 1);
+    }
+  };
+  walk(query);
+  return parts.join("");
 }
 
 function createRecordingDb() {
@@ -2291,10 +2292,48 @@ describe("BambooHR batched writes", () => {
       .map((call) => call.sql)
       .join("\n");
     expect(sqlText).toMatch(/source_balance/i);
+    expect(sqlText).toContain("CAST(");
+    expect(sqlText).toContain("AS numeric");
     expect(sqlText).toContain("accrual:%");
     expect(sqlText).toContain("carryover:%");
     expect(recorded.insertSizes("time_off_balances")).toEqual([20, 20]);
     expect(recorded.calls.filter((call) => call.op === "execute").length).toBe(2);
+  });
+
+  it("casts date columns in the batched employee UPDATE", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const row = batchEmployee("1");
+    await store.upsertEmployeesBatch([row], { chunkSize: 10 });
+    await store.upsertEmployeesBatch([row], { chunkSize: 10 });
+    const sqlText = recorded.calls
+      .filter((call) => call.op === "execute")
+      .map((call) => call.sql)
+      .join("\n");
+    expect(sqlText).toMatch(/hire_date/i);
+    expect(sqlText).toContain("CAST(");
+    expect(sqlText).toContain("AS date");
+    expect(sqlText).toContain("AS employment_status");
+    expect(sqlText).toContain("AS gender");
+    expect(sqlText).toContain("CAST(v.hire_date AS date)");
+    expect(sqlText).toContain("CAST(v.original_hire_date AS date)");
+    expect(sqlText).toContain("CAST(v.termination_date AS date)");
+    expect(sqlText).toContain("CAST(v.birth_date AS date)");
+    expect(sqlText).toContain("CAST(v.employment_status AS employment_status)");
+  });
+
+  it("dedupes org-unit names case-insensitively before insert", async () => {
+    const recorded = createRecordingDb();
+    const store = createBambooSyncStore(recorded.db);
+    const ids = await store.upsertOrgUnits("department", [
+      "Sales",
+      "sales",
+      "SALES",
+      "Engineering",
+    ]);
+    expect(recorded.insertSizes("departments")).toEqual([2]);
+    expect(ids.get("sales")).toBe(ids.get("Sales".toLowerCase()));
+    expect(ids.size).toBe(2);
   });
 
   it("bounds a 2409-employee employee upsert to a handful of round trips", async () => {

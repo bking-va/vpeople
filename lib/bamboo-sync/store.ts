@@ -100,12 +100,14 @@ function chunkSizeOf(progress?: BatchProgress): number {
 }
 
 function uniqueNames(values: Array<string | null | undefined>): string[] {
-  const names = new Set<string>();
+  const byLower = new Map<string, string>();
   for (const value of values) {
     const trimmed = value?.trim();
-    if (trimmed) names.add(trimmed);
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (!byLower.has(key)) byLower.set(key, trimmed);
   }
-  return [...names];
+  return [...byLower.values()];
 }
 
 function assignEmployeeNumber(
@@ -206,7 +208,7 @@ async function updateEmployeesChunk(
   if (rows.length === 0) return;
   const tuples = rows.map(
     (row) => sql`(
-      ${row.id}::int,
+      CAST(${row.id} AS int),
       ${row.bambooId},
       ${row.employeeNumber},
       ${row.firstName},
@@ -220,15 +222,15 @@ async function updateEmployeesChunk(
       ${row.mobilePhone},
       ${row.homePhone},
       ${row.jobTitle},
-      ${row.departmentId}::int,
-      ${row.divisionId}::int,
-      ${row.locationId}::int,
-      ${row.hireDate},
-      ${row.originalHireDate},
-      ${row.terminationDate},
-      ${row.employmentStatus}::employment_status,
-      ${row.gender}::gender,
-      ${row.birthDate},
+      CAST(${row.departmentId} AS int),
+      CAST(${row.divisionId} AS int),
+      CAST(${row.locationId} AS int),
+      CAST(${row.hireDate} AS date),
+      CAST(${row.originalHireDate} AS date),
+      CAST(${row.terminationDate} AS date),
+      CAST(${row.employmentStatus} AS employment_status),
+      CAST(${row.gender} AS gender),
+      CAST(${row.birthDate} AS date),
       ${row.maritalStatus},
       ${row.nationality},
       ${row.citizenship},
@@ -259,15 +261,15 @@ async function updateEmployeesChunk(
         mobile_phone = v.mobile_phone,
         home_phone = v.home_phone,
         job_title = v.job_title,
-        department_id = v.department_id,
-        division_id = v.division_id,
-        location_id = v.location_id,
-        hire_date = v.hire_date,
-        original_hire_date = v.original_hire_date,
-        termination_date = v.termination_date,
-        employment_status = v.employment_status,
-        gender = v.gender,
-        birth_date = v.birth_date,
+        department_id = CAST(v.department_id AS int),
+        division_id = CAST(v.division_id AS int),
+        location_id = CAST(v.location_id AS int),
+        hire_date = CAST(v.hire_date AS date),
+        original_hire_date = CAST(v.original_hire_date AS date),
+        termination_date = CAST(v.termination_date AS date),
+        employment_status = CAST(v.employment_status AS employment_status),
+        gender = CAST(v.gender AS gender),
+        birth_date = CAST(v.birth_date AS date),
         marital_status = v.marital_status,
         nationality = v.nationality,
         citizenship = v.citizenship,
@@ -290,7 +292,7 @@ async function updateEmployeesChunk(
         address_province, address_postal_code, address_country,
         linkedin_url, twitter_url
       )
-      WHERE e.id = v.id
+      WHERE e.id = CAST(v.id AS int)
     `
   );
 }
@@ -603,16 +605,17 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       let done = 0;
       for (const chunk of chunkRows(links, size)) {
         const tuples = chunk.map(
-          (link) => sql`(${link.employeeId}::int, ${link.managerId}::int)`
+          (link) =>
+            sql`(CAST(${link.employeeId} AS int), CAST(${link.managerId} AS int))`
         );
         await executeSql(
           db,
           sql`
             UPDATE employees AS e
-            SET manager_id = v.manager_id,
+            SET manager_id = CAST(v.manager_id AS int),
                 updated_at = now()
             FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(id, manager_id)
-            WHERE e.id = v.id
+            WHERE e.id = CAST(v.id AS int)
           `
         );
         done += chunk.length;
@@ -643,16 +646,16 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       for (const chunk of chunkRows(links, size)) {
         const tuples = chunk.map(
           (link) =>
-            sql`(${link.employeeId}::int, ${link.supervisorBambooId})`
+            sql`(CAST(${link.employeeId} AS int), CAST(${link.supervisorBambooId} AS text))`
         );
         await executeSql(
           db,
           sql`
             UPDATE employees AS e
-            SET pending_supervisor_bamboo_id = v.pending_supervisor_bamboo_id,
+            SET pending_supervisor_bamboo_id = CAST(v.pending_supervisor_bamboo_id AS text),
                 updated_at = now()
             FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(id, pending_supervisor_bamboo_id)
-            WHERE e.id = v.id
+            WHERE e.id = CAST(v.id AS int)
           `
         );
         done += chunk.length;
@@ -918,15 +921,16 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       let done = 0;
       for (const chunk of chunkRows(updates, size)) {
         const tuples = chunk.map(
-          (row) => sql`(${row.id}::int, ${row.sourceBalance})`
+          (row) =>
+            sql`(CAST(${row.id} AS int), CAST(${row.sourceBalance} AS numeric))`
         );
         await executeSql(
           db,
           sql`
             UPDATE time_off_balances AS b
             SET
-              source_balance = v.source_balance::numeric,
-              balance = v.source_balance::numeric + coalesce((
+              source_balance = CAST(v.source_balance AS numeric),
+              balance = CAST(v.source_balance AS numeric) + coalesce((
                 select sum(${timeOffBalanceAdjustments.amount}::numeric)
                 from ${timeOffBalanceAdjustments}
                 where ${timeOffBalanceAdjustments.balanceId} = b.id
@@ -935,7 +939,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
               ), 0),
               updated_at = now()
             FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(id, source_balance)
-            WHERE b.id = v.id
+            WHERE b.id = CAST(v.id AS int)
           `
         );
         done += chunk.length;
