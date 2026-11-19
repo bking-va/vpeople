@@ -14,7 +14,9 @@ const SAFE_NAME = /[^A-Za-z0-9._-]+/g;
 
 export const BAMBOO_RESUME_UNAVAILABLE = "bamboo:unavailable";
 
-export function isStoredResumeBlobUrl(url: string | null | undefined): boolean {
+export function isStoredResumeBlobUrl(
+  url: string | null | undefined
+): url is string {
   return Boolean(url && /^https:\/\//i.test(url));
 }
 
