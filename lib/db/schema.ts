@@ -230,6 +230,15 @@ export const employees = pgTable("employees", {
   addressCountry: text("address_country"),
   linkedInUrl: text("linkedin_url"),
   twitterUrl: text("twitter_url"),
+  ethnicity: text("ethnicity"),
+  eeoJobCategory: text("eeo_job_category"),
+  payGroup: text("pay_group"),
+  flsaExempt: boolean("flsa_exempt"),
+  standardHoursPerWeek: decimal("standard_hours_per_week", {
+    precision: 5,
+    scale: 2,
+  }),
+  timeTrackingEnabled: boolean("time_tracking_enabled"),
   githubUrl: text("github_url"),
   jobTitle: text("job_title"),
   departmentId: integer("department_id").references(() => departments.id),
@@ -947,8 +956,38 @@ export const customFieldVisibilityEnum = pgEnum("custom_field_visibility", [
   "hr_only",
 ]);
 
+export const employeeAssets = pgTable("employee_assets", {
+  id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  category: text("category"),
+  serialNumber: text("serial_number"),
+  assignedDate: date("assigned_date"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const employeeDependents = pgTable("employee_dependents", {
+  id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
+  employeeId: integer("employee_id")
+    .notNull()
+    .references(() => employees.id, { onDelete: "cascade" }),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name"),
+  relationship: text("relationship"),
+  birthDate: date("birth_date"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const customFields = pgTable("custom_fields", {
   id: serial("id").primaryKey(),
+  bambooId: text("bamboo_id").unique(),
   name: text("name").notNull(),
   fieldType: customFieldTypeEnum("field_type").notNull(),
   entityType: text("entity_type").notNull(), // "employee", "job", "compensation", etc.
@@ -961,16 +1000,25 @@ export const customFields = pgTable("custom_fields", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const customFieldValues = pgTable("custom_field_values", {
-  id: serial("id").primaryKey(),
-  customFieldId: integer("custom_field_id")
-    .notNull()
-    .references(() => customFields.id, { onDelete: "cascade" }),
-  entityId: integer("entity_id").notNull(), // ID of the employee, job, etc.
-  value: text("value"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+export const customFieldValues = pgTable(
+  "custom_field_values",
+  {
+    id: serial("id").primaryKey(),
+    customFieldId: integer("custom_field_id")
+      .notNull()
+      .references(() => customFields.id, { onDelete: "cascade" }),
+    entityId: integer("entity_id").notNull(), // ID of the employee, job, etc.
+    value: text("value"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    fieldEntityUnique: uniqueIndex("custom_field_values_field_entity_unique").on(
+      table.customFieldId,
+      table.entityId
+    ),
+  })
+);
 
 export const peopleViews = pgTable("people_views", {
   id: serial("id").primaryKey(),

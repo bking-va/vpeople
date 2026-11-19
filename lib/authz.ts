@@ -328,6 +328,21 @@ export function timingSafeEqualString(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
+/** Ethnicity/EEO demographics: HR admins only, including when viewing self. */
+export function canViewEeoDemographics(opts: {
+  canViewSensitivePersonalInfo?: boolean | null;
+}): boolean {
+  return opts.canViewSensitivePersonalInfo === true;
+}
+
+/** Dependents: the employee themselves or HR with sensitive-personal permission. */
+export function canViewDependents(opts: {
+  isViewingSelf: boolean;
+  canViewSensitivePersonalInfo?: boolean | null;
+}): boolean {
+  return opts.isViewingSelf || opts.canViewSensitivePersonalInfo === true;
+}
+
 export function canViewCustomFieldValue(opts: {
   field: { visibility?: string | null; section?: string | null; entityType?: string | null };
   isViewingSelf: boolean;
@@ -337,6 +352,9 @@ export function canViewCustomFieldValue(opts: {
 }): boolean {
   const { field } = opts;
   const section = (field.section || field.entityType || "").toLowerCase();
+  if (section === "eeo") {
+    return opts.isHROrAdmin;
+  }
   if (section === "compensation" && !opts.isViewingSelf && !opts.canViewCompensation) {
     return false;
   }

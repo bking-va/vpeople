@@ -341,6 +341,11 @@ export async function writeExtendedPayload(
     jobOpenings,
     education,
     visas,
+    assets: 0,
+    dependents: 0,
+    customFields: 0,
+    customFieldValues: 0,
+    employeeExtras: 0,
   };
 }
 

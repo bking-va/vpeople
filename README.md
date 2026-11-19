@@ -389,7 +389,7 @@ rm -f "$HOME/.cache/vpeople/bamboo-sync.json"
 
 Hourly incremental sync is `GET /api/cron/bamboo-sync` (Vercel Cron `0 * * * *`, `Authorization: Bearer $CRON_SECRET`). It uses BambooHR `employees/changed` since the last successful run. If `BAMBOOHR_API_KEY` is unset the route logs a skip and records a `skipped` row in `bamboo_sync_runs`.
 
-Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, job/status/compensation history, emergency contacts, time-off types/policies and current balances, time-off *request* history (2020–2027 on a full run; the hourly cron re-upserts the previous calendar year through 2027), ATS job openings plus Bamboo status labels, education, and visas. Hourly Bamboo balances are converted to days at 8 hours/day before they are stored, matching vPeople’s day-based deductions. Bamboo remains the system of record for entitlement: the imported amount is stored as `source_balance`, and spendable credit is that source plus local usage/manual adjustments so an hourly re-sync cannot restore already-approved leave. If a changed employee’s new supervisor is not in vPeople yet, the former `managerId` is cleared (so they lose leave-approval and manager-scoped access) and the link is retried once that supervisor exists.
+Imported when Bamboo provides them: identity, work/personal email, phones, job title, department, division, location, hire/termination dates, employment status, manager (`supervisorEId`), gender, DOB, address, LinkedIn/Twitter, ethnicity/EEO (HR-admin only), pay group/FLSA/hours/time-tracking flags, job/status/compensation history, emergency contacts, time-off types/policies and current balances, time-off *request* history (2020–2027 on a full run; the hourly cron re-upserts the previous calendar year through 2027), ATS job openings plus Bamboo status labels, education, visas, assigned assets, dependents (self or HR), and Bamboo `/meta/fields` custom fields plus values (comp-sensitive and EEO fields are `hr_only`). Hourly Bamboo balances are converted to days at 8 hours/day before they are stored, matching vPeople’s day-based deductions. Bamboo remains the system of record for entitlement: the imported amount is stored as `source_balance`, and spendable credit is that source plus local usage/manual adjustments so an hourly re-sync cannot restore already-approved leave. If a changed employee’s new supervisor is not in vPeople yet, the former `managerId` is cleared (so they lose leave-approval and manager-scoped access) and the link is retried once that supervisor exists.
 
 Time-off types/policies come from `GET /meta/time_off/types` and `GET /meta/time_off/policies` (`GET /time_off/types` 404s and is not used). Requests come from `GET /time_off/requests` one year at a time. ATS jobs come from `GET /applicant_tracking/jobs?statusGroups=ALL` with `GET /applicant_tracking/statuses` for the 117-status map. Education and visas come from `GET /employees/all/tables/{alias}` after `/meta/tables`.
 
@@ -419,7 +419,20 @@ npx tsx scripts/bamboo-sync.ts --files --skip-blobs /tmp/db_url.txt
 - **Blob storage:** private Vercel Blob, plan ~38GB. Requires `BLOB_READ_WRITE_TOKEN`. `--skip-blobs` stores metadata only.
 - **New env vars:** none beyond `BLOB_READ_WRITE_TOKEN`. Hourly cron does not download files.
 
-Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, custom Bamboo fields, FLSA/payroll flags. Compensation is stored but never printed.
+Assets, dependents, `/meta/fields` custom fields, and remaining safe employee extras (ethnicity/EEO, pay group, FLSA exempt, hours/week, time tracking) are part of the **hourly employee sync**, not a separate job. Historical import never sends email or notifications.
+
+```bash
+npm run db:migrate   # through drizzle/0035_bamboo_sync_metadata.sql
+npx tsx scripts/bamboo-sync.ts --replace-demo --cache "$HOME/.cache/vpeople/bamboo-sync.json" /tmp/db_url.txt
+npx tsx scripts/bamboo-sync.ts --incremental /tmp/db_url.txt
+```
+
+- **Expected runtime:** minutes, not hours. ~340 assets, ~27 dependents, ~233 field definitions, and custom values for ~2400 employees ride along with the employee sync. `--cache` version is 3 (invalidates v2 caches so extras are fetched).
+- **Blob storage:** none for this dataset.
+- **New env vars:** none.
+- **Access:** ethnicity/EEO is HR-admin only (not the employee). Dependents are self or HR. Comp-sensitive custom fields use `hr_only` plus the existing compensation section check. SIN/SSN/bank/credit-card aliases from `/meta/fields` are never requested or stored.
+
+Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ACA, photos, certifications, stock/equity grants, `includeInPayroll`. Compensation is stored but never printed.
 
 ## Contributing
 

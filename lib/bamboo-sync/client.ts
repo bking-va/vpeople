@@ -37,6 +37,10 @@ const ALLOWED_FULL_TABLES = new Set([
   "employeeEducation",
   "visas",
   "employeeVisas",
+  "employeeAssets",
+  "assets",
+  "dependents",
+  "employeeDependents",
 ]);
 export const ATS_APPLICATIONS_MAX_PAGES = 2000;
 export const BAMBOO_ATS_DETAIL_CONCURRENCY = 8;
@@ -333,18 +337,45 @@ export class BambooHrClient {
     throw lastError;
   }
 
-  async fetchAllEmployees(): Promise<BambooEmployeeRecord[]> {
+  async fetchCustomReport(opts: {
+    title: string;
+    fields: string[];
+    employeeIds?: string[];
+  }): Promise<BambooEmployeeRecord[]> {
+    const fields = opts.fields.filter((field) => SAFE_PATH_SEGMENT.test(field));
+    if (fields.length === 0) return [];
+    const body: Record<string, unknown> = {
+      title: opts.title,
+      fields,
+    };
+    if (opts.employeeIds && opts.employeeIds.length > 0) {
+      body.filters = {
+        employeeIds: opts.employeeIds.filter((id) => SAFE_PATH_SEGMENT.test(id)),
+      };
+    }
     const payload = await this.request("/reports/custom?format=JSON", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: "vPeople employee sync",
-        fields: [...IMPORTED_EMPLOYEE_FIELDS],
-      }),
+      body: JSON.stringify(body),
     });
     const employees = asRecord(payload).employees;
     if (!Array.isArray(employees)) return [];
     return employees.map((row) => row as BambooEmployeeRecord);
+  }
+
+  async fetchAllEmployees(): Promise<BambooEmployeeRecord[]> {
+    return this.fetchCustomReport({
+      title: "vPeople employee sync",
+      fields: [...IMPORTED_EMPLOYEE_FIELDS],
+    });
+  }
+
+  async fetchMetaFields(): Promise<unknown[]> {
+    const payload = await this.request("/meta/fields");
+    if (Array.isArray(payload)) return payload;
+    const root = asRecord(payload);
+    if (Array.isArray(root.fields)) return root.fields;
+    return [];
   }
 
   async fetchChangedEmployees(

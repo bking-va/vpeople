@@ -3,18 +3,46 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { customFields, employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getSessionUserPermissions } from "@/lib/permissions";
+import { canViewCustomFieldValue } from "@/lib/authz";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.employeeId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    const fields = await db
+    const permissions = await getSessionUserPermissions(session);
+    const entityId = request.nextUrl.searchParams.get("entityId");
+    const targetEmployeeId = entityId ? parseInt(entityId, 10) : NaN;
+    const isViewingSelf =
+      Number.isFinite(targetEmployeeId) &&
+      session.user.employeeId === targetEmployeeId;
+    let isManager = false;
+    if (Number.isFinite(targetEmployeeId)) {
+      const [target] = await db
+        .select({ managerId: employees.managerId })
+        .from(employees)
+        .where(eq(employees.id, targetEmployeeId))
+        .limit(1);
+      isManager = target?.managerId === session.user.employeeId;
+    }
+
+    const allFields = await db
       .select()
       .from(customFields)
       .orderBy(customFields.section, customFields.orderIndex);
+
+    const fields = allFields.filter((field) =>
+      canViewCustomFieldValue({
+        field,
+        isViewingSelf,
+        isManager,
+        isHROrAdmin: permissions.canManageUsers,
+        canViewCompensation: permissions.canViewCompensation,
+      })
+    );
 
     return NextResponse.json({ fields });
   } catch (error: unknown) {

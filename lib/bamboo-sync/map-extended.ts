@@ -361,11 +361,21 @@ export function emptyDatasetCounts(): {
   jobOpenings: number;
   education: number;
   visas: number;
+  assets: number;
+  dependents: number;
+  customFields: number;
+  customFieldValues: number;
+  employeeExtras: number;
 } {
   return {
     timeOffRequests: 0,
     jobOpenings: 0,
     education: 0,
     visas: 0,
+    assets: 0,
+    dependents: 0,
+    customFields: 0,
+    customFieldValues: 0,
+    employeeExtras: 0,
   };
 }
