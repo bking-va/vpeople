@@ -1020,6 +1020,27 @@ export const customFieldValues = pgTable(
   })
 );
 
+export const employeeCompensationTableRows = pgTable(
+  "employee_compensation_table_rows",
+  {
+    id: serial("id").primaryKey(),
+    bambooId: text("bamboo_id").unique(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    tableAlias: text("table_alias").notNull(),
+    rowData: jsonb("row_data").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    employeeAliasIdx: index("employee_comp_table_rows_employee_alias_idx").on(
+      table.employeeId,
+      table.tableAlias
+    ),
+  })
+);
+
 export const peopleViews = pgTable("people_views", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),

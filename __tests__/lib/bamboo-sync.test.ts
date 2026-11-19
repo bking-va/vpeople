@@ -489,6 +489,7 @@ class MemoryStore implements BambooSyncStore {
   dependents: Array<Record<string, unknown>> = [];
   customFields: Array<Record<string, unknown>> = [];
   customFieldValues: Array<Record<string, unknown>> = [];
+  compensationTableRows: Array<Record<string, unknown>> = [];
   approvalRequests: Array<Record<string, unknown>> = [];
   writes = 0;
   nextId = 1;
@@ -1024,6 +1025,25 @@ class MemoryStore implements BambooSyncStore {
     return rows.length;
   }
 
+  async upsertCompensationTableRowsBatch(
+    rows: Array<Record<string, unknown>>,
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    let done = 0;
+    for (const row of rows) {
+      this.writes += 1;
+      const bambooId = String(row.bambooId);
+      const existing = this.compensationTableRows.find(
+        (item) => item.bambooId === bambooId
+      );
+      if (existing) Object.assign(existing, row);
+      else this.compensationTableRows.push({ ...row });
+      done += 1;
+      progress?.onProgress?.(done, rows.length);
+    }
+    return rows.length;
+  }
+
   candidates: Array<Record<string, unknown>> = [];
   candidateAnswers: Array<Record<string, unknown>> = [];
   candidateComments: Array<Record<string, unknown>> = [];
@@ -1198,7 +1218,8 @@ class MemoryStore implements BambooSyncStore {
       | "visas"
       | "candidates"
       | "assets"
-      | "dependents",
+      | "dependents"
+      | "compensation_tables",
     keepBambooIds: string[],
     progress?: { onProgress?: (done: number, total: number) => void }
   ): Promise<number> {
@@ -1216,7 +1237,9 @@ class MemoryStore implements BambooSyncStore {
                 ? this.assets
                 : kind === "dependents"
                   ? this.dependents
-                  : this.visas;
+                  : kind === "compensation_tables"
+                    ? this.compensationTableRows
+                    : this.visas;
     const next = collection.filter((row) => keep.has(String(row.bambooId)));
     const removed = collection.length - next.length;
     collection.length = 0;
@@ -1785,6 +1808,7 @@ describe("runBambooSync", () => {
       customFields: 0,
       customFieldValues: 0,
       employeeExtras: 0,
+      compensationTableRows: 0,
     });
     expect(store.timeOffRequests).toHaveLength(2);
     expect(store.timeOffRequests.every((row) => row.workflowId == null)).toBe(true);
@@ -1865,6 +1889,40 @@ describe("runBambooSync", () => {
     expect(result.datasetCounts.assets).toBe(1);
     expect(result.datasetCounts.dependents).toBe(1);
     expect(result.datasetCounts.customFields).toBe(1);
+  });
+
+  it("imports Bamboo custom compensation tables without email", async () => {
+    const store = new MemoryStore();
+    const result = await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        fetch: mockBambooFetch({
+          report: {
+            employees: [bambooEmployee({ id: "101", workEmail: "ada@vendasta.com" })],
+          },
+          timeOffTypes: { timeOffTypes: [] },
+          allTables: {
+            customAnnualBonus: {
+              "101": [{ id: "22", amount: "2500", currency: "CAD", ssn: "111-22-3333" }],
+            },
+          },
+        }),
+      }),
+      store,
+      mode: "full",
+    });
+    expect(result.status).toBe("success");
+    expect(store.emailsSent).toBe(0);
+    expect(store.compensationTableRows).toEqual([
+      expect.objectContaining({
+        bambooId: "ct:customAnnualBonus:101:22",
+        tableAlias: "customAnnualBonus",
+        rowData: expect.not.objectContaining({ ssn: "111-22-3333" }),
+      }),
+    ]);
+    expect(JSON.stringify(store.compensationTableRows)).not.toMatch(/111-22-3333/);
+    expect(result.datasetCounts.compensationTableRows).toBe(1);
   });
 
   it("fails the run instead of wiping job history when a table fetch errors", async () => {
@@ -2671,7 +2729,7 @@ describe("BambooHR fast import", () => {
       `bamboo-forged-${process.pid}-${Date.now()}.json`
     );
     const forged: BambooSyncSnapshot = {
-      version: 3,
+      version: 4,
       mode: "full",
       fetchedAt: "2026-01-01T00:00:00Z",
       employees: [
@@ -2707,6 +2765,7 @@ describe("BambooHR fast import", () => {
         assets: {},
         dependents: {},
       },
+      compensationTables: { tables: {} },
     };
     await writeFile(cachePath, JSON.stringify(forged), { mode: 0o666 });
     await chmod(cachePath, 0o666);
@@ -2741,7 +2800,7 @@ describe("BambooHR fast import", () => {
     const cacheDir = await mkdtemp(path.join(os.tmpdir(), "bamboo-sync-cache-"));
     await chmod(cacheDir, 0o700);
     const snapshot: BambooSyncSnapshot = {
-      version: 3,
+      version: 4,
       mode: "full",
       fetchedAt: "2026-01-01T00:00:00Z",
       employees: [
@@ -2776,6 +2835,7 @@ describe("BambooHR fast import", () => {
         assets: {},
         dependents: {},
       },
+      compensationTables: { tables: {} },
     };
     try {
       const writablePath = path.join(cacheDir, "writable.json");

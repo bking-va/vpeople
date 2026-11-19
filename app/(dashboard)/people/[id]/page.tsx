@@ -25,6 +25,7 @@ import {
   employeeEducation,
   employeeVisas,
   employeeAssets,
+  employeeCompensationTableRows,
   employeeDependents,
 } from "@/lib/db/schema";
 import { eq, desc, inArray } from "drizzle-orm";
@@ -36,6 +37,7 @@ import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getSessionUserPermissions } from "@/lib/permissions";
 import {
+  canViewBambooCompensationTables,
   canViewDependents,
   canViewEeoDemographics,
   canViewImmigrationNumbers,
@@ -49,6 +51,7 @@ import {
 } from "@/lib/authz";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
 import Link from "next/link";
+import { compensationTableLabel } from "@/lib/bamboo-sync/map-comp-tables";
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 import { CompensationEditForm } from "@/components/compensation-edit-form";
@@ -212,7 +215,10 @@ export default async function EmployeeProfilePage({
   const permissions = await getSessionUserPermissions(session);
   
   // Allow viewing own data or use DB permissions
-  const canViewCompensation = isViewingSelf || permissions.canViewCompensation;
+  const canViewCompensation = canViewBambooCompensationTables({
+    isViewingSelf,
+    canViewCompensation: permissions.canViewCompensation,
+  });
   const canEditCompensation = permissions.canEditCompensation;
   const canViewSensitivePersonalInfo = isViewingSelf || permissions.canViewSensitivePersonalInfo;
   const canSeeEeo = canViewEeoDemographics({
@@ -260,6 +266,18 @@ export default async function EmployeeProfilePage({
         .limit(1)
         .then((rows) => rows[0] || { roeCode: null, terminationType: null })
     : { roeCode: null, terminationType: null };
+
+  const compensationTableRows = canViewCompensation
+    ? await db
+        .select({
+          id: employeeCompensationTableRows.id,
+          tableAlias: employeeCompensationTableRows.tableAlias,
+          rowData: employeeCompensationTableRows.rowData,
+        })
+        .from(employeeCompensationTableRows)
+        .where(eq(employeeCompensationTableRows.employeeId, employeeId))
+        .orderBy(employeeCompensationTableRows.tableAlias)
+    : [];
 
   const [compHistory, bonuses, equity] = canViewCompensation
     ? await Promise.all([
@@ -888,6 +906,45 @@ export default async function EmployeeProfilePage({
                       </div>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {compensationTableRows.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Bamboo compensation tables</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {compensationTableRows.map((row) => (
+                    <div key={row.id} className="border rounded-lg p-3 space-y-2">
+                      <p className="text-sm font-medium">
+                        {compensationTableLabel(row.tableAlias)}
+                      </p>
+                      <div className="grid md:grid-cols-2 gap-2 text-sm">
+                        {Object.entries(row.rowData ?? {})
+                          .filter(
+                            ([key]) =>
+                              key !== "id" &&
+                              key !== "employeeId" &&
+                              !/ssn|sin|bank|iban|routing|credit/i.test(key)
+                          )
+                          .map(([key, value]) => (
+                            <InfoField
+                              key={key}
+                              label={key}
+                              value={
+                                value == null || value === ""
+                                  ? null
+                                  : typeof value === "object"
+                                    ? JSON.stringify(value)
+                                    : String(value)
+                              }
+                            />
+                          ))}
+                      </div>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
             )}

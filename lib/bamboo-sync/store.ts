@@ -19,6 +19,7 @@ import {
   emergencyContacts,
   customFields,
   employeeAssets,
+  employeeCompensationTableRows,
   employeeDependents,
   employeeEducation,
   employeeNotes,
@@ -1462,6 +1463,48 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       return rows.length;
     },
 
+    async upsertCompensationTableRowsBatch(rows, progress) {
+      if (rows.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(rows, size)) {
+        const tuples = chunk.map(
+          (row) => sql`(
+            ${row.bambooId},
+            CAST(${row.employeeId} AS int),
+            ${row.tableAlias},
+            CAST(${JSON.stringify(row.rowData)} AS jsonb)
+          )`
+        );
+        await executeSql(
+          db,
+          sql`
+            INSERT INTO employee_compensation_table_rows (
+              bamboo_id, employee_id, table_alias, row_data, created_at, updated_at
+            )
+            SELECT
+              v.bamboo_id,
+              CAST(v.employee_id AS int),
+              v.table_alias,
+              CAST(v.row_data AS jsonb),
+              now(),
+              now()
+            FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
+              bamboo_id, employee_id, table_alias, row_data
+            )
+            ON CONFLICT (bamboo_id) DO UPDATE SET
+              employee_id = CAST(EXCLUDED.employee_id AS int),
+              table_alias = EXCLUDED.table_alias,
+              row_data = CAST(EXCLUDED.row_data AS jsonb),
+              updated_at = now()
+          `
+        );
+        done += chunk.length;
+        reportChunkProgress(progress, done, rows.length);
+      }
+      return rows.length;
+    },
+
     async listJobOpeningIdsByBambooId() {
       const rows: Array<{ id: number; bambooId: string | null }> = await db
         .select({ id: jobOpenings.id, bambooId: jobOpenings.bambooId })
@@ -2082,7 +2125,9 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
                   ? employeeAssets
                   : kind === "dependents"
                     ? employeeDependents
-                    : employeeVisas;
+                    : kind === "compensation_tables"
+                      ? employeeCompensationTableRows
+                      : employeeVisas;
       const existing: Array<{ id: number; bambooId: string | null }> = await db
         .select({
           id: table.id,

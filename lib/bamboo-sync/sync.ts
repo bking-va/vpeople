@@ -31,6 +31,13 @@ import {
   type MetadataFetchPayload,
 } from "./metadata";
 import {
+  emptyCompensationTablesPayload,
+  fetchCompensationTablesPayload,
+  mapCompensationTablesPayload,
+  writeCompensationTablesPayload,
+  type CompensationTablesFetchPayload,
+} from "./comp-tables";
+import {
   blankToNull,
   isBrendanWorkEmail,
   mapEmergencyContact,
@@ -224,8 +231,18 @@ export interface BambooSyncStore {
       | "visas"
       | "candidates"
       | "assets"
-      | "dependents",
+      | "dependents"
+      | "compensation_tables",
     keepBambooIds: string[],
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertCompensationTableRowsBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      tableAlias: string;
+      rowData: Record<string, unknown>;
+    }>,
     progress?: BatchProgress
   ): Promise<number>;
   updateEmployeeExtrasBatch(
@@ -464,6 +481,7 @@ type SyncFetchPayload = {
   balancesByBambooId: Map<string, Array<{ name: string; balance: string }>>;
   extended: ExtendedFetchPayload;
   metadata: MetadataFetchPayload;
+  compensationTables: CompensationTablesFetchPayload;
 };
 
 function tableKeyCount(table: TableRows | null): number {
@@ -483,6 +501,8 @@ function snapshotToPayload(snapshot: BambooSyncSnapshot): SyncFetchPayload {
     balancesByBambooId: new Map(Object.entries(snapshot.balances)),
     extended: snapshot.extended ?? emptyExtendedPayload(),
     metadata: snapshot.metadata ?? emptyMetadataPayload(),
+    compensationTables:
+      snapshot.compensationTables ?? emptyCompensationTablesPayload(),
   };
 }
 
@@ -507,6 +527,7 @@ function payloadToSnapshot(
     balances: Object.fromEntries(payload.balancesByBambooId),
     extended: payload.extended,
     metadata: payload.metadata,
+    compensationTables: payload.compensationTables,
   };
 }
 
@@ -642,6 +663,7 @@ async function fetchHttpPayload(
 
   const extended = await fetchExtendedPayload(client, mode, now, log);
   const metadata = await fetchMetadataPayload(client, log);
+  const compensationTables = await fetchCompensationTablesPayload(client, log);
   log("Phase fetch complete");
 
   return {
@@ -656,6 +678,7 @@ async function fetchHttpPayload(
     balancesByBambooId: balances,
     extended,
     metadata,
+    compensationTables,
   };
 }
 
@@ -789,6 +812,10 @@ export async function runBambooSync(
       log
     );
     payload.metadata = await fetchMetadataPayload(opts.client, log);
+    payload.compensationTables = await fetchCompensationTablesPayload(
+      opts.client,
+      log
+    );
   }
 
   mapped = payload.employees
@@ -798,10 +825,11 @@ export async function runBambooSync(
   unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
   const wouldCreate = mapped.filter((row) => !existingByBambooId.has(row.bambooId)).length;
   const wouldUpdate = mapped.length - wouldCreate;
-  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId, extended, metadata } =
+  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId, extended, metadata, compensationTables } =
     payload;
   const mappedExtended = mapExtendedPayload(extended);
   const mappedMetadata = mapMetadataPayload(metadata);
+  const mappedCompTables = mapCompensationTablesPayload(compensationTables);
 
   log(`Fetched ${mapped.length} employees`);
   log(`Bamboo ids: ${bambooIds.join(", ")}`);
@@ -843,6 +871,7 @@ export async function runBambooSync(
         customFields: mappedMetadata.customFields.length,
         customFieldValues: mappedMetadata.customFieldValues.length,
         employeeExtras: mappedMetadata.extras.length,
+        compensationTableRows: mappedCompTables.length,
       },
     };
   }
@@ -1139,9 +1168,18 @@ export async function runBambooSync(
       writeProgress,
       log
     );
+    const compensationTableRows = await writeCompensationTablesPayload(
+      store,
+      compensationTables,
+      idByBambooId,
+      opts.mode,
+      writeProgress,
+      log
+    );
     const datasetCounts = {
       ...extendedCounts,
       ...metadataCounts,
+      compensationTableRows,
     };
 
     const deletedExisting = deletedBambooIds.filter((id) =>
@@ -1245,5 +1283,6 @@ export function formatSyncSummary(result: BambooSyncResult): string {
     `assets=${result.datasetCounts.assets}`,
     `dependents=${result.datasetCounts.dependents}`,
     `customFields=${result.datasetCounts.customFields}`,
+    `compensationTableRows=${result.datasetCounts.compensationTableRows}`,
   ].join("\n");
 }

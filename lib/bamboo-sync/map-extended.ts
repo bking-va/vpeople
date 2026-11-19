@@ -363,6 +363,7 @@ export function emptyDatasetCounts(): {
   customFields: number;
   customFieldValues: number;
   employeeExtras: number;
+  compensationTableRows: number;
 } {
   return {
     timeOffRequests: 0,
@@ -374,5 +375,6 @@ export function emptyDatasetCounts(): {
     customFields: 0,
     customFieldValues: 0,
     employeeExtras: 0,
+    compensationTableRows: 0,
   };
 }
