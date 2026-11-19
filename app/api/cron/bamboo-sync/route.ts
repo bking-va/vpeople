@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
       reportsToResolved: result.reportsToResolved,
       bambooIds: result.bambooIds,
       unmappedFields: result.unmappedFields,
+      datasetCounts: result.datasetCounts,
     });
   } catch {
     console.error("Bamboo sync failed");

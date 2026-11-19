@@ -180,6 +180,79 @@ export type BambooChangedEmployee = {
 
 export type BambooSyncMode = "full" | "incremental";
 
+export type TimeOffRequestStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "cancelled";
+
+export type JobOpeningStatus =
+  | "draft"
+  | "open"
+  | "on_hold"
+  | "filled"
+  | "canceled";
+
+export type BambooSyncDatasetCounts = {
+  timeOffRequests: number;
+  jobOpenings: number;
+  education: number;
+  visas: number;
+};
+
+export type MappedTimeOffRequestWrite = {
+  bambooId: string;
+  employeeBambooId: string;
+  typeName: string;
+  typeBambooId: string | null;
+  startDate: string;
+  endDate: string;
+  daysRequested: string;
+  status: TimeOffRequestStatus;
+  notes: string | null;
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  createdAt: string | null;
+};
+
+export type MappedJobOpeningWrite = {
+  bambooId: string;
+  title: string;
+  departmentName: string | null;
+  locationName: string | null;
+  hiringLeadBambooId: string | null;
+  status: JobOpeningStatus;
+  bambooStatusId: string | null;
+  bambooStatusLabel: string | null;
+  employmentType: string;
+  description: string | null;
+  requirements: string | null;
+  openDate: string | null;
+  closeDate: string | null;
+};
+
+export type MappedEducationWrite = {
+  bambooId: string;
+  employeeBambooId: string;
+  institution: string;
+  degree: string | null;
+  fieldOfStudy: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  notes: string | null;
+};
+
+export type MappedVisaWrite = {
+  bambooId: string;
+  employeeBambooId: string;
+  visaType: string;
+  country: string;
+  documentNumber: string | null;
+  issuedDate: string | null;
+  expiryDate: string | null;
+  status: string;
+};
+
 export type BambooSyncResult = {
   status: "success" | "skipped" | "failed";
   dryRun: boolean;
@@ -193,5 +266,6 @@ export type BambooSyncResult = {
   bambooIds: string[];
   writes: number;
   latestChanged: string | null;
+  datasetCounts: BambooSyncDatasetCounts;
   errorMessage?: string;
 };

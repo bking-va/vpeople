@@ -25,6 +25,17 @@ export {
   parsePayRate,
   resolveLoginEmails,
 } from "./map";
+export {
+  BAMBOO_TIME_OFF_REQUEST_END_YEAR,
+  BAMBOO_TIME_OFF_REQUEST_START_YEAR,
+  mapAtsJob,
+  mapEducationRow,
+  mapJobOpeningStatus,
+  mapTimeOffRequest,
+  mapTimeOffRequestStatus,
+  mapVisaRow,
+  timeOffRequestYears,
+} from "./map-extended";
 export { createBambooSyncStore, applyBambooWriteGuards } from "./store";
 export {
   BAMBOO_WRITE_CHUNK_SIZE,

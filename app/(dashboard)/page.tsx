@@ -13,7 +13,7 @@ import {
   documents,
   announcements,
 } from "@/lib/db/schema";
-import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, sql, inArray, isNull } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,7 +139,12 @@ export default async function HomePage() {
           .from(timeOffRequests)
           .leftJoin(employees, eq(timeOffRequests.employeeId, employees.id))
           .leftJoin(timeOffPolicies, eq(timeOffRequests.policyId, timeOffPolicies.id))
-          .where(eq(timeOffRequests.status, "pending"))
+          .where(
+            and(
+              eq(timeOffRequests.status, "pending"),
+              isNull(timeOffRequests.bambooId)
+            )
+          )
           .limit(5)
       : reportIds.length > 0
         ? db
@@ -154,6 +159,7 @@ export default async function HomePage() {
             .where(
               and(
                 eq(timeOffRequests.status, "pending"),
+                isNull(timeOffRequests.bambooId),
                 inArray(timeOffRequests.employeeId, reportIds)
               )
             )

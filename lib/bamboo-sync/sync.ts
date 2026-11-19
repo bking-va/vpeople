@@ -16,6 +16,14 @@ import {
   BAMBOO_PROGRESS_EVERY,
 } from "./client";
 import {
+  emptyExtendedPayload,
+  fetchExtendedPayload,
+  mapExtendedPayload,
+  writeExtendedPayload,
+  type ExtendedFetchPayload,
+} from "./extended";
+import { emptyDatasetCounts } from "./map-extended";
+import {
   blankToNull,
   isBrendanWorkEmail,
   mapEmergencyContact,
@@ -130,7 +138,7 @@ export interface BambooSyncStore {
   ): Promise<void>;
   upsertTimeOffPolicy(name: string, policyType: string): Promise<number>;
   upsertTimeOffPoliciesBatch(
-    policies: Array<{ name: string; policyType: string }>
+    policies: Array<{ name: string; policyType: string; bambooId?: string | null }>
   ): Promise<Map<string, number>>;
   upsertTimeOffBalance(
     employeeId: number,
@@ -141,6 +149,71 @@ export interface BambooSyncStore {
     rows: Array<{ employeeId: number; policyId: number; sourceBalance: string }>,
     progress?: BatchProgress
   ): Promise<void>;
+  upsertTimeOffRequestsBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      policyId: number;
+      startDate: string;
+      endDate: string;
+      daysRequested: string;
+      status: "pending" | "approved" | "denied" | "cancelled";
+      notes: string | null;
+      reviewNotes: string | null;
+      reviewedAt: string | null;
+      createdAt: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertJobOpeningsBatch(
+    rows: Array<{
+      bambooId: string;
+      title: string;
+      departmentId: number | null;
+      locationId: number | null;
+      hiringLeadId: number | null;
+      status: "draft" | "open" | "on_hold" | "filled" | "canceled";
+      bambooStatusId: string | null;
+      bambooStatusLabel: string | null;
+      employmentType: string;
+      description: string | null;
+      requirements: string | null;
+      openDate: string | null;
+      closeDate: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertEducationBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      institution: string;
+      degree: string | null;
+      fieldOfStudy: string | null;
+      startDate: string | null;
+      endDate: string | null;
+      notes: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertVisasBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      visaType: string;
+      country: string;
+      documentNumber: string | null;
+      issuedDate: string | null;
+      expiryDate: string | null;
+      status: string;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  pruneImportedRowsNotIn(
+    kind: "time_off_requests" | "job_openings" | "education" | "visas",
+    keepBambooIds: string[],
+    progress?: BatchProgress
+  ): Promise<number>;
   applyBrendanCarryOver(opts: BrendanSnapshot): Promise<boolean>;
   recordSyncRun(run: Record<string, unknown>): Promise<void>;
   lastSuccessfulIncrementalCursor(): Promise<string | null>;
@@ -212,6 +285,7 @@ type SyncFetchPayload = {
   contacts: TableRows | null;
   timeOffTypes: Array<{ id: string; name: string; units?: string }>;
   balancesByBambooId: Map<string, Array<{ name: string; balance: string }>>;
+  extended: ExtendedFetchPayload;
 };
 
 function tableKeyCount(table: TableRows | null): number {
@@ -229,6 +303,7 @@ function snapshotToPayload(snapshot: BambooSyncSnapshot): SyncFetchPayload {
     contacts: snapshot.tables.emergencyContacts,
     timeOffTypes: snapshot.timeOffTypes,
     balancesByBambooId: new Map(Object.entries(snapshot.balances)),
+    extended: snapshot.extended ?? emptyExtendedPayload(),
   };
 }
 
@@ -251,6 +326,7 @@ function payloadToSnapshot(
     },
     timeOffTypes: payload.timeOffTypes,
     balances: Object.fromEntries(payload.balancesByBambooId),
+    extended: payload.extended,
   };
 }
 
@@ -383,6 +459,8 @@ async function fetchHttpPayload(
   if (failed > 0) {
     log(`time-off balances failed: ${failed}`);
   }
+
+  const extended = await fetchExtendedPayload(client, mode, now, log);
   log("Phase fetch complete");
 
   return {
@@ -395,6 +473,7 @@ async function fetchHttpPayload(
     contacts,
     timeOffTypes,
     balancesByBambooId: balances,
+    extended,
   };
 }
 
@@ -434,6 +513,7 @@ export async function runBambooSync(
       bambooIds: [],
       writes: dryRun ? 0 : 1,
       latestChanged: null,
+      datasetCounts: emptyDatasetCounts(),
     };
   }
 
@@ -474,6 +554,7 @@ export async function runBambooSync(
       contacts: null,
       timeOffTypes: [],
       balancesByBambooId: new Map(),
+      extended: emptyExtendedPayload(),
     };
   } else if (opts.cachePath) {
     await assertSafeCacheLocation(opts.cachePath);
@@ -518,6 +599,15 @@ export async function runBambooSync(
     );
   }
 
+  if (dryRun) {
+    payload.extended = await fetchExtendedPayload(
+      opts.client,
+      opts.mode,
+      opts.now ?? new Date(),
+      log
+    );
+  }
+
   mapped = payload.employees
     .map((row) => mapEmployeeRecord(row))
     .filter((row) => row.bambooId);
@@ -525,8 +615,9 @@ export async function runBambooSync(
   unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
   const wouldCreate = mapped.filter((row) => !existingByBambooId.has(row.bambooId)).length;
   const wouldUpdate = mapped.length - wouldCreate;
-  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId } =
+  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId, extended } =
     payload;
+  const mappedExtended = mapExtendedPayload(extended);
 
   log(`Fetched ${mapped.length} employees`);
   log(`Bamboo ids: ${bambooIds.join(", ")}`);
@@ -537,6 +628,9 @@ export async function runBambooSync(
   if (opts.replaceDemo) {
     log(`Demo employees that would be removed: ${demoExisting.length}`);
   }
+  log(
+    `Would import timeOffRequests=${mappedExtended.timeOffRequests.length} jobOpenings=${mappedExtended.jobOpenings.length} education=${mappedExtended.education.length} visas=${mappedExtended.visas.length}`
+  );
 
   if (dryRun) {
     return {
@@ -554,6 +648,12 @@ export async function runBambooSync(
       bambooIds,
       writes: 0,
       latestChanged,
+      datasetCounts: {
+        timeOffRequests: mappedExtended.timeOffRequests.length,
+        jobOpenings: mappedExtended.jobOpenings.length,
+        education: mappedExtended.education.length,
+        visas: mappedExtended.visas.length,
+      },
     };
   }
 
@@ -833,6 +933,15 @@ export async function runBambooSync(
       writeProgress("time_off_balances")
     );
 
+    const datasetCounts = await writeExtendedPayload(
+      store,
+      extended,
+      idByBambooId,
+      opts.mode,
+      writeProgress,
+      log
+    );
+
     const deletedExisting = deletedBambooIds.filter((id) =>
       existingByBambooId.has(id)
     );
@@ -856,10 +965,14 @@ export async function runBambooSync(
       demoRemoved,
       latestChanged,
       unmappedFields,
+      datasetCounts,
     });
 
     log(`Upserted ${created} created, ${updated} updated`);
     log(`Reports-to resolved: ${reportsToResolved}`);
+    log(
+      `Extended datasets timeOffRequests=${datasetCounts.timeOffRequests} jobOpenings=${datasetCounts.jobOpenings} education=${datasetCounts.education} visas=${datasetCounts.visas}`
+    );
     log("Phase write: complete");
 
     return {
@@ -875,6 +988,7 @@ export async function runBambooSync(
       bambooIds,
       writes: created + updated + demoRemoved + 1,
       latestChanged,
+      datasetCounts,
     };
   });
   } catch (error: unknown) {
@@ -904,6 +1018,7 @@ export async function runBambooSync(
       bambooIds,
       writes: dryRun ? 0 : 1,
       latestChanged: null,
+      datasetCounts: emptyDatasetCounts(),
       errorMessage: message,
     };
   }
@@ -921,5 +1036,9 @@ export function formatSyncSummary(result: BambooSyncResult): string {
     `brendanAdminBound=${result.brendanAdminBound}`,
     `unmappedFields=${result.unmappedFields.join("|") || "(none)"}`,
     `bambooIds=${result.bambooIds.join(",")}`,
+    `timeOffRequests=${result.datasetCounts.timeOffRequests}`,
+    `jobOpenings=${result.datasetCounts.jobOpenings}`,
+    `education=${result.datasetCounts.education}`,
+    `visas=${result.datasetCounts.visas}`,
   ].join("\n");
 }

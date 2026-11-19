@@ -31,7 +31,12 @@ const ALLOWED_TABLES = new Set([
   "compensation",
   "emergencyContacts",
 ]);
-
+const ALLOWED_FULL_TABLES = new Set([
+  "education",
+  "employeeEducation",
+  "visas",
+  "employeeVisas",
+]);
 export function assertSafeBambooSubdomain(subdomain: string): string {
   const value = subdomain.trim();
   if (!SAFE_SUBDOMAIN.test(value)) {
@@ -360,6 +365,204 @@ export class BambooHrClient {
       result[bambooId] = tableRowsForEmployee({ [bambooId]: value, employees: source }, bambooId);
     }
     return result;
+  }
+
+  async fetchTimeOffPolicies(): Promise<Array<{ id: string; name: string; timeOffTypeId?: string }>> {
+    const payload = await this.request("/meta/time_off/policies");
+    const root = asRecord(payload);
+    const list = Array.isArray(payload)
+      ? payload
+      : Array.isArray(root.timeOffPolicies)
+        ? root.timeOffPolicies
+        : [];
+    return list
+      .map((row) => asRecord(row))
+      .map((row) => ({
+        id: String(row.id ?? ""),
+        name: String(row.name ?? row.id ?? "Time Off"),
+        timeOffTypeId:
+          typeof row.timeOffTypeId === "string" || typeof row.timeOffTypeId === "number"
+            ? String(row.timeOffTypeId)
+            : undefined,
+      }))
+      .filter((row) => row.name);
+  }
+
+  async fetchTimeOffRequests(
+    start: string,
+    end: string
+  ): Promise<Array<Record<string, unknown>>> {
+    const statuses = [
+      "approved",
+      "denied",
+      "canceled",
+      "cancelled",
+      "requested",
+      "superceded",
+    ].join(",");
+    const payload = await this.request(
+      `/time_off/requests/?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&status=${encodeURIComponent(statuses)}`
+    );
+    const root = asRecord(payload);
+    const list = Array.isArray(payload)
+      ? payload
+      : Array.isArray(root.requests)
+        ? root.requests
+        : Array.isArray(root.timeOffRequests)
+          ? root.timeOffRequests
+          : [];
+    return list.filter(
+      (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+    );
+  }
+
+  async fetchTimeOffRequestsForYears(
+    years: number[]
+  ): Promise<Array<Record<string, unknown>>> {
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const year of years) {
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) continue;
+      const rows = await this.fetchTimeOffRequests(
+        `${year}-01-01`,
+        `${year}-12-31`
+      );
+      for (const row of rows) {
+        const id = String(asRecord(row).id ?? "");
+        if (id) byId.set(id, row);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  async fetchAtsStatuses(): Promise<
+    Array<{ id: string; name: string; code?: number | null; kind?: string }>
+  > {
+    const payload = await this.request("/applicant_tracking/statuses");
+    const root = asRecord(payload);
+    const groups: Array<{ kind: string; rows: unknown }> = [
+      { kind: "job", rows: root.jobOpeningStatuses ?? root.jobStatuses },
+      { kind: "application", rows: root.applicationStatuses },
+      { kind: "status", rows: Array.isArray(payload) ? payload : root.statuses },
+    ];
+    const out: Array<{ id: string; name: string; code?: number | null; kind?: string }> =
+      [];
+    const seen = new Set<string>();
+    for (const group of groups) {
+      if (!Array.isArray(group.rows)) continue;
+      for (const row of group.rows) {
+        const rec = asRecord(row);
+        const id = String(rec.id ?? "");
+        const name = String(rec.name ?? rec.label ?? rec.id ?? "");
+        if (!id || !name || seen.has(id)) continue;
+        seen.add(id);
+        const codeRaw = rec.code ?? rec.raw ?? rec.statusGroup;
+        const code = Number(codeRaw);
+        out.push({
+          id,
+          name,
+          code: Number.isFinite(code) ? code : null,
+          kind:
+            typeof rec.type === "string"
+              ? rec.type
+              : typeof rec.listType === "string"
+                ? rec.listType
+                : group.kind,
+        });
+      }
+    }
+    return out;
+  }
+
+  async fetchAtsJobs(): Promise<Array<Record<string, unknown>>> {
+    const payload = await this.request(
+      `/applicant_tracking/jobs?statusGroups=${encodeURIComponent("ALL")}`
+    );
+    const root = asRecord(payload);
+    const pageJobs = Array.isArray(payload)
+      ? payload
+      : Array.isArray(root.jobs)
+        ? root.jobs
+        : [];
+    return pageJobs.filter(
+      (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+    );
+  }
+
+  async fetchMetaTables(): Promise<string[]> {
+    const payload = await this.request("/meta/tables");
+    const root = asRecord(payload);
+    const list = Array.isArray(payload)
+      ? payload
+      : Array.isArray(root.tables)
+        ? root.tables
+        : Object.keys(root);
+    const aliases: string[] = [];
+    for (const row of list) {
+      if (typeof row === "string") {
+        aliases.push(row);
+        continue;
+      }
+      const rec = asRecord(row);
+      const alias = String(rec.alias ?? rec.name ?? rec.id ?? "");
+      if (alias) aliases.push(alias);
+    }
+    return aliases.filter((alias) => SAFE_PATH_SEGMENT.test(alias));
+  }
+
+  async fetchAllTableRows(
+    table: string
+  ): Promise<Record<string, Array<Record<string, unknown>>>> {
+    if (!SAFE_PATH_SEGMENT.test(table) || !this.isAllowedFullTable(table)) {
+      throw new Error("Invalid BambooHR table");
+    }
+    const payload = await this.request(
+      `/employees/all/tables/${pathSegment(table, "table")}`
+    );
+    const root = asRecord(payload);
+    const result: Record<string, Array<Record<string, unknown>>> = {};
+    if (Array.isArray(root) || Array.isArray(payload)) {
+      const list = Array.isArray(payload) ? payload : [];
+      for (const row of list) {
+        if (!row || typeof row !== "object") continue;
+        const record = row as Record<string, unknown>;
+        const id = String(record.employeeId ?? "");
+        if (!id) continue;
+        result[id] = result[id] || [];
+        result[id].push(record);
+      }
+      return result;
+    }
+    for (const [bambooId, value] of Object.entries(root)) {
+      if (bambooId === "employees") continue;
+      result[bambooId] = tableRowsForEmployee(
+        { [bambooId]: value, employees: root },
+        bambooId
+      );
+      if (result[bambooId].length === 0 && Array.isArray(value)) {
+        result[bambooId] = value.filter(
+          (row): row is Record<string, unknown> =>
+            Boolean(row) && typeof row === "object"
+        );
+      }
+    }
+    const employees = asRecord(root.employees);
+    if (Object.keys(employees).length > 0) {
+      for (const [bambooId, value] of Object.entries(employees)) {
+        result[bambooId] = tableRowsForEmployee(
+          { [bambooId]: value, employees },
+          bambooId
+        );
+      }
+    }
+    return result;
+  }
+
+  allowFullTable(table: string): void {
+    if (SAFE_PATH_SEGMENT.test(table)) ALLOWED_FULL_TABLES.add(table);
+  }
+
+  private isAllowedFullTable(table: string): boolean {
+    return ALLOWED_FULL_TABLES.has(table) || ALLOWED_TABLES.has(table);
   }
 
   async fetchTimeOffTypes(): Promise<Array<{ id: string; name: string; units?: string }>> {
