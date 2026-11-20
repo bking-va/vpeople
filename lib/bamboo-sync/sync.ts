@@ -276,6 +276,10 @@ export interface BambooSyncStore {
     limit: number,
     afterBambooId?: string | null
   ): Promise<Array<{ id: number; bambooId: string }>>;
+  listCandidatesForCommentsHistoryBackfill(
+    limit: number,
+    afterBambooId?: string | null
+  ): Promise<Array<{ id: number; bambooId: string }>>;
   listCandidatesNeedingResume(
     limit: number,
     afterBambooId?: string | null
