@@ -899,9 +899,11 @@ describe("runAtsApplicationsSync", () => {
       atsDetailImportedAt: null,
     });
     const logs: string[] = [];
-    let release: (() => void) | null = null;
-    const hung = new Promise<void>((resolve) => {
-      release = resolve;
+    const hung = {
+      resolve() {},
+    };
+    const hungPromise = new Promise<void>((resolve) => {
+      hung.resolve = resolve;
     });
     const client = new BambooHrClient({
       apiKey: "test-key",
@@ -917,7 +919,7 @@ describe("runAtsApplicationsSync", () => {
           return jsonResponse({ applications: [], paginationComplete: true });
         }
         if (url.includes("/applicant_tracking/applications/40316")) {
-          await hung;
+          await hungPromise;
           return jsonResponse({
             id: 40316,
             job: { id: 22, title: "Engineer" },
@@ -962,7 +964,7 @@ describe("runAtsApplicationsSync", () => {
     expect(logs.some((line) => /heartbeat/i.test(line))).toBe(true);
     expect(logs.some((line) => /rate=.*eta=/i.test(line))).toBe(true);
     expect(logs.join("\n")).not.toMatch(/ada@example.com/i);
-    release?.();
+    hung.resolve();
     const result = await running;
     expect(["success", "failed"]).toContain(result.status);
   });
