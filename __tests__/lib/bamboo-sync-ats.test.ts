@@ -235,7 +235,10 @@ class FakeAtsStore {
     };
   }
   async lastSuccessfulAtsCursor() {
-    return null;
+    const row = [...this.syncRuns]
+      .reverse()
+      .find((item) => item.kind === "ats_applications" && item.status === "success");
+    return typeof row?.latestChanged === "string" ? row.latestChanged : null;
   }
 }
 
@@ -410,6 +413,47 @@ describe("ATS application mapping", () => {
       ])
     );
     expect(history).toHaveLength(2);
+  });
+
+  test("keeps current Applied status id instead of dropping it for the synthetic Applied event", () => {
+    const history = mapAtsStatusHistory(
+      {
+        appliedDate: "2024-01-15T14:30:00Z",
+        status: {
+          id: 1,
+          label: "Applied",
+          dateChanged: "2024-01-16T09:00:00Z",
+          changedByUser: { firstName: "Pat", lastName: "Kim" },
+        },
+      },
+      "92654"
+    );
+    expect(history).toEqual([
+      expect.objectContaining({
+        bambooStatusId: "1",
+        statusLabel: "Applied",
+        changedAt: "2024-01-16T09:00:00Z",
+        changedByName: "Pat Kim",
+      }),
+    ]);
+  });
+
+  test("does not treat movedTo/movedFrom job moves as status history", () => {
+    expect(
+      mapAtsStatusHistory(
+        {
+          status: { id: 3, label: "Interview", dateChanged: "2024-01-18T09:15:00Z" },
+          movedTo: [{ id: 99, label: "Staff Engineer" }],
+          movedFrom: [{ id: 88, label: "Software Engineer" }],
+        },
+        "92654"
+      )
+    ).toEqual([
+      expect.objectContaining({
+        bambooStatusId: "3",
+        statusLabel: "Interview",
+      }),
+    ]);
   });
 
   test("formats Bamboo newSince without ISO T/Z", () => {
@@ -1311,6 +1355,124 @@ describe("runAtsApplicationsSync", () => {
     expect(store.webhookCalls).toBe(0);
     expect(methods.every((method) => method === "GET")).toBe(true);
     expect(store.candidates.every((row) => row.atsDetailImportedAt)).toBe(true);
+  });
+
+  test("treats 403 on GET comments as unavailable and still imports status history", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 1,
+      bambooId: "92654",
+      jobOpeningId: 10,
+      atsDetailImportedAt: null,
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (/\/applicant_tracking\/applications\/92654\/comments$/.test(url)) {
+          return jsonResponse({ error: "forbidden" }, 403);
+        }
+        if (/\/applicant_tracking\/applications\/92654$/.test(url)) {
+          return jsonResponse({
+            id: 92654,
+            status: { id: 3, label: "Interview", dateChanged: "2024-01-18T09:15:00Z" },
+            commentCount: 4,
+            applicant: { firstName: "Jordan", lastName: "Lee" },
+            job: { id: 22, title: "Engineer" },
+          });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 13,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: "92654",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 1,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.comments).toHaveLength(0);
+    expect(store.history.some((row) => row.statusLabel === "Interview")).toBe(true);
+  });
+
+  test("incremental comments/history backfill does not advance the application list cursor", async () => {
+    const store = new FakeAtsStore();
+    store.syncRuns.push({
+      id: 20,
+      kind: "ats_applications",
+      status: "success",
+      latestChanged: "2026-11-01 00:00:00",
+    });
+    store.candidates.push({
+      id: 2,
+      bambooId: "82017",
+      jobOpeningId: 10,
+      atsDetailImportedAt: "2026-11-20T00:00:00.000Z",
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (/\/applicant_tracking\/applications\/82017\/comments$/.test(url)) {
+          return jsonResponse({ error: "not found" }, 404);
+        }
+        if (/\/applicant_tracking\/applications\/82017$/.test(url)) {
+          return jsonResponse({
+            id: 82017,
+            status: { id: 3, label: "Interview", dateChanged: "2024-01-18T09:15:00Z" },
+            commentCount: 1,
+            applicant: { firstName: "Jordan", lastName: "Lee" },
+            job: { id: 22, title: "Engineer" },
+          });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "incremental",
+      importResumes: false,
+      backfillCommentsHistory: true,
+      now: new Date("2026-11-20T20:00:00Z"),
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.history.length).toBeGreaterThan(0);
+    expect(await store.lastSuccessfulAtsCursor()).toBe("2026-11-01 00:00:00");
   });
 
   test("refuses POST application comments and stays GET-only", async () => {

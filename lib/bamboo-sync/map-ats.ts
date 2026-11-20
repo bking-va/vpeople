@@ -365,7 +365,7 @@ export function mapAtsStatusHistory(
       dateChanged: appliedDate,
     });
   }
-  const lists = [raw.statusHistory, raw.history, raw.movedTo, raw.movedFrom];
+  const lists = [raw.statusHistory, raw.history];
   for (const list of lists) {
     if (!Array.isArray(list)) continue;
     for (const item of list) {
@@ -376,13 +376,27 @@ export function mapAtsStatusHistory(
     const statusRec = dropSecretFields(asRecord(raw.status));
     const statusId = nestedId(statusRec.id) || scalarText(statusRec.id);
     const label = labeledValue(statusRec) || scalarText(statusRec.label);
-    const alreadyRecorded = out.some(
-      (event) =>
-        (statusId && event.bambooStatusId === statusId) ||
-        (label && event.statusLabel === label)
-    );
-    if (!alreadyRecorded) {
-      pushStatusHistoryEvent(out, seen, applicationBambooId, statusRec);
+    const changedAt = historyChangedAt(statusRec, statusRec);
+    const appliedMatch =
+      label &&
+      label.toLowerCase() === "applied" &&
+      out.find((event) => event.statusLabel.toLowerCase() === "applied" && !event.bambooStatusId);
+    if (appliedMatch) {
+      if (statusId) appliedMatch.bambooStatusId = statusId;
+      if (changedAt) appliedMatch.changedAt = changedAt;
+      const userName = personName(
+        statusRec.changedByUser ?? statusRec.user ?? statusRec.changedBy
+      );
+      if (userName) appliedMatch.changedByName = userName;
+    } else {
+      const alreadyRecorded = out.some((event) => {
+        if (!statusId || event.bambooStatusId !== statusId) return false;
+        if (!changedAt) return true;
+        return event.changedAt === changedAt;
+      });
+      if (!alreadyRecorded) {
+        pushStatusHistoryEvent(out, seen, applicationBambooId, statusRec);
+      }
     }
   }
   return out;

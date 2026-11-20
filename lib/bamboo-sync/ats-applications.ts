@@ -264,6 +264,7 @@ export async function runAtsApplicationsSync(
         )
       : null;
 
+  const existingAtsCursor = dryRun ? null : await opts.store.lastSuccessfulAtsCursor();
   let incomplete = dryRun ? null : await opts.store.lastIncompleteAtsCheckpoint();
   let checkpoint = asCheckpoint(incomplete?.checkpoint, newSince);
   if (Boolean(checkpoint.backfillCommentsHistory) !== backfillCommentsHistory) {
@@ -302,8 +303,9 @@ export async function runAtsApplicationsSync(
     await opts.store.updateSyncRun(runId, {
       status,
       finishedAt: status === "running" ? null : new Date().toISOString(),
-      latestChanged:
-        opts.mode === "incremental"
+      latestChanged: backfillCommentsHistory
+        ? existingAtsCursor
+        : opts.mode === "incremental"
           ? formatBambooNewSince(opts.now ?? new Date())
           : checkpoint.newSince,
       checkpoint,

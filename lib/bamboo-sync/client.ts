@@ -617,7 +617,11 @@ export class BambooHrClient {
     } catch (error) {
       if (
         error instanceof BambooHrHttpError &&
-        (error.status === 404 || error.status === 405 || error.status === 501)
+        (error.status === 401 ||
+          error.status === 403 ||
+          error.status === 404 ||
+          error.status === 405 ||
+          error.status === 501)
       ) {
         if (this.atsCommentsGet !== "available") {
           this.atsCommentsGet = "unavailable";
