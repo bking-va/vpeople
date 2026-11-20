@@ -415,7 +415,7 @@ describe("ATS application mapping", () => {
     expect(history).toHaveLength(2);
   });
 
-  test("keeps current Applied status id instead of dropping it for the synthetic Applied event", () => {
+  test("keeps current Applied status id on its own event key", () => {
     const history = mapAtsStatusHistory(
       {
         appliedDate: "2024-01-15T14:30:00Z",
@@ -428,14 +428,39 @@ describe("ATS application mapping", () => {
       },
       "92654"
     );
-    expect(history).toEqual([
-      expect.objectContaining({
-        bambooStatusId: "1",
-        statusLabel: "Applied",
-        changedAt: "2024-01-16T09:00:00Z",
-        changedByName: "Pat Kim",
-      }),
-    ]);
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          bambooStatusId: "1",
+          statusLabel: "Applied",
+          changedAt: "2024-01-16T09:00:00Z",
+          changedByName: "Pat Kim",
+        }),
+        expect.objectContaining({
+          bambooStatusId: null,
+          statusLabel: "Applied",
+          changedAt: "2024-01-15T14:30:00Z",
+        }),
+      ])
+    );
+    const withStatusId = history.find((event) => event.bambooStatusId === "1");
+    const later = mapAtsStatusHistory(
+      {
+        appliedDate: "2024-01-15T14:30:00Z",
+        status: { id: 3, label: "Interview", dateChanged: "2024-01-18T09:15:00Z" },
+      },
+      "92654"
+    );
+    expect(later.map((event) => event.bambooEventId)).not.toContain(withStatusId?.bambooEventId);
+    expect(later).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ statusLabel: "Interview", bambooStatusId: "3" }),
+        expect.objectContaining({
+          statusLabel: "Applied",
+          changedAt: "2024-01-15T14:30:00Z",
+        }),
+      ])
+    );
   });
 
   test("does not treat movedTo/movedFrom job moves as status history", () => {
