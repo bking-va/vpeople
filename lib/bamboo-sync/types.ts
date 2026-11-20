@@ -281,6 +281,7 @@ export type AtsSyncCheckpoint = {
   newSince: string | null;
   paginationComplete: boolean;
   detailsRequeued?: boolean;
+  backfillCommentsHistory?: boolean;
 };
 
 export function compareBambooApplicationIds(a: string, b: string): number {

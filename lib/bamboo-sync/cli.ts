@@ -10,6 +10,7 @@ export type BambooSyncCliArgs = {
   onlyMissing: boolean;
   requeueDetails: boolean;
   resumeFrom: string | null;
+  backfillCommentsHistory: boolean;
   concurrency: number | null;
   dbUrlFile: string | null;
   cacheFile: string | null;
@@ -35,6 +36,7 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     onlyMissing: true,
     requeueDetails: false,
     resumeFrom: null,
+    backfillCommentsHistory: false,
     concurrency: null,
     dbUrlFile: null,
     cacheFile: null,
@@ -52,6 +54,10 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     } else if (arg === "--requeue-details") {
       args.requeueDetails = true;
       args.onlyMissing = false;
+    } else if (arg === "--backfill-comments-history") {
+      args.backfillCommentsHistory = true;
+      args.atsApplications = true;
+      args.skipResumes = true;
     } else if (arg === "--resume-from" || arg.startsWith("--resume-from=")) {
       const value = takeValue(argv, i, "--resume-from");
       if (value) {

@@ -54,6 +54,7 @@ async function main() {
         onlyMissing: args.onlyMissing,
         requeueDetails: args.requeueDetails,
         resumeFrom: args.resumeFrom,
+        backfillCommentsHistory: args.backfillCommentsHistory,
         concurrency: args.concurrency ?? undefined,
         log: (message) => {
           console.log(message);

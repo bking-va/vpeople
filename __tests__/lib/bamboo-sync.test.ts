@@ -1005,6 +1005,25 @@ class MemoryStore implements BambooSyncStore {
       .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
   }
 
+  async listCandidatesForCommentsHistoryBackfill(
+    limit: number,
+    afterBambooId?: string | null
+  ) {
+    return this.candidates
+      .filter(
+        (row) =>
+          row.bambooId &&
+          row.atsDetailImportedAt &&
+          (!afterBambooId ||
+            compareBambooApplicationIds(String(row.bambooId), afterBambooId) > 0)
+      )
+      .sort((a, b) =>
+        compareBambooApplicationIds(String(a.bambooId), String(b.bambooId))
+      )
+      .slice(0, limit)
+      .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
+  }
+
   async listCandidatesNeedingResume(limit: number, afterBambooId?: string | null) {
     return this.candidates
       .filter(
@@ -2172,6 +2191,7 @@ describe("CLI args and demo detection", () => {
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
+      backfillCommentsHistory: false,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
@@ -2195,6 +2215,7 @@ describe("CLI args and demo detection", () => {
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
+      backfillCommentsHistory: false,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
@@ -2232,6 +2253,18 @@ describe("CLI args and demo detection", () => {
       requeueDetails: true,
       concurrency: 12,
     });
+    expect(
+      parseBambooSyncArgs([
+        "--backfill-comments-history",
+        "--resume-from=82017",
+        "/tmp/db_url.txt",
+      ])
+    ).toMatchObject({
+      atsApplications: true,
+      skipResumes: true,
+      backfillCommentsHistory: true,
+      resumeFrom: "82017",
+    });
   });
 
   it("parses --cache without treating the cache path as the db url file", () => {
@@ -2251,6 +2284,7 @@ describe("CLI args and demo detection", () => {
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
+      backfillCommentsHistory: false,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: "/tmp/bamboo-sync.bamboo-cache.json",

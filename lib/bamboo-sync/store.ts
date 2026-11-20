@@ -1533,6 +1533,32 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       );
     },
 
+    async listCandidatesForCommentsHistoryBackfill(limit, afterBambooId) {
+      const size = Math.max(1, Math.min(limit, 500));
+      const numericCursor =
+        afterBambooId && isNumericBambooApplicationId(afterBambooId)
+          ? afterBambooId
+          : null;
+      const rows: Array<{ id: number; bambooId: string | null }> = await db
+        .select({ id: candidates.id, bambooId: candidates.bambooId })
+        .from(candidates)
+        .where(
+          and(
+            isNotNull(candidates.bambooId),
+            isNotNull(candidates.atsDetailImportedAt),
+            sql`${candidates.bambooId} ~ '^[0-9]+$'`,
+            numericCursor
+              ? sql`CAST(${candidates.bambooId} AS bigint) > CAST(${numericCursor} AS bigint)`
+              : undefined
+          )
+        )
+        .orderBy(sql`CAST(${candidates.bambooId} AS bigint)`)
+        .limit(size);
+      return rows.flatMap((row) =>
+        row.bambooId ? [{ id: row.id, bambooId: row.bambooId }] : []
+      );
+    },
+
     async listCandidatesNeedingResume(limit, afterBambooId) {
       const size = Math.max(1, Math.min(limit, 200));
       const rows: Array<{

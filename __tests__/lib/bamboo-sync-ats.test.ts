@@ -167,6 +167,23 @@ class FakeAtsStore {
       .slice(0, limit)
       .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
   }
+  async listCandidatesForCommentsHistoryBackfill(
+    limit: number,
+    afterBambooId?: string | null
+  ) {
+    return this.candidates
+      .filter((row) => row.bambooId && row.atsDetailImportedAt)
+      .filter(
+        (row) =>
+          !afterBambooId ||
+          compareBambooApplicationIds(String(row.bambooId), afterBambooId) > 0
+      )
+      .sort((a, b) =>
+        compareBambooApplicationIds(String(a.bambooId), String(b.bambooId))
+      )
+      .slice(0, limit)
+      .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
+  }
   async listCandidatesNeedingResume(limit: number) {
     return this.candidates
       .filter((row) => row.bambooId && row.resumeBambooFileId && !row.resumeBlobUrl)
@@ -345,6 +362,56 @@ describe("ATS application mapping", () => {
     expect(mapAtsStatusHistory(raw, "7")[0].bambooEventId).toContain("7:2:");
   });
 
+  test("maps documented Bamboo GET application details (no comments[] or statusHistory[])", () => {
+    const raw = {
+      id: 92654,
+      appliedDate: "2024-01-15T14:30:00Z",
+      status: {
+        id: 3,
+        label: "Interview",
+        dateChanged: "2024-01-18T09:15:00Z",
+        changedByUser: { id: 12, firstName: "Pat", lastName: "Kim" },
+      },
+      commentCount: 3,
+      emailCount: 1,
+      eventCount: 2,
+      movedTo: [],
+      movedFrom: [],
+      questionsAndAnswers: [
+        {
+          question: { id: 11, label: "Are you authorized to work in the country?" },
+          answer: { id: 21, label: "Yes" },
+        },
+      ],
+      applicant: { firstName: "Jordan", lastName: "Lee", email: "jordan.lee@example.com" },
+      job: { id: 88, title: { id: 5, label: "Software Engineer" } },
+    };
+    expect(mapAtsAnswers(raw, "92654")).toEqual([
+      {
+        bambooQuestionId: "11",
+        question: "Are you authorized to work in the country?",
+        answer: "Yes",
+      },
+    ]);
+    expect(mapAtsComments(raw, "92654")).toEqual([]);
+    const history = mapAtsStatusHistory(raw, "92654");
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          statusLabel: "Applied",
+          changedAt: "2024-01-15T14:30:00Z",
+        }),
+        expect.objectContaining({
+          bambooStatusId: "3",
+          statusLabel: "Interview",
+          changedAt: "2024-01-18T09:15:00Z",
+          changedByName: "Pat Kim",
+        }),
+      ])
+    );
+    expect(history).toHaveLength(2);
+  });
+
   test("formats Bamboo newSince without ISO T/Z", () => {
     expect(formatBambooNewSince(new Date("2024-01-01T13:00:00Z"))).toBe(
       "2024-01-01 13:00:00"
@@ -387,7 +454,8 @@ describe("runAtsApplicationsSync", () => {
     expect(store.candidates[0].coverLetter).toBe("I would like to apply");
     expect(store.answers).toHaveLength(1);
     expect(store.comments).toHaveLength(1);
-    expect(store.history).toHaveLength(1);
+    expect(store.history.some((row) => row.statusLabel === "New")).toBe(true);
+    expect(store.history.length).toBeGreaterThanOrEqual(1);
     expect(store.candidates[0].resumeBlobUrl).toContain("blob.vercel-storage.com");
     expect(blobs[0]).toMatch(/^ats-resumes\/40316\//);
     expect(JSON.stringify(store.syncRuns)).not.toMatch(/ada@example.com/i);
@@ -987,6 +1055,282 @@ describe("runAtsApplicationsSync", () => {
     expect(line).toContain("in-flight=8");
     expect(line).toContain("lastId=40316");
     expect(line).not.toMatch(/@|ssn|ada/i);
+  });
+
+  test("imports status history from documented GET details and does not POST comments", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 1,
+      bambooId: "92654",
+      jobOpeningId: 10,
+      atsDetailImportedAt: null,
+    });
+    const methods: string[] = [];
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input, init) => {
+        const url = String(input);
+        const method = (init?.method || "GET").toUpperCase();
+        methods.push(`${method} ${url.replace(/^https:\/\/[^/]+/, "")}`);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (/\/applicant_tracking\/applications\/92654\/comments$/.test(url)) {
+          return jsonResponse({ error: "not found" }, 404);
+        }
+        if (/\/applicant_tracking\/applications\/92654$/.test(url)) {
+          return jsonResponse({
+            id: 92654,
+            appliedDate: "2024-01-15T14:30:00Z",
+            status: {
+              id: 3,
+              label: "Interview",
+              dateChanged: "2024-01-18T09:15:00Z",
+              changedByUser: { id: 12, firstName: "Pat", lastName: "Kim" },
+            },
+            commentCount: 3,
+            questionsAndAnswers: [
+              {
+                question: { id: 11, label: "Work authorization?" },
+                answer: { id: 21, label: "Yes" },
+              },
+            ],
+            applicant: { firstName: "Jordan", lastName: "Lee", email: "jordan.lee@example.com" },
+            job: { id: 22, title: "Engineer" },
+          });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 11,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: "92654",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 1,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(store.emailsSent).toBe(0);
+    expect(store.webhookCalls).toBe(0);
+    expect(store.answers).toHaveLength(1);
+    expect(store.comments).toHaveLength(0);
+    expect(store.history.length).toBeGreaterThan(0);
+    expect(store.history.some((row) => row.statusLabel === "Interview")).toBe(true);
+    expect(methods.every((row) => row.startsWith("GET "))).toBe(true);
+    expect(methods.some((row) => row.includes("/applications/92654/comments"))).toBe(true);
+    expect(logs.join("\n")).toMatch(/comment bodies are not on a public GET endpoint/i);
+    expect(logs.join("\n")).not.toMatch(/jordan\.lee@example\.com|test-key/i);
+    expect(JSON.stringify(store.syncRuns)).not.toMatch(/jordan\.lee@example\.com/i);
+  });
+
+  test("maps comment bodies when GET /applications/{id}/comments exists", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 1,
+      bambooId: "92654",
+      jobOpeningId: 10,
+      atsDetailImportedAt: null,
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (/\/applicant_tracking\/applications\/92654\/comments$/.test(url)) {
+          return jsonResponse({
+            comments: [
+              {
+                id: 44,
+                comment: "Strong hire",
+                author: { firstName: "Sam", lastName: "Lee" },
+                created: "2024-01-19T00:00:00Z",
+              },
+            ],
+          });
+        }
+        if (/\/applicant_tracking\/applications\/92654$/.test(url)) {
+          return jsonResponse({
+            id: 92654,
+            status: { id: 3, label: "Interview", dateChanged: "2024-01-18T09:15:00Z" },
+            commentCount: 1,
+            applicant: { firstName: "Jordan", lastName: "Lee" },
+            job: { id: 22, title: "Engineer" },
+          });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 12,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: "92654",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 1,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.comments).toEqual([
+      expect.objectContaining({
+        bambooId: "44",
+        content: "Strong hire",
+        authorName: "Sam Lee",
+      }),
+    ]);
+  });
+
+  test("backfills only comments/history for already-imported applications after --resume-from", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push(
+      {
+        id: 1,
+        bambooId: "100",
+        jobOpeningId: 10,
+        atsDetailImportedAt: "2026-11-20T00:00:00.000Z",
+      },
+      {
+        id: 2,
+        bambooId: "82017",
+        jobOpeningId: 10,
+        atsDetailImportedAt: "2026-11-20T00:00:00.000Z",
+      },
+      {
+        id: 3,
+        bambooId: "92654",
+        jobOpeningId: 10,
+        atsDetailImportedAt: "2026-11-20T00:00:00.000Z",
+      }
+    );
+    const fetched: string[] = [];
+    const methods: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input, init) => {
+        const url = String(input);
+        methods.push((init?.method || "GET").toUpperCase());
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        const commentsMatch = url.match(/\/applicant_tracking\/applications\/(\d+)\/comments$/);
+        if (commentsMatch) {
+          return jsonResponse({ error: "not found" }, 404);
+        }
+        const detailMatch = url.match(/\/applicant_tracking\/applications\/(\d+)$/);
+        if (detailMatch) {
+          fetched.push(detailMatch[1]);
+          return jsonResponse({
+            id: Number(detailMatch[1]),
+            appliedDate: "2024-01-15T14:30:00Z",
+            status: {
+              id: 3,
+              label: "Interview",
+              dateChanged: "2024-01-18T09:15:00Z",
+              changedByUser: { firstName: "Pat", lastName: "Kim" },
+            },
+            commentCount: 2,
+            questionsAndAnswers: [
+              {
+                question: { id: 11, label: "Work authorization?" },
+                answer: { id: 21, label: "Yes" },
+              },
+            ],
+            applicant: { firstName: "Jordan", lastName: "Lee", email: "jordan.lee@example.com" },
+            job: { id: 22, title: "Engineer" },
+          });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: true,
+      backfillCommentsHistory: true,
+      resumeFrom: "82016",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(result.checkpoint.backfillCommentsHistory).toBe(true);
+    expect(fetched.sort()).toEqual(["82017", "92654"]);
+    expect(store.answers).toHaveLength(0);
+    expect(store.comments).toHaveLength(0);
+    expect(store.history.length).toBeGreaterThanOrEqual(2);
+    expect(store.emailsSent).toBe(0);
+    expect(store.webhookCalls).toBe(0);
+    expect(methods.every((method) => method === "GET")).toBe(true);
+    expect(store.candidates.every((row) => row.atsDetailImportedAt)).toBe(true);
+  });
+
+  test("refuses POST application comments and stays GET-only", async () => {
+    const client = new BambooHrClient({
+      apiKey: "secret-api-key",
+      subdomain: "vendasta",
+      fetch: async () => {
+        throw new Error("network should not be called for writes");
+      },
+    });
+    await expect(
+      (
+        client as unknown as {
+          request: (path: string, init?: RequestInit) => Promise<unknown>;
+        }
+      ).request("/applicant_tracking/applications/92654/comments", {
+        method: "POST",
+        body: JSON.stringify({ type: "comment", comment: "hi" }),
+      })
+    ).rejects.toThrow(/read-only/i);
   });
 });
 
