@@ -28,6 +28,7 @@ import {
 import { isBambooImportedTimeOff } from "@/lib/time-off-imported";
 import {
   BambooHrClient,
+  BAMBOO_REQUEST_TIMEOUT_MS,
   parseRetryAfterMs,
 } from "@/lib/bamboo-sync/client";
 import { parseBambooSyncArgs } from "@/lib/bamboo-sync/cli";
@@ -1417,6 +1418,7 @@ describe("BambooHR client", () => {
     const client = new BambooHrClient({
       apiKey: "test-key",
       subdomain: "vendasta",
+      maxRetries: 0,
       fetch: fetchMock,
     });
     const rows = await client.fetchEmployeesByIds(["101"]);
@@ -1755,6 +1757,7 @@ describe("runBambooSync", () => {
     const failing = new BambooHrClient({
       apiKey: "test-key",
       subdomain: "vendasta",
+      maxRetries: 0,
       fetch: mockBambooFetch({
         report: { employees: [ceo, report] },
         tableStatus: { jobInfo: 500 },
@@ -2162,6 +2165,10 @@ describe("CLI args and demo detection", () => {
       incremental: false,
       atsApplications: false,
       skipResumes: false,
+      onlyMissing: true,
+      requeueDetails: false,
+      resumeFrom: null,
+      concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
     });
@@ -2181,8 +2188,45 @@ describe("CLI args and demo detection", () => {
       incremental: true,
       atsApplications: true,
       skipResumes: true,
+      onlyMissing: true,
+      requeueDetails: false,
+      resumeFrom: null,
+      concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
+    });
+  });
+
+  it("parses ATS details resume and concurrency flags", () => {
+    expect(
+      parseBambooSyncArgs([
+        "--ats-applications",
+        "--skip-resumes",
+        "--only-missing",
+        "--resume-from",
+        "40316",
+        "--concurrency",
+        "8",
+        "/tmp/db_url.txt",
+      ])
+    ).toMatchObject({
+      atsApplications: true,
+      skipResumes: true,
+      onlyMissing: true,
+      requeueDetails: false,
+      resumeFrom: "40316",
+      concurrency: 8,
+    });
+    expect(
+      parseBambooSyncArgs([
+        "--ats-applications",
+        "--requeue-details",
+        "--concurrency=12",
+      ])
+    ).toMatchObject({
+      onlyMissing: false,
+      requeueDetails: true,
+      concurrency: 12,
     });
   });
 
@@ -2200,6 +2244,10 @@ describe("CLI args and demo detection", () => {
       incremental: false,
       atsApplications: false,
       skipResumes: false,
+      onlyMissing: true,
+      requeueDetails: false,
+      resumeFrom: null,
+      concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: "/tmp/bamboo-sync.bamboo-cache.json",
     });
@@ -2287,6 +2335,65 @@ describe("BambooHR fast import", () => {
     expect(rows).toEqual([
       expect.objectContaining({ name: "Vacation", balance: "10.00" }),
     ]);
+  });
+
+  it("uses a 30s Bamboo request timeout by default", () => {
+    expect(BAMBOO_REQUEST_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it("retries timed-out Bamboo requests", async () => {
+    let calls = 0;
+    const inner = mockBambooFetch({
+      report: { employees: [bambooEmployee({ id: "1" })] },
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      timeoutMs: 20,
+      maxRetries: 1,
+      fetch: jest.fn(async (url, init) => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise<Response>(() => {});
+        }
+        return inner(url, init);
+      }),
+    });
+    const rows = await client.fetchAllEmployees();
+    expect(calls).toBe(2);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("retries 5xx Bamboo responses with backoff", async () => {
+    let calls = 0;
+    const inner = mockBambooFetch({
+      report: { employees: [bambooEmployee({ id: "1" })] },
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: jest.fn(async (url, init) => {
+        if (String(url).includes("/reports/custom")) {
+          calls += 1;
+          if (calls === 1) {
+            return new Response("", {
+              status: 500,
+              headers: { "Retry-After": "0" },
+            });
+          }
+          if (calls === 2) {
+            return new Response("", {
+              status: 504,
+              headers: { "Retry-After": "0" },
+            });
+          }
+        }
+        return inner(url, init);
+      }),
+    });
+    const rows = await client.fetchAllEmployees();
+    expect(calls).toBe(3);
+    expect(rows).toHaveLength(1);
   });
 
   it("does not multiply retries when 429 persists", async () => {
