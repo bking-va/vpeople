@@ -15,7 +15,11 @@ import {
 import { atsResumeBlobPath, BAMBOO_RESUME_UNAVAILABLE, isStoredResumeBlobUrl } from "@/lib/bamboo-sync/blob";
 import { toPublicCareerOpening } from "@/lib/careers-public";
 import type { BambooSyncStore } from "@/lib/bamboo-sync/sync";
-import { isResumableAtsRun } from "@/lib/bamboo-sync/types";
+import {
+  compareBambooApplicationIds,
+  isResumableAtsRun,
+  laterBambooApplicationId,
+} from "@/lib/bamboo-sync/types";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -152,8 +156,14 @@ class FakeAtsStore {
   async listCandidatesNeedingDetail(limit: number, afterBambooId?: string | null) {
     return this.candidates
       .filter((row) => row.bambooId && !row.atsDetailImportedAt)
-      .filter((row) => !afterBambooId || String(row.bambooId) > afterBambooId)
-      .sort((a, b) => String(a.bambooId).localeCompare(String(b.bambooId)))
+      .filter(
+        (row) =>
+          !afterBambooId ||
+          compareBambooApplicationIds(String(row.bambooId), afterBambooId) > 0
+      )
+      .sort((a, b) =>
+        compareBambooApplicationIds(String(a.bambooId), String(b.bambooId))
+      )
       .slice(0, limit)
       .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
   }
@@ -678,6 +688,137 @@ describe("runAtsApplicationsSync", () => {
     });
     expect(result.status).toBe("success");
     expect(requested).toEqual(["200"]);
+  });
+
+  test("requeue-details still refreshes when resuming an only-missing checkpoint", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 50,
+      bambooId: "40316",
+      jobOpeningId: 10,
+      atsDetailImportedAt: "2024-01-01T00:00:00Z",
+    });
+    let detailCalls = 0;
+    const inner = mockAtsFetch();
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input, init) => {
+        if (String(input).includes("/applicant_tracking/applications/40316")) {
+          detailCalls += 1;
+        }
+        return inner(input, init);
+      },
+    });
+    store.syncRuns.push({
+      id: 8,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 3,
+        lastListId: "40316",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 1,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      requeueDetails: true,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(detailCalls).toBeGreaterThan(0);
+    expect(store.answers.length).toBeGreaterThan(0);
+  });
+
+  test("resume-from compares Bamboo ids numerically", async () => {
+    expect(laterBambooApplicationId("99999", "100000")).toBe("100000");
+    const store = new FakeAtsStore();
+    store.candidates.push(
+      {
+        id: 1,
+        bambooId: "9999",
+        jobOpeningId: 10,
+        atsDetailImportedAt: null,
+      },
+      {
+        id: 2,
+        bambooId: "100000",
+        jobOpeningId: 10,
+        atsDetailImportedAt: null,
+      }
+    );
+    const requested: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (url.includes("/applicant_tracking/applications?")) {
+          return jsonResponse({ applications: [], paginationComplete: true });
+        }
+        const match = url.match(/applications\/(\d+)$/);
+        if (match) {
+          requested.push(match[1]);
+          return jsonResponse({
+            id: Number(match[1]),
+            job: { id: 22, title: "Engineer" },
+            applicant: { firstName: "Pat", lastName: "Lee" },
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 11,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: "100000",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 2,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      resumeFrom: "99999",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(requested).toEqual(["100000"]);
   });
 
   test("details phase uses bounded concurrency of 8 by default", async () => {

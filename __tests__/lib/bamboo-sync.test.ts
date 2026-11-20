@@ -60,7 +60,7 @@ import type {
   MappedEmployee,
   SyncEmployeeRow,
 } from "@/lib/bamboo-sync/types";
-import { isResumableAtsRun } from "@/lib/bamboo-sync/types";
+import { compareBambooApplicationIds, isResumableAtsRun } from "@/lib/bamboo-sync/types";
 
 function bambooEmployee(
   overrides: Partial<BambooEmployeeRecord> & { id: string }
@@ -995,7 +995,11 @@ class MemoryStore implements BambooSyncStore {
         (row) =>
           row.bambooId &&
           !row.atsDetailImportedAt &&
-          (!afterBambooId || String(row.bambooId) > afterBambooId)
+          (!afterBambooId ||
+            compareBambooApplicationIds(String(row.bambooId), afterBambooId) > 0)
+      )
+      .sort((a, b) =>
+        compareBambooApplicationIds(String(a.bambooId), String(b.bambooId))
       )
       .slice(0, limit)
       .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));

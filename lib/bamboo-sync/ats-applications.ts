@@ -21,12 +21,13 @@ import {
 } from "./map-ats";
 import type { BambooSyncStore } from "./sync";
 import type { BatchProgress } from "./chunks";
-import type {
-  AtsDatasetCounts,
-  AtsSyncCheckpoint,
-  BambooAtsSyncResult,
-  BambooSyncMode,
-  MappedAtsApplicationWrite,
+import {
+  laterBambooApplicationId,
+  type AtsDatasetCounts,
+  type AtsSyncCheckpoint,
+  type BambooAtsSyncResult,
+  type BambooSyncMode,
+  type MappedAtsApplicationWrite,
 } from "./types";
 
 const PII_LOG_PATTERN =
@@ -54,17 +55,6 @@ export type RunAtsApplicationsSyncOptions = {
 };
 
 export const BAMBOO_ATS_DETAIL_HEARTBEAT_MS = 15_000;
-
-function laterBambooId(
-  a: string | null | undefined,
-  b: string | null | undefined
-): string | null {
-  const values = [a, b].filter((value): value is string => Boolean(value));
-  if (values.length === 0) return null;
-  return values.sort((left, right) =>
-    left.localeCompare(right, undefined, { numeric: true })
-  )[values.length - 1];
-}
 
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "unknown";
@@ -414,16 +404,17 @@ export async function runAtsApplicationsSync(
       const shouldRequeue =
         !dryRun &&
         opts.mode === "full" &&
-        !onlyMissing &&
-        !checkpoint.detailsRequeued;
+        (opts.requeueDetails === true ||
+          (!onlyMissing && !checkpoint.detailsRequeued));
       if (shouldRequeue) {
         await opts.store.requeueCandidateDetails();
         checkpoint.detailsRequeued = true;
         await persist("running");
-      } else {
-        checkpoint.detailsRequeued = true;
       }
-      let afterDetailId = laterBambooId(opts.resumeFrom, checkpoint.lastDetailId);
+      let afterDetailId = laterBambooApplicationId(
+        opts.resumeFrom,
+        checkpoint.lastDetailId
+      );
       let inFlight = 0;
       let lastStartedId = checkpoint.lastDetailId;
       const detailsStartedAt = Date.now();
@@ -467,7 +458,7 @@ export async function runAtsApplicationsSync(
           if (batch.length === 0) break;
           const details = await mapPool(batch, concurrency, async (row) => {
             inFlight += 1;
-            lastStartedId = laterBambooId(lastStartedId, row.bambooId);
+            lastStartedId = laterBambooApplicationId(lastStartedId, row.bambooId);
             try {
               const detail = await opts.client!.fetchAtsApplicationDetail(row.bambooId);
               return { row, detail };
@@ -551,7 +542,7 @@ export async function runAtsApplicationsSync(
             progress("candidate_history", opts.writeChunkSize)
           );
           checkpoint.detailed += batch.length;
-          afterDetailId = laterBambooId(
+          afterDetailId = laterBambooApplicationId(
             afterDetailId,
             batch[batch.length - 1]?.bambooId
           );
