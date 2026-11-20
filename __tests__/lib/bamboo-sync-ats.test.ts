@@ -1,4 +1,4 @@
-import { BambooHrClient } from "@/lib/bamboo-sync/client";
+import { BambooHrClient, BAMBOO_ATS_DETAIL_CONCURRENCY } from "@/lib/bamboo-sync/client";
 import {
   formatBambooNewSince,
   mapApplicationStage,
@@ -8,11 +8,18 @@ import {
   mapAtsStatusHistory,
   mapCandidateSource,
 } from "@/lib/bamboo-sync/map-ats";
-import { runAtsApplicationsSync } from "@/lib/bamboo-sync/ats-applications";
+import {
+  formatAtsDetailsProgress,
+  runAtsApplicationsSync,
+} from "@/lib/bamboo-sync/ats-applications";
 import { atsResumeBlobPath, BAMBOO_RESUME_UNAVAILABLE, isStoredResumeBlobUrl } from "@/lib/bamboo-sync/blob";
 import { toPublicCareerOpening } from "@/lib/careers-public";
 import type { BambooSyncStore } from "@/lib/bamboo-sync/sync";
-import { isResumableAtsRun } from "@/lib/bamboo-sync/types";
+import {
+  compareBambooApplicationIds,
+  isResumableAtsRun,
+  laterBambooApplicationId,
+} from "@/lib/bamboo-sync/types";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -146,9 +153,17 @@ class FakeAtsStore {
     this.history.push(...rows);
     return rows.length;
   }
-  async listCandidatesNeedingDetail(limit: number) {
+  async listCandidatesNeedingDetail(limit: number, afterBambooId?: string | null) {
     return this.candidates
       .filter((row) => row.bambooId && !row.atsDetailImportedAt)
+      .filter(
+        (row) =>
+          !afterBambooId ||
+          compareBambooApplicationIds(String(row.bambooId), afterBambooId) > 0
+      )
+      .sort((a, b) =>
+        compareBambooApplicationIds(String(a.bambooId), String(b.bambooId))
+      )
       .slice(0, limit)
       .map((row) => ({ id: Number(row.id), bambooId: String(row.bambooId) }));
   }
@@ -551,7 +566,7 @@ describe("runAtsApplicationsSync", () => {
     expect(store.candidates).toHaveLength(1);
   });
 
-  test("full import requeues details that ON CONFLICT would otherwise preserve", async () => {
+  test("full import skips already imported details unless requeueDetails is set", async () => {
     const store = new FakeAtsStore();
     store.candidates.push({
       id: 50,
@@ -561,25 +576,417 @@ describe("runAtsApplicationsSync", () => {
       resumeBambooFileId: "99",
       resumeBlobUrl: null,
     });
+    let detailCalls = 0;
+    const inner = mockAtsFetch();
     const client = new BambooHrClient({
       apiKey: "test-key",
       subdomain: "vendasta",
-      fetch: mockAtsFetch(),
+      fetch: async (input, init) => {
+        if (String(input).includes("/applicant_tracking/applications/40316")) {
+          detailCalls += 1;
+        }
+        return inner(input, init);
+      },
+    });
+    const skipped = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      log: () => undefined,
+    });
+    expect(skipped.status).toBe("success");
+    expect(detailCalls).toBe(0);
+    expect(store.answers).toHaveLength(0);
+
+    const refreshed = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      requeueDetails: true,
+      log: () => undefined,
+    });
+    expect(refreshed.status).toBe("success");
+    expect(detailCalls).toBeGreaterThan(0);
+    expect(store.answers.length).toBeGreaterThan(0);
+  });
+
+  test("resume-from skips earlier application ids in the details phase", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push(
+      {
+        id: 1,
+        bambooId: "100",
+        jobOpeningId: 10,
+        atsDetailImportedAt: null,
+      },
+      {
+        id: 2,
+        bambooId: "200",
+        jobOpeningId: 10,
+        atsDetailImportedAt: null,
+      }
+    );
+    const requested: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (url.includes("/applicant_tracking/applications?")) {
+          return jsonResponse({ applications: [], paginationComplete: true });
+        }
+        const match = url.match(/applications\/(\d+)$/);
+        if (match) {
+          requested.push(match[1]);
+          return jsonResponse({
+            id: Number(match[1]),
+            job: { id: 22, title: "Engineer" },
+            applicant: { firstName: "Pat", lastName: "Lee" },
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 9,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 3,
+        lastListId: "200",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 2,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
     });
     const result = await runAtsApplicationsSync({
       client,
       store: store as unknown as BambooSyncStore,
-      blob: {
-        async putPrivate(input) {
-          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
-        },
-      },
+      blob: null,
       mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      resumeFrom: "100",
       log: () => undefined,
     });
     expect(result.status).toBe("success");
+    expect(requested).toEqual(["200"]);
+  });
+
+  test("requeue-details still refreshes when resuming an only-missing checkpoint", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 50,
+      bambooId: "40316",
+      jobOpeningId: 10,
+      atsDetailImportedAt: "2024-01-01T00:00:00Z",
+    });
+    let detailCalls = 0;
+    const inner = mockAtsFetch();
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input, init) => {
+        if (String(input).includes("/applicant_tracking/applications/40316")) {
+          detailCalls += 1;
+        }
+        return inner(input, init);
+      },
+    });
+    store.syncRuns.push({
+      id: 8,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 3,
+        lastListId: "40316",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 1,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      requeueDetails: true,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(detailCalls).toBeGreaterThan(0);
     expect(store.answers.length).toBeGreaterThan(0);
-    expect(store.candidates[0].coverLetter).toBe("I would like to apply");
+  });
+
+  test("resume-from compares Bamboo ids numerically", async () => {
+    expect(laterBambooApplicationId("99999", "100000")).toBe("100000");
+    const store = new FakeAtsStore();
+    store.candidates.push(
+      {
+        id: 1,
+        bambooId: "9999",
+        jobOpeningId: 10,
+        atsDetailImportedAt: null,
+      },
+      {
+        id: 2,
+        bambooId: "100000",
+        jobOpeningId: 10,
+        atsDetailImportedAt: null,
+      }
+    );
+    const requested: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (url.includes("/applicant_tracking/applications?")) {
+          return jsonResponse({ applications: [], paginationComplete: true });
+        }
+        const match = url.match(/applications\/(\d+)$/);
+        if (match) {
+          requested.push(match[1]);
+          return jsonResponse({
+            id: Number(match[1]),
+            job: { id: 22, title: "Engineer" },
+            applicant: { firstName: "Pat", lastName: "Lee" },
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 11,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: "100000",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 2,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      resumeFrom: "99999",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(requested).toEqual(["100000"]);
+  });
+
+  test("details phase uses bounded concurrency of 8 by default", async () => {
+    const store = new FakeAtsStore();
+    const ids = Array.from({ length: 16 }, (_, index) => String(1000 + index));
+    store.candidates = ids.map((bambooId, index) => ({
+      id: index + 1,
+      bambooId,
+      jobOpeningId: 10,
+      atsDetailImportedAt: null,
+    }));
+    let inflight = 0;
+    let maxInflight = 0;
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (url.includes("/applicant_tracking/applications?")) {
+          return jsonResponse({ applications: [], paginationComplete: true });
+        }
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inflight -= 1;
+        const match = url.match(/applications\/(\d+)$/);
+        return jsonResponse({
+          id: Number(match?.[1] || 0),
+          job: { id: 22, title: "Engineer" },
+          applicant: { firstName: "Pat", lastName: "Lee" },
+        });
+      },
+    });
+    store.syncRuns.push({
+      id: 3,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: ids[ids.length - 1],
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: ids.length,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(maxInflight).toBeGreaterThan(2);
+    expect(maxInflight).toBeLessThanOrEqual(8);
+  });
+
+  test("details logs progress with a rate and a heartbeat without PII", async () => {
+    const store = new FakeAtsStore();
+    store.candidates.push({
+      id: 1,
+      bambooId: "40316",
+      jobOpeningId: 10,
+      atsDetailImportedAt: null,
+    });
+    const logs: string[] = [];
+    const hung = {
+      resolve() {},
+    };
+    const hungPromise = new Promise<void>((resolve) => {
+      hung.resolve = resolve;
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      timeoutMs: 200,
+      maxRetries: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/applicant_tracking/statuses")) {
+          return jsonResponse({ applicationStatuses: [] });
+        }
+        if (url.includes("/applicant_tracking/applications?")) {
+          return jsonResponse({ applications: [], paginationComplete: true });
+        }
+        if (url.includes("/applicant_tracking/applications/40316")) {
+          await hungPromise;
+          return jsonResponse({
+            id: 40316,
+            job: { id: 22, title: "Engineer" },
+            applicant: { firstName: "Ada", lastName: "Lovelace", email: "ada@example.com" },
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+    });
+    store.syncRuns.push({
+      id: 4,
+      kind: "ats_applications",
+      status: "checkpointed",
+      checkpoint: {
+        phase: "details",
+        listPage: 2,
+        lastListId: "40316",
+        lastDetailId: null,
+        lastResumeId: null,
+        listed: 1,
+        detailed: 0,
+        resumes: 0,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: true,
+        detailsRequeued: true,
+      },
+    });
+    const running = runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: null,
+      mode: "full",
+      importResumes: false,
+      onlyMissing: true,
+      heartbeatMs: 20,
+      log: (message) => logs.push(message),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(logs.some((line) => /heartbeat/i.test(line))).toBe(true);
+    expect(logs.some((line) => /rate=.*eta=/i.test(line))).toBe(true);
+    expect(logs.join("\n")).not.toMatch(/ada@example.com/i);
+    hung.resolve();
+    const result = await running;
+    expect(["success", "failed"]).toContain(result.status);
+  });
+
+  test("details progress logs rate and ETA without PII", () => {
+    expect(BAMBOO_ATS_DETAIL_CONCURRENCY).toBe(8);
+    const line = formatAtsDetailsProgress({
+      processed: 2475,
+      listed: 88512,
+      startedAtMs: 0,
+      nowMs: 10 * 60_000,
+      inFlight: 8,
+      lastId: "40316",
+      heartbeat: true,
+    });
+    expect(line).toContain("ATS details heartbeat");
+    expect(line).toContain("processed=2475");
+    expect(line).toContain("rate=248/min");
+    expect(line).toContain("eta=5h 47m");
+    expect(line).toContain("in-flight=8");
+    expect(line).toContain("lastId=40316");
+    expect(line).not.toMatch(/@|ssn|ada/i);
   });
 });
 

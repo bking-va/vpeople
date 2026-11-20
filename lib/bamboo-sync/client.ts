@@ -7,7 +7,7 @@ export type BambooFetch = (
   init?: RequestInit
 ) => Promise<Response>;
 
-export const BAMBOO_REQUEST_TIMEOUT_MS = 20_000;
+export const BAMBOO_REQUEST_TIMEOUT_MS = 30_000;
 export const BAMBOO_MAX_RETRIES = 4;
 export const BAMBOO_BALANCE_CONCURRENCY = 6;
 export const BAMBOO_MAX_RETRY_AFTER_MS = 60_000;
@@ -38,7 +38,7 @@ const ALLOWED_FULL_TABLES = new Set([
   "employeeVisas",
 ]);
 export const ATS_APPLICATIONS_MAX_PAGES = 2000;
-export const BAMBOO_ATS_DETAIL_CONCURRENCY = 2;
+export const BAMBOO_ATS_DETAIL_CONCURRENCY = 8;
 
 export function assertSafeBambooSubdomain(subdomain: string): string {
   const value = subdomain.trim();
@@ -98,7 +98,7 @@ export function parseRetryAfterMs(
 }
 
 function isRetryableStatus(status: number): boolean {
-  return status === 429 || status === 502 || status === 503;
+  return status === 429 || status >= 500;
 }
 
 function isRetryableAbortOrNetwork(error: unknown): boolean {

@@ -283,6 +283,28 @@ export type AtsSyncCheckpoint = {
   detailsRequeued?: boolean;
 };
 
+export function compareBambooApplicationIds(a: string, b: string): number {
+  const left = Number(a);
+  const right = Number(b);
+  if (Number.isFinite(left) && Number.isFinite(right)) {
+    return left === right ? 0 : left < right ? -1 : 1;
+  }
+  return a.localeCompare(b);
+}
+
+export function laterBambooApplicationId(
+  a: string | null | undefined,
+  b: string | null | undefined
+): string | null {
+  const values = [a, b].filter((value): value is string => Boolean(value));
+  if (values.length === 0) return null;
+  return values.sort(compareBambooApplicationIds)[values.length - 1];
+}
+
+export function isNumericBambooApplicationId(value: string): boolean {
+  return /^\d{1,18}$/.test(value);
+}
+
 export function isResumableAtsRun(
   status: unknown,
   checkpoint: unknown
