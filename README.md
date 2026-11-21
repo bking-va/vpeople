@@ -432,6 +432,17 @@ npx tsx scripts/bamboo-sync.ts --incremental /tmp/db_url.txt
 - **New env vars:** none.
 - **Access:** ethnicity/EEO is HR-admin only (not the employee). Dependents are self or HR. Comp-sensitive custom fields use `hr_only` plus the existing compensation section check. SIN/SSN/bank/credit-card aliases from `/meta/fields` are never requested or stored.
 
+Nine Bamboo **custom compensation tables** (`customTeamInformation`, `customAdjustments`, `customVariablePayActuals`, `customInternalReporting`, `customAnnualBonus`, `customShiftTiming`, `customCommissionPlanDetails`, `customStatutoryBonusPlanDetails`, `customCommissionSupplements`) are imported with the hourly employee sync into `employee_compensation_table_rows` (`GET /employees/all/tables/{alias}`). Access matches current compensation: the employee, or anyone with `canViewCompensation` (HR/comp admins and the management chain only if that flag is already granted). `--cache` version is **4**.
+
+```bash
+npm run db:migrate   # through drizzle/0036_bamboo_sync_comp_tables.sql
+npx tsx scripts/bamboo-sync.ts --replace-demo --cache "$HOME/.cache/vpeople/bamboo-sync.json" /tmp/db_url.txt
+```
+
+- **Expected runtime:** minutes; the nine tables are small relative to ATS/files.
+- **Blob storage:** none.
+- **New env vars:** none.
+
 Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ACA, photos, certifications, stock/equity grants, `includeInPayroll`. Compensation is stored but never printed.
 
 ## Contributing

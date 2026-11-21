@@ -219,6 +219,7 @@ export type BambooSyncDatasetCounts = {
   customFields: number;
   customFieldValues: number;
   employeeExtras: number;
+  compensationTableRows: number;
 };
 
 export type AtsDatasetCounts = {

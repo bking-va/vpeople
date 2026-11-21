@@ -10,6 +10,7 @@ export type BambooSyncCliArgs = {
   files: boolean;
   skipBlobs: boolean;
   metadata: boolean;
+  compTables: boolean;
   onlyMissing: boolean;
   requeueDetails: boolean;
   resumeFrom: string | null;
@@ -39,6 +40,7 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     files: false,
     skipBlobs: false,
     metadata: false,
+    compTables: false,
     onlyMissing: true,
     requeueDetails: false,
     resumeFrom: null,
@@ -57,6 +59,7 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     else if (arg === "--files") args.files = true;
     else if (arg === "--skip-blobs") args.skipBlobs = true;
     else if (arg === "--metadata") args.metadata = true;
+    else if (arg === "--comp-tables") args.compTables = true;
     else if (arg === "--only-missing") {
       args.onlyMissing = true;
       args.requeueDetails = false;

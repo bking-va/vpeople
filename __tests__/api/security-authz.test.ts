@@ -1,4 +1,5 @@
 import {
+  canViewBambooCompensationTables,
   canViewCustomFieldValue,
   canViewDependents,
   canViewEeoDemographics,
@@ -172,6 +173,27 @@ describe("field-level authz helpers", () => {
         search: "secret.personal",
         isSelf: false,
         canViewSensitivePersonalInfo: true,
+      })
+    ).toBe(true);
+  });
+
+  test("Bamboo compensation tables follow current compensation visibility", () => {
+    expect(
+      canViewBambooCompensationTables({
+        isViewingSelf: false,
+        canViewCompensation: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewBambooCompensationTables({
+        isViewingSelf: true,
+        canViewCompensation: false,
+      })
+    ).toBe(true);
+    expect(
+      canViewBambooCompensationTables({
+        isViewingSelf: false,
+        canViewCompensation: true,
       })
     ).toBe(true);
   });
