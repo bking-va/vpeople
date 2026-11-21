@@ -31,6 +31,13 @@ export async function POST(
       );
     }
 
+    if (document.bambooId) {
+      return NextResponse.json(
+        { error: "BambooHR is the system of record for this document" },
+        { status: 409 }
+      );
+    }
+
     // Get employee ID
     const [employee] = await db
       .select({ id: employees.id, userId: employees.userId })

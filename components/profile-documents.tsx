@@ -15,6 +15,7 @@ interface Document {
   createdAt: string;
   body?: string | null;
   fileUrl?: string | null;
+  bambooId?: string | null;
 }
 
 export function ProfileDocuments({
@@ -169,13 +170,13 @@ export function ProfileDocuments({
                 </div>
                 <div className="flex items-center gap-2">
                   {getStatusBadge(doc.status)}
-                  {doc.status === "pending_signature" && (
+                  {doc.status === "pending_signature" && !doc.bambooId && (
                     <Button size="sm" onClick={() => handleSign(doc.id)}>
                       <CheckCircle className="mr-1 h-4 w-4" />
                       Sign
                     </Button>
                   )}
-                  {doc.fileUrl ? (
+                  {doc.fileUrl?.startsWith("https://") ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -184,7 +185,7 @@ export function ProfileDocuments({
                       <Download className="h-4 w-4" />
                     </Button>
                   ) : null}
-                  {canUpload && (
+                  {canUpload && !doc.bambooId && (
                     <Button
                       size="sm"
                       variant="ghost"

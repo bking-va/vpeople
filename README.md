@@ -407,7 +407,19 @@ npx tsx scripts/bamboo-sync.ts --ats-applications --incremental /tmp/db_url.txt
 - **Blob storage:** private Vercel Blob; plan for resume files (subset of 88k). Requires `BLOB_READ_WRITE_TOKEN`. Skip with `--skip-resumes` if the token is not provisioned yet.
 - **New env vars:** `BLOB_READ_WRITE_TOKEN` (existing Blob token; now used by the ATS importer). Optional `BAMBOO_SYNC_CONCURRENCY` still caps other Bamboo reads; ATS details stay at 1–4.
 
-Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, custom Bamboo fields, FLSA/payroll flags, employee/company files. Compensation is stored but never printed.
+Employee and company files are a **separate, resumable job** (not the hourly cron). Restricted Bamboo categories (I-9, Immigration, Signed Documents, Commission Docs, Stock Option agreements, Sunlife, Resumes, India Team, compensation letters) are HR admin or the employee themselves — never other employees. Blobs are private and served only via authorized download routes.
+
+```bash
+npm run db:migrate   # through drizzle/0034_bamboo_sync_files.sql
+npx tsx scripts/bamboo-sync.ts --files /tmp/db_url.txt
+npx tsx scripts/bamboo-sync.ts --files --skip-blobs /tmp/db_url.txt
+```
+
+- **Expected runtime:** many hours. ~27,979 employee files (~35.5GB) plus ~9,301 company files (~2.8GB), concurrency 1, 429 backoff, checkpointed per file. Re-run the same command to resume.
+- **Blob storage:** private Vercel Blob, plan ~38GB. Requires `BLOB_READ_WRITE_TOKEN`. `--skip-blobs` stores metadata only.
+- **New env vars:** none beyond `BLOB_READ_WRITE_TOKEN`. Hourly cron does not download files.
+
+Not imported (excluded or no vPeople column): SIN/SSN/national id/NIN/passport, bank/direct-deposit fields, ethnicity/EEO/ACA, photos, dependents, assets, certifications, stock/equity grants, custom Bamboo fields, FLSA/payroll flags. Compensation is stored but never printed.
 
 ## Contributing
 

@@ -7,6 +7,8 @@ export type BambooSyncCliArgs = {
   incremental: boolean;
   atsApplications: boolean;
   skipResumes: boolean;
+  files: boolean;
+  skipBlobs: boolean;
   onlyMissing: boolean;
   requeueDetails: boolean;
   resumeFrom: string | null;
@@ -33,6 +35,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     incremental: false,
     atsApplications: false,
     skipResumes: false,
+    files: false,
+    skipBlobs: false,
     onlyMissing: true,
     requeueDetails: false,
     resumeFrom: null,
@@ -48,6 +52,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     else if (arg === "--incremental") args.incremental = true;
     else if (arg === "--ats-applications") args.atsApplications = true;
     else if (arg === "--skip-resumes") args.skipResumes = true;
+    else if (arg === "--files") args.files = true;
+    else if (arg === "--skip-blobs") args.skipBlobs = true;
     else if (arg === "--only-missing") {
       args.onlyMissing = true;
       args.requeueDetails = false;
