@@ -385,6 +385,22 @@ export interface BambooSyncStore {
     limit: number,
     afterBambooId?: string | null
   ): Promise<Array<{ id: number; bambooId: string; resumeBambooFileId: string }>>;
+  listRecentDetailedCandidatesForResumes(limit: number): Promise<
+    Array<{
+      id: number;
+      bambooId: string;
+      resumeBambooFileId: string | null;
+      resumeBlobUrl: string | null;
+    }>
+  >;
+  listCandidatesResumeState(bambooIds: string[]): Promise<
+    Array<{
+      id: number;
+      bambooId: string;
+      resumeBambooFileId: string | null;
+      resumeBlobUrl: string | null;
+    }>
+  >;
   setCandidateResumeBlob(bambooId: string, blobUrl: string): Promise<void>;
   requeueCandidateDetails(): Promise<number>;
   markCandidateDetailImported(bambooIds: string[]): Promise<void>;

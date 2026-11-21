@@ -4,7 +4,7 @@
  */
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   candidateApplicationAnswers,
   candidateApplicationComments,
@@ -50,8 +50,15 @@ describe("BambooHR ATS batched writes (Real Postgres)", () => {
         await db
           .delete(candidateStatusHistory)
           .where(eq(candidateStatusHistory.candidateId, candidateId));
-        await db.delete(candidates).where(eq(candidates.id, candidateId));
       }
+      await db.delete(candidates).where(
+        inArray(candidates.bambooId, [
+          appBambooId,
+          `ATSAPP_OLD_${runId}`,
+          `ATSAPP_NEW_${runId}`,
+          `ATSAPP_SKIP_${runId}`,
+        ])
+      );
       if (openingId) {
         await db.delete(jobOpenings).where(eq(jobOpenings.id, openingId));
       }
@@ -197,6 +204,11 @@ describe("BambooHR ATS batched writes (Real Postgres)", () => {
     expect(updated.coverLetter).toBe("Hello updated");
     expect(updated.rating).toBe(5);
 
+    const recent = await store.listRecentDetailedCandidatesForResumes(10);
+    expect(recent.some((row) => row.bambooId === appBambooId)).toBe(true);
+    const [state] = await store.listCandidatesResumeState([appBambooId]);
+    expect(state.resumeBambooFileId).toBe("99");
+
     const answers = await db
       .select()
       .from(candidateApplicationAnswers)
@@ -209,5 +221,110 @@ describe("BambooHR ATS batched writes (Real Postgres)", () => {
       .from(candidateApplicationComments)
       .where(eq(candidateApplicationComments.candidateId, candidateId!));
     expect(comments[0].content).toBe("Strong");
+  });
+
+  test("orders detailed applications by appliedAt desc for resumes-only", async () => {
+    const store = createBambooSyncStore(db);
+    const olderId = `ATSAPP_OLD_${runId}`;
+    const newerId = `ATSAPP_NEW_${runId}`;
+    const undetailedId = `ATSAPP_SKIP_${runId}`;
+    if (!openingId) {
+      await store.upsertJobOpeningsBatch(
+        [
+          {
+            bambooId: jobBambooId,
+            title: "ATS Import Role",
+            departmentId: null,
+            locationId: null,
+            hiringLeadId: null,
+            status: "open",
+            bambooStatusId: "4",
+            bambooStatusLabel: "Open",
+            employmentType: "full_time",
+            description: null,
+            requirements: null,
+            openDate: "2024-01-01",
+            closeDate: null,
+          },
+        ],
+        { chunkSize: 50 }
+      );
+      openingId = (await store.listJobOpeningIdsByBambooId()).get(jobBambooId) ?? null;
+    }
+    const jobId = openingId;
+    await store.upsertCandidatesBatch(
+      [
+        {
+          bambooId: olderId,
+          jobOpeningId: jobId!,
+          firstName: "Pat",
+          lastName: "Lee",
+          email: `pat.old.${runId}@invalid.local`,
+          phone: null,
+          linkedinUrl: null,
+          source: "other",
+          sourceDetail: null,
+          stage: "new",
+          bambooStatusId: "1",
+          bambooStatusLabel: "New",
+          rating: null,
+          appliedAt: "2099-01-01T00:00:00Z",
+          coverLetter: null,
+          resumeBambooFileId: "1",
+          resumeBlobUrl: null,
+          atsDetailImportedAt: "2024-01-02T00:00:00Z",
+        },
+        {
+          bambooId: newerId,
+          jobOpeningId: jobId!,
+          firstName: "Pat",
+          lastName: "Lee",
+          email: `pat.new.${runId}@invalid.local`,
+          phone: null,
+          linkedinUrl: null,
+          source: "other",
+          sourceDetail: null,
+          stage: "new",
+          bambooStatusId: "1",
+          bambooStatusLabel: "New",
+          rating: null,
+          appliedAt: "2099-06-01T00:00:00Z",
+          coverLetter: null,
+          resumeBambooFileId: "2",
+          resumeBlobUrl: "https://blob.example/existing",
+          atsDetailImportedAt: "2024-06-02T00:00:00Z",
+        },
+        {
+          bambooId: undetailedId,
+          jobOpeningId: jobId!,
+          firstName: "Pat",
+          lastName: "Lee",
+          email: `pat.skip.${runId}@invalid.local`,
+          phone: null,
+          linkedinUrl: null,
+          source: "other",
+          sourceDetail: null,
+          stage: "new",
+          bambooStatusId: "1",
+          bambooStatusLabel: "New",
+          rating: null,
+          appliedAt: "2099-12-01T00:00:00Z",
+          coverLetter: null,
+          resumeBambooFileId: "3",
+          resumeBlobUrl: null,
+          atsDetailImportedAt: null,
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    expect(jobId).not.toBeNull();
+    const recent = await store.listRecentDetailedCandidatesForResumes(50);
+    const window = recent.filter((row) =>
+      [olderId, newerId, undetailedId].includes(row.bambooId)
+    );
+    expect(window.map((row) => row.bambooId)).toEqual([newerId, olderId]);
+    const state = await store.listCandidatesResumeState([newerId, olderId]);
+    expect(state.map((row) => row.bambooId)).toEqual([newerId, olderId]);
+    expect(state[0].resumeBlobUrl).toBe("https://blob.example/existing");
   });
 });

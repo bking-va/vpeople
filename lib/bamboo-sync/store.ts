@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import {
   announcements,
   approvalRequestSteps,
@@ -1969,6 +1969,81 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       );
     },
 
+    async listRecentDetailedCandidatesForResumes(limit) {
+      const size = Math.max(1, Math.min(limit, 5000));
+      const rows: Array<{
+        id: number;
+        bambooId: string | null;
+        resumeBambooFileId: string | null;
+        resumeBlobUrl: string | null;
+      }> = await db
+        .select({
+          id: candidates.id,
+          bambooId: candidates.bambooId,
+          resumeBambooFileId: candidates.resumeBambooFileId,
+          resumeBlobUrl: candidates.resumeBlobUrl,
+        })
+        .from(candidates)
+        .where(
+          and(
+            isNotNull(candidates.bambooId),
+            isNotNull(candidates.atsDetailImportedAt)
+          )
+        )
+        .orderBy(desc(candidates.appliedAt), desc(candidates.id))
+        .limit(size);
+      return rows.flatMap((row) =>
+        row.bambooId
+          ? [
+              {
+                id: row.id,
+                bambooId: row.bambooId,
+                resumeBambooFileId: row.resumeBambooFileId,
+                resumeBlobUrl: row.resumeBlobUrl,
+              },
+            ]
+          : []
+      );
+    },
+
+    async listCandidatesResumeState(bambooIds) {
+      const ids = bambooIds.filter(Boolean);
+      if (ids.length === 0) return [];
+      const found: Array<{
+        id: number;
+        bambooId: string | null;
+        resumeBambooFileId: string | null;
+        resumeBlobUrl: string | null;
+      }> = [];
+      for (const chunk of chunkRows(ids, 200)) {
+        const rows = await db
+          .select({
+            id: candidates.id,
+            bambooId: candidates.bambooId,
+            resumeBambooFileId: candidates.resumeBambooFileId,
+            resumeBlobUrl: candidates.resumeBlobUrl,
+          })
+          .from(candidates)
+          .where(inArray(candidates.bambooId, chunk));
+        found.push(...rows);
+      }
+      const byId = new Map(
+        found.flatMap((row) => (row.bambooId ? [[row.bambooId, row] as const] : []))
+      );
+      return ids.flatMap((bambooId) => {
+        const row = byId.get(bambooId);
+        if (!row || !row.bambooId) return [];
+        return [
+          {
+            id: row.id,
+            bambooId: row.bambooId,
+            resumeBambooFileId: row.resumeBambooFileId,
+            resumeBlobUrl: row.resumeBlobUrl,
+          },
+        ];
+      });
+    },
+
     async setCandidateResumeBlob(bambooId, blobUrl) {
       await db
         .update(candidates)
@@ -2083,6 +2158,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
           id: bambooSyncRuns.id,
           checkpoint: bambooSyncRuns.checkpoint,
           latestChanged: bambooSyncRuns.latestChanged,
+          status: bambooSyncRuns.status,
         })
         .from(bambooSyncRuns)
         .where(
@@ -2090,14 +2166,18 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
             eq(bambooSyncRuns.kind, kind),
             or(
               eq(bambooSyncRuns.status, "running"),
-              eq(bambooSyncRuns.status, "checkpointed")
+              eq(bambooSyncRuns.status, "checkpointed"),
+              and(
+                eq(bambooSyncRuns.status, "failed"),
+                sql`coalesce(${bambooSyncRuns.checkpoint}, '{}'::jsonb) <> '{}'::jsonb`
+              )
             )
           )
         )
         .orderBy(sql`${bambooSyncRuns.id} desc`)
         .limit(1);
       const row = rows[0];
-      if (!row) return null;
+      if (!row || !isResumableAtsRun(row.status, row.checkpoint)) return null;
       return {
         id: row.id,
         checkpoint:

@@ -194,6 +194,43 @@ class FakeAtsStore {
         resumeBambooFileId: String(row.resumeBambooFileId),
       }));
   }
+  async listRecentDetailedCandidatesForResumes(limit: number) {
+    return this.candidates
+      .filter((row) => row.bambooId && row.atsDetailImportedAt)
+      .sort((a, b) => {
+        const applied = String(b.appliedAt || "").localeCompare(String(a.appliedAt || ""));
+        if (applied !== 0) return applied;
+        return Number(b.id) - Number(a.id);
+      })
+      .slice(0, limit)
+      .map((row) => ({
+        id: Number(row.id),
+        bambooId: String(row.bambooId),
+        resumeBambooFileId:
+          row.resumeBambooFileId == null ? null : String(row.resumeBambooFileId),
+        resumeBlobUrl: row.resumeBlobUrl == null ? null : String(row.resumeBlobUrl),
+      }));
+  }
+  async listCandidatesResumeState(bambooIds: string[]) {
+    const byId = new Map(
+      this.candidates
+        .filter((row) => row.bambooId)
+        .map((row) => [String(row.bambooId), row])
+    );
+    return bambooIds.flatMap((bambooId) => {
+      const row = byId.get(bambooId);
+      if (!row) return [];
+      return [
+        {
+          id: Number(row.id),
+          bambooId,
+          resumeBambooFileId:
+            row.resumeBambooFileId == null ? null : String(row.resumeBambooFileId),
+          resumeBlobUrl: row.resumeBlobUrl == null ? null : String(row.resumeBlobUrl),
+        },
+      ];
+    });
+  }
   async setCandidateResumeBlob(bambooId: string, blobUrl: string) {
     const row = this.candidates.find((item) => item.bambooId === bambooId);
     if (row) row.resumeBlobUrl = blobUrl;
@@ -240,6 +277,91 @@ class FakeAtsStore {
       .find((item) => item.kind === "ats_applications" && item.status === "success");
     return typeof row?.latestChanged === "string" ? row.latestChanged : null;
   }
+  async lastIncompleteKindCheckpoint(kind: string) {
+    const row = [...this.syncRuns]
+      .reverse()
+      .find((item) => item.kind === kind && isResumableAtsRun(item.status, item.checkpoint));
+    if (!row) return null;
+    return {
+      id: Number(row.id),
+      checkpoint: (row.checkpoint as Record<string, unknown>) || null,
+      latestChanged: (row.latestChanged as string) || null,
+    };
+  }
+}
+
+function seedDetailedCandidate(
+  store: FakeAtsStore,
+  opts: {
+    bambooId: string;
+    appliedAt: string;
+    resumeBambooFileId?: string | null;
+    resumeBlobUrl?: string | null;
+    atsDetailImportedAt?: string | null;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+  }
+) {
+  store.candidates.push({
+    id: Number(opts.bambooId) || store.nextId++,
+    bambooId: opts.bambooId,
+    jobOpeningId: 10,
+    firstName: opts.firstName ?? "Pat",
+    lastName: opts.lastName ?? "Lee",
+    email: opts.email ?? `candidate-${opts.bambooId}@example.com`,
+    atsDetailImportedAt:
+      opts.atsDetailImportedAt === undefined
+        ? "2026-01-01T00:00:00.000Z"
+        : opts.atsDetailImportedAt,
+    appliedAt: opts.appliedAt,
+    resumeBambooFileId: opts.resumeBambooFileId ?? null,
+    resumeBlobUrl: opts.resumeBlobUrl ?? null,
+  });
+}
+
+function mockResumeFileFetch(
+  files: Record<string, Buffer | "404">,
+  tracker?: {
+    urls: string[];
+    methods: string[];
+    inFlight: number;
+    maxInFlight: number;
+    delayMs?: number;
+  }
+): typeof fetch {
+  return async (input, init) => {
+    const url = String(input);
+    const method = String(init?.method || "GET").toUpperCase();
+    tracker?.urls.push(url);
+    tracker?.methods.push(method);
+    if (tracker) {
+      tracker.inFlight += 1;
+      tracker.maxInFlight = Math.max(tracker.maxInFlight, tracker.inFlight);
+    }
+    try {
+      if (tracker?.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, tracker.delayMs));
+      }
+      const match = url.match(/\/files\/(\d+)/);
+      if (match) {
+        const body = files[match[1]];
+        if (body === "404" || body === undefined) {
+          return jsonResponse({ error: "missing" }, 404);
+        }
+        return new Response(Uint8Array.from(body), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="resume-${match[1]}.pdf"`,
+          },
+        });
+      }
+      return jsonResponse({ error: url }, 404);
+    } finally {
+      if (tracker) tracker.inFlight -= 1;
+    }
+  };
 }
 
 function mockAtsFetch(): typeof fetch {
@@ -1518,6 +1640,450 @@ describe("runAtsApplicationsSync", () => {
         body: JSON.stringify({ type: "comment", comment: "hi" }),
       })
     ).rejects.toThrow(/read-only/i);
+  });
+});
+
+describe("ATS resumes-only import", () => {
+  test("requires --limit-recent", async () => {
+    const store = new FakeAtsStore();
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch({}),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate() {
+          return { url: "https://blob.vercel-storage.com/unused" };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/limit-recent/i);
+    expect(store.syncRuns).toHaveLength(0);
+  });
+
+  test("selects the N most recent detailed applications, skips existing blobs, and GET-downloads the rest", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "1",
+      appliedAt: "2026-01-01T00:00:00.000Z",
+      resumeBambooFileId: "11",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ada@example.com",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "2",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "22",
+      resumeBlobUrl: "https://blob.vercel-storage.com/ats-resumes/2/existing.pdf",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "3",
+      appliedAt: "2026-04-01T00:00:00.000Z",
+      resumeBambooFileId: "33",
+      firstName: "Ada",
+      email: "ada@example.com",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "4",
+      appliedAt: "2026-05-01T00:00:00.000Z",
+      atsDetailImportedAt: null,
+      resumeBambooFileId: "44",
+    });
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+    };
+    const blobs: string[] = [];
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch(
+        { "11": Buffer.from("%PDF-old"), "33": Buffer.from("%PDF-new") },
+        tracker
+      ),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          blobs.push(input.pathname);
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(result.kind).toBe("ats_resumes_only");
+    expect(result.datasetCounts.applications).toBe(2);
+    expect(result.datasetCounts.resumes).toBe(1);
+    expect(result.checkpoint.skippedExistingResume).toBe(1);
+    expect(store.candidates.find((row) => row.bambooId === "3")?.resumeBlobUrl).toContain(
+      "blob.vercel-storage.com"
+    );
+    expect(store.candidates.find((row) => row.bambooId === "1")?.resumeBlobUrl).toBeNull();
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0]).toMatch(/^ats-resumes\/3\//);
+    expect(tracker.urls.some((url) => url.includes("/applicant_tracking/"))).toBe(false);
+    expect(tracker.urls).toEqual([
+      expect.stringMatching(/\/files\/33$/),
+    ]);
+    expect(tracker.methods.every((method) => method === "GET")).toBe(true);
+    expect(store.emailsSent).toBe(0);
+    expect(store.webhookCalls).toBe(0);
+    expect(logs.join("\n")).not.toMatch(/ada@example.com/i);
+    expect(logs.join("\n")).not.toMatch(/Lovelace/i);
+    expect(JSON.stringify(store.syncRuns)).not.toMatch(/ada@example.com/i);
+  });
+
+  test("dry-run reports counts only and does not GET or persist", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "10",
+      appliedAt: "2026-04-01T00:00:00.000Z",
+      resumeBambooFileId: "101",
+      resumeBlobUrl: "https://blob.vercel-storage.com/existing",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "11",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "111",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "12",
+      appliedAt: "2026-02-01T00:00:00.000Z",
+    });
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+    };
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch({ "111": Buffer.from("%PDF") }, tracker),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate() {
+          throw new Error("dry-run must not upload");
+        },
+      },
+      mode: "full",
+      dryRun: true,
+      resumesOnly: true,
+      limitRecent: 3,
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(result.dryRun).toBe(true);
+    expect(result.datasetCounts.applications).toBe(3);
+    expect(result.datasetCounts.resumes).toBe(0);
+    expect(result.checkpoint.skippedExistingResume).toBe(1);
+    expect(result.checkpoint.missingResumeFile).toBe(1);
+    expect(result.checkpoint.pendingResumes).toBe(1);
+    expect(tracker.urls).toHaveLength(0);
+    expect(store.syncRuns).toHaveLength(0);
+    expect(store.candidates.find((row) => row.bambooId === "11")?.resumeBlobUrl).toBeNull();
+    expect(logs.some((line) => /dry-run/i.test(line) && /selected=3/.test(line))).toBe(
+      true
+    );
+  });
+
+  test("snapshots the selected window so resume does not shift after blobs land", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "21",
+      appliedAt: "2026-02-01T00:00:00.000Z",
+      resumeBambooFileId: "221",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "22",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "222",
+    });
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+      delayMs: 40,
+    };
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch(
+        { "221": Buffer.from("%PDF-21"), "222": Buffer.from("%PDF-22") },
+        tracker
+      ),
+    });
+    const blob = {
+      async putPrivate(input: { pathname: string }) {
+        return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+      },
+    };
+    const first = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob,
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      concurrency: 1,
+      maxMs: 20,
+      log: () => undefined,
+    });
+    expect(first.status).toBe("checkpointed");
+    expect(first.kind).toBe("ats_resumes_only");
+    expect(first.checkpoint.selectedResumeIds).toEqual(["22", "21"]);
+    expect(first.datasetCounts.resumes).toBe(1);
+    seedDetailedCandidate(store, {
+      bambooId: "23",
+      appliedAt: "2026-04-01T00:00:00.000Z",
+      resumeBambooFileId: "223",
+    });
+    const second = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob,
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      concurrency: 1,
+      log: () => undefined,
+    });
+    expect(second.status).toBe("success");
+    expect(store.candidates.find((row) => row.bambooId === "21")?.resumeBlobUrl).toContain(
+      "blob.vercel-storage.com"
+    );
+    expect(store.candidates.find((row) => row.bambooId === "23")?.resumeBlobUrl).toBeNull();
+    expect(tracker.urls.some((url) => url.endsWith("/files/223"))).toBe(false);
+  });
+
+  test("persists the selected window before the first résumé GET", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "51",
+      appliedAt: "2026-02-01T00:00:00.000Z",
+      resumeBambooFileId: "511",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "52",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "522",
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const run = store.syncRuns[0];
+        expect(run?.status).toBe("running");
+        expect((run?.checkpoint as { selectedResumeIds?: string[] })?.selectedResumeIds).toEqual(
+          ["52", "51"]
+        );
+        const url = String(input);
+        const match = url.match(/\/files\/(\d+)/);
+        if (!match) return jsonResponse({ error: url }, 404);
+        return new Response(Uint8Array.from(Buffer.from("%PDF")), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="resume-${match[1]}.pdf"`,
+          },
+        });
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+  });
+
+  test("resumes a failed resumes-only run from its saved window", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "61",
+      appliedAt: "2026-02-01T00:00:00.000Z",
+      resumeBambooFileId: "611",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "62",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "622",
+      resumeBlobUrl: "https://blob.vercel-storage.com/ats-resumes/62/done.pdf",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "63",
+      appliedAt: "2026-04-01T00:00:00.000Z",
+      resumeBambooFileId: "633",
+    });
+    store.syncRuns.push({
+      id: 90,
+      kind: "ats_resumes_only",
+      status: "failed",
+      checkpoint: {
+        phase: "resumes",
+        listPage: 1,
+        lastListId: null,
+        lastDetailId: null,
+        lastResumeId: "62",
+        listed: 2,
+        detailed: 0,
+        resumes: 1,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: false,
+        resumesOnly: true,
+        limitRecent: 2,
+        selectedResumeIds: ["62", "61"],
+      },
+    });
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+    };
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch({ "611": Buffer.from("%PDF-61") }, tracker),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.syncRuns[0].status).toBe("success");
+    expect(store.candidates.find((row) => row.bambooId === "61")?.resumeBlobUrl).toContain(
+      "blob.vercel-storage.com"
+    );
+    expect(store.candidates.find((row) => row.bambooId === "63")?.resumeBlobUrl).toBeNull();
+    expect(tracker.urls).toEqual([expect.stringMatching(/\/files\/611$/)]);
+  });
+
+  test("bounds résumé GET concurrency", async () => {
+    const store = new FakeAtsStore();
+    for (const id of ["31", "32", "33"]) {
+      seedDetailedCandidate(store, {
+        bambooId: id,
+        appliedAt: `2026-0${id[1]}-01T00:00:00.000Z`,
+        resumeBambooFileId: id,
+      });
+    }
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+      delayMs: 40,
+    };
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch(
+        {
+          "31": Buffer.from("%PDF-31"),
+          "32": Buffer.from("%PDF-32"),
+          "33": Buffer.from("%PDF-33"),
+        },
+        tracker
+      ),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 3,
+      concurrency: 2,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(result.datasetCounts.resumes).toBe(3);
+    expect(tracker.maxInFlight).toBeGreaterThan(1);
+    expect(tracker.maxInFlight).toBeLessThanOrEqual(2);
+  });
+
+  test("marks a 404 résumé unavailable without listing applications", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "41",
+      appliedAt: "2026-06-01T00:00:00.000Z",
+      resumeBambooFileId: "411",
+    });
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+    };
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch({ "411": "404" }, tracker),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate() {
+          throw new Error("should not upload a missing resume");
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 1,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.candidates[0].resumeBlobUrl).toBe(BAMBOO_RESUME_UNAVAILABLE);
+    expect(tracker.urls).toEqual([expect.stringMatching(/\/files\/411$/)]);
+    expect(store.emailsSent).toBe(0);
   });
 });
 

@@ -1204,6 +1204,45 @@ class MemoryStore implements BambooSyncStore {
       }));
   }
 
+  async listRecentDetailedCandidatesForResumes(limit: number) {
+    return this.candidates
+      .filter((row) => row.bambooId && row.atsDetailImportedAt)
+      .sort((a, b) => {
+        const applied = String(b.appliedAt || "").localeCompare(String(a.appliedAt || ""));
+        if (applied !== 0) return applied;
+        return Number(b.id) - Number(a.id);
+      })
+      .slice(0, limit)
+      .map((row) => ({
+        id: Number(row.id),
+        bambooId: String(row.bambooId),
+        resumeBambooFileId:
+          row.resumeBambooFileId == null ? null : String(row.resumeBambooFileId),
+        resumeBlobUrl: row.resumeBlobUrl == null ? null : String(row.resumeBlobUrl),
+      }));
+  }
+
+  async listCandidatesResumeState(bambooIds: string[]) {
+    const byId = new Map(
+      this.candidates
+        .filter((row) => row.bambooId)
+        .map((row) => [String(row.bambooId), row])
+    );
+    return bambooIds.flatMap((bambooId) => {
+      const row = byId.get(bambooId);
+      if (!row) return [];
+      return [
+        {
+          id: Number(row.id),
+          bambooId,
+          resumeBambooFileId:
+            row.resumeBambooFileId == null ? null : String(row.resumeBambooFileId),
+          resumeBlobUrl: row.resumeBlobUrl == null ? null : String(row.resumeBlobUrl),
+        },
+      ];
+    });
+  }
+
   async setCandidateResumeBlob(bambooId: string, blobUrl: string): Promise<void> {
     const row = this.candidates.find((item) => item.bambooId === bambooId);
     if (row) row.resumeBlobUrl = blobUrl;
@@ -1270,11 +1309,7 @@ class MemoryStore implements BambooSyncStore {
   async lastIncompleteKindCheckpoint(kind: string) {
     const row = [...this.syncRuns]
       .reverse()
-      .find(
-        (item) =>
-          item.kind === kind &&
-          (item.status === "running" || item.status === "checkpointed")
-      );
+      .find((item) => item.kind === kind && isResumableAtsRun(item.status, item.checkpoint));
     if (!row) return null;
     return {
       id: Number(row.id),
@@ -2589,6 +2624,8 @@ describe("CLI args and demo detection", () => {
       requeueDetails: false,
       resumeFrom: null,
       backfillCommentsHistory: false,
+      atsResumesOnly: false,
+      limitRecent: null,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
@@ -2617,6 +2654,8 @@ describe("CLI args and demo detection", () => {
       requeueDetails: false,
       resumeFrom: null,
       backfillCommentsHistory: false,
+      atsResumesOnly: false,
+      limitRecent: null,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
@@ -2651,6 +2690,8 @@ describe("CLI args and demo detection", () => {
       requeueDetails: false,
       resumeFrom: null,
       backfillCommentsHistory: false,
+      atsResumesOnly: false,
+      limitRecent: null,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
@@ -2702,6 +2743,31 @@ describe("CLI args and demo detection", () => {
     });
   });
 
+  it("parses --ats-resumes-only and --limit-recent", () => {
+    expect(
+      parseBambooSyncArgs([
+        "--ats-resumes-only",
+        "--limit-recent",
+        "25",
+        "--dry-run",
+        "/tmp/db_url.txt",
+      ])
+    ).toMatchObject({
+      atsResumesOnly: true,
+      atsApplications: true,
+      skipResumes: false,
+      limitRecent: 25,
+      dryRun: true,
+    });
+    expect(
+      parseBambooSyncArgs(["--ats-resumes-only", "--limit-recent=8"])
+    ).toMatchObject({
+      atsResumesOnly: true,
+      limitRecent: 8,
+    });
+    expect(parseBambooSyncArgs(["--ats-resumes-only"]).limitRecent).toBeNull();
+  });
+
   it("parses --cache without treating the cache path as the db url file", () => {
     expect(
       parseBambooSyncArgs([
@@ -2724,6 +2790,8 @@ describe("CLI args and demo detection", () => {
       requeueDetails: false,
       resumeFrom: null,
       backfillCommentsHistory: false,
+      atsResumesOnly: false,
+      limitRecent: null,
       concurrency: null,
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: "/tmp/bamboo-sync.bamboo-cache.json",
