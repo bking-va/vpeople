@@ -32,7 +32,7 @@ import { eq, desc, inArray } from "drizzle-orm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, formatCurrency, calculateTenure } from "@/lib/utils";
+import { formatDate, calculateTenure } from "@/lib/utils";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getSessionUserPermissions } from "@/lib/permissions";
@@ -58,6 +58,9 @@ import {
 import { ProfileDocuments } from "@/components/profile-documents";
 import { CustomFieldsDisplay } from "@/components/custom-fields-display";
 import { CompensationEditForm } from "@/components/compensation-edit-form";
+import { FxRatesFootnote, PayAmount } from "@/components/pay-amount";
+import { compensationTableFieldCurrency, isCompensationTableMoneyField } from "@/lib/fx";
+import { getLatestFxRates } from "@/lib/fx-rates";
 import { JobInfoEditForm } from "@/components/job-info-edit-form";
 import { EmploymentStatusForm } from "@/components/employment-status-form";
 import { PromotionForm } from "@/components/promotion-form";
@@ -269,6 +272,8 @@ export default async function EmployeeProfilePage({
         .limit(1)
         .then((rows) => rows[0] || { roeCode: null, terminationType: null })
     : { roeCode: null, terminationType: null };
+
+  const fxRates = canViewCompensation ? await getLatestFxRates() : new Map();
 
   const compensationTableRows = canViewCompensation
     ? await db
@@ -850,7 +855,13 @@ export default async function EmployeeProfilePage({
                           {formatDate(record.effectiveDate)}
                         </p>
                         <p className="font-medium">
-                          {record.payRate ? formatCurrency(record.payRate, record.currency || "CAD") : "—"} {record.payType}
+                          <PayAmount
+                            amount={record.payRate}
+                            currency={record.currency || "CAD"}
+                            visible={canViewCompensation}
+                            rates={fxRates}
+                            suffix={record.payType}
+                          />
                         </p>
                         {record.changeReason && (
                           <p className="text-sm text-muted-foreground">
@@ -877,7 +888,13 @@ export default async function EmployeeProfilePage({
                           {formatDate(record.effectiveDate)}
                         </p>
                         <p className="font-medium">
-                          {record.bonusType}: {record.eligibleAmount ? formatCurrency(record.eligibleAmount, record.currency || "CAD") : "—"}
+                          {record.bonusType}:{" "}
+                          <PayAmount
+                            amount={record.eligibleAmount}
+                            currency={record.currency || "CAD"}
+                            visible={canViewCompensation}
+                            rates={fxRates}
+                          />
                         </p>
                       </div>
                     ))}
@@ -929,25 +946,53 @@ export default async function EmployeeProfilePage({
                           .filter(([key]) =>
                             isVisibleCompensationTableField(key)
                           )
-                          .map(([key, value]) => (
-                            <InfoField
-                              key={key}
-                              label={key}
-                              value={
-                                value == null || value === ""
-                                  ? null
-                                  : typeof value === "object"
-                                    ? JSON.stringify(value)
-                                    : String(value)
-                              }
-                            />
-                          ))}
+                          .map(([key, value]) => {
+                            if (
+                              isCompensationTableMoneyField(key) &&
+                              value != null &&
+                              value !== "" &&
+                              typeof value !== "object"
+                            ) {
+                              return (
+                                <div key={key}>
+                                  <p className="text-sm text-muted-foreground">{key}</p>
+                                  <p className="font-medium">
+                                    <PayAmount
+                                      amount={value as string | number}
+                                      currency={compensationTableFieldCurrency(
+                                        row.rowData ?? {},
+                                        value
+                                      )}
+                                      visible={canViewCompensation}
+                                      rates={fxRates}
+                                      formatted={String(value)}
+                                    />
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return (
+                              <InfoField
+                                key={key}
+                                label={key}
+                                value={
+                                  value == null || value === ""
+                                    ? null
+                                    : typeof value === "object"
+                                      ? JSON.stringify(value)
+                                      : String(value)
+                                }
+                              />
+                            );
+                          })}
                       </div>
                     </div>
                   ))}
                 </CardContent>
               </Card>
             )}
+
+            <FxRatesFootnote rates={fxRates} />
 
             <CompensationEditForm
               employeeId={employee.id}

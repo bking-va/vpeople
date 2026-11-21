@@ -8,7 +8,9 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { PayAmount } from "@/components/pay-amount";
+import { getLatestFxRates } from "@/lib/fx-rates";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ApprovalActions } from "@/components/approval-actions";
@@ -48,6 +50,11 @@ export default async function ApprovalsPage() {
   }
 
   const pendingSteps = await getVisiblePendingApprovals(employeeId, isAdmin);
+  const fxRates = pendingSteps.some(
+    (item) => item.request.entityType === "compensation_change"
+  )
+    ? await getLatestFxRates()
+    : new Map();
 
   // Enrich requests with entity-specific data
   const enrichedRequests = await Promise.all(
@@ -196,10 +203,12 @@ export default async function ApprovalsPage() {
                           <div>
                             <span className="text-muted-foreground">New Pay Rate:</span>{" "}
                             <span className="font-medium">
-                              {formatCurrency(
-                                parseFloat(item.entityData.metadata.payRate),
-                                item.entityData.metadata.currency || "CAD"
-                              )}
+                              <PayAmount
+                                amount={item.entityData.metadata.payRate}
+                                currency={item.entityData.metadata.currency || "CAD"}
+                                visible
+                                rates={fxRates}
+                              />
                             </span>
                           </div>
                         )}

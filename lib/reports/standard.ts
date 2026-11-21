@@ -18,6 +18,12 @@ import { formatGender } from "@/lib/utils/formatters";
 import { auth } from "@/lib/auth";
 import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewTerminationDetails, redactTerminationDetails } from "@/lib/authz";
+import {
+  type FxRateMap,
+  type UsdEquivalent,
+  usdEquivalentForVisiblePay,
+} from "@/lib/fx";
+import { getLatestFxRates } from "@/lib/fx-rates";
 
 export { raiseCutoffDate, isRaiseOverdue } from "./raise-overdue";
 
@@ -141,6 +147,7 @@ export async function getLastPayChangeReport() {
       lastName: employees.lastName,
       jobTitle: employees.jobTitle,
       payRate: compensationHistory.payRate,
+      currency: compensationHistory.currency,
       effectiveDate: compensationHistory.effectiveDate,
       changeReason: compensationHistory.changeReason,
     })
@@ -181,6 +188,7 @@ export async function getPeopleWithoutRaise(asOf: Date = new Date(), months = 12
         ...emp,
         lastRaiseDate,
         lastPayRate: last?.payRate ?? null,
+        lastCurrency: last?.currency ?? "CAD",
         overdue: isRaiseOverdue(lastRaiseDate, cutoff),
       };
     })
@@ -299,7 +307,7 @@ export async function getEmploymentStatusHistoryReport(opts?: {
 export async function getSalaryHistoryReport(opts?: { canViewCompensation?: boolean }) {
   if (opts?.canViewCompensation === false) return [];
   if (!(await sessionCanViewCompensation())) return [];
-  return db
+  const rows = await db
     .select({
       id: compensationHistory.id,
       employeeId: employees.id,
@@ -316,6 +324,17 @@ export async function getSalaryHistoryReport(opts?: { canViewCompensation?: bool
     .from(compensationHistory)
     .innerJoin(employees, eq(compensationHistory.employeeId, employees.id))
     .orderBy(desc(compensationHistory.effectiveDate), desc(compensationHistory.id));
+
+  const rates = await getLatestFxRates();
+  return rows.map((row) => ({
+    ...row,
+    usdEquivalent: usdEquivalentForVisiblePay({
+      visible: true,
+      amount: row.payRate,
+      currency: row.currency,
+      rates,
+    }),
+  }));
 }
 
 export async function getTimeOffScheduleReport(year: number) {
@@ -420,9 +439,31 @@ export type PayGroupRow = {
   maxPay: number;
   currency: string;
   payType: string;
+  avgPayUsd: number | null;
+  minPayUsd: number | null;
+  maxPayUsd: number | null;
+  fxRateDate: string | null;
+  fxSource: string | null;
 };
 
-function aggregatePay(rows: PayRow[], groupOf: (row: PayRow) => string | null | undefined): PayGroupRow[] {
+function usdForGroupAmount(
+  amount: number,
+  currency: string,
+  rates: FxRateMap
+): UsdEquivalent | null {
+  return usdEquivalentForVisiblePay({
+    visible: true,
+    amount,
+    currency,
+    rates,
+  });
+}
+
+function aggregatePay(
+  rows: PayRow[],
+  groupOf: (row: PayRow) => string | null | undefined,
+  rates: FxRateMap
+): PayGroupRow[] {
   const groups = new Map<string, { rates: number[]; currency: string; payType: string; label: string }>();
   for (const row of rows) {
     const rate = row.payRate != null ? parseFloat(row.payRate) : NaN;
@@ -445,26 +486,51 @@ function aggregatePay(rows: PayRow[], groupOf: (row: PayRow) => string | null | 
   }
 
   return Array.from(groups.values())
-    .map((entry) => ({
-      group: entry.label,
-      count: entry.rates.length,
-      avgPay: Number((entry.rates.reduce((sum, n) => sum + n, 0) / entry.rates.length).toFixed(2)),
-      minPay: Math.min(...entry.rates),
-      maxPay: Math.max(...entry.rates),
-      currency: entry.currency,
-      payType: entry.payType,
-    }))
+    .map((entry) => {
+      const avgPay = Number(
+        (entry.rates.reduce((sum, n) => sum + n, 0) / entry.rates.length).toFixed(2)
+      );
+      const minPay = Math.min(...entry.rates);
+      const maxPay = Math.max(...entry.rates);
+      const avgUsd = usdForGroupAmount(avgPay, entry.currency, rates);
+      const minUsd = usdForGroupAmount(minPay, entry.currency, rates);
+      const maxUsd = usdForGroupAmount(maxPay, entry.currency, rates);
+      const showUsd = Boolean(avgUsd && !avgUsd.isIdentity);
+      return {
+        group: entry.label,
+        count: entry.rates.length,
+        avgPay,
+        minPay,
+        maxPay,
+        currency: entry.currency,
+        payType: entry.payType,
+        avgPayUsd: showUsd ? avgUsd!.amountUsd : null,
+        minPayUsd: showUsd && minUsd && !minUsd.isIdentity ? minUsd.amountUsd : null,
+        maxPayUsd: showUsd && maxUsd && !maxUsd.isIdentity ? maxUsd.amountUsd : null,
+        fxRateDate: showUsd ? avgUsd!.rateDate : null,
+        fxSource: showUsd ? avgUsd!.source : null,
+      };
+    })
     .sort((a, b) => b.avgPay - a.avgPay);
 }
 
+async function aggregateCurrentPay(
+  opts: CompensationAccess,
+  groupOf: (row: PayRow) => string | null | undefined
+): Promise<PayGroupRow[]> {
+  const rows = await getCurrentPayRows(opts);
+  if (rows.length === 0) return [];
+  return aggregatePay(rows, groupOf, await getLatestFxRates());
+}
+
 export async function getPayByTitleReport(opts: CompensationAccess = {}) {
-  return aggregatePay(await getCurrentPayRows(opts), (row) => row.jobTitle);
+  return aggregateCurrentPay(opts, (row) => row.jobTitle);
 }
 
 export async function getPayByDepartmentReport(opts: CompensationAccess = {}) {
-  return aggregatePay(await getCurrentPayRows(opts), (row) => row.department);
+  return aggregateCurrentPay(opts, (row) => row.department);
 }
 
 export async function getPayByLocationReport(opts: CompensationAccess = {}) {
-  return aggregatePay(await getCurrentPayRows(opts), (row) => row.location);
+  return aggregateCurrentPay(opts, (row) => row.location);
 }

@@ -260,6 +260,13 @@
       "when": 1795112337845,
       "tag": "0036_bamboo_sync_comp_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795300348040,
+      "tag": "0037_fx_daily_rates",
+      "breakpoints": true
     }
   ]
 }

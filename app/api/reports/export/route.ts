@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { csvRow } from "@/lib/csv";
+import { csvUsdAmount } from "@/lib/fx";
 import { getHeadcountReport, headcountToCsv } from "@/lib/reports/headcount";
 import { getTurnoverReport } from "@/lib/reports/turnover";
 import { turnoverToCsv } from "@/lib/reports/turnover-format";
@@ -100,6 +101,9 @@ export async function GET(request: NextRequest) {
             "Job Title",
             "Pay Rate",
             "Currency",
+            "USD Equivalent",
+            "FX Rate Date",
+            "FX Source",
             "Pay Type",
             "Effective Date",
             "Reason",
@@ -111,6 +115,13 @@ export async function GET(request: NextRequest) {
               row.jobTitle,
               row.payRate,
               row.currency,
+              csvUsdAmount(row.usdEquivalent),
+              row.usdEquivalent && !row.usdEquivalent.isIdentity
+                ? row.usdEquivalent.rateDate
+                : "",
+              row.usdEquivalent && !row.usdEquivalent.isIdentity
+                ? row.usdEquivalent.source
+                : "",
               row.payType,
               row.effectiveDate,
               row.changeReason,
@@ -124,9 +135,36 @@ export async function GET(request: NextRequest) {
           : reportType === "pay-by-department"
             ? await getPayByDepartmentReport({ canViewCompensation: true })
             : await getPayByLocationReport({ canViewCompensation: true });
-      let csvData = csvRow(["Group", "Count", "Avg Pay", "Min Pay", "Max Pay", "Currency", "Pay Type"]) + "\n";
+      let csvData =
+        csvRow([
+          "Group",
+          "Count",
+          "Avg Pay",
+          "Min Pay",
+          "Max Pay",
+          "Currency",
+          "Pay Type",
+          "Avg USD",
+          "Min USD",
+          "Max USD",
+          "FX Rate Date",
+          "FX Source",
+        ]) + "\n";
       for (const row of rows) {
-        csvData += csvRow([row.group, row.count, row.avgPay, row.minPay, row.maxPay, row.currency, row.payType]) + "\n";
+        csvData += csvRow([
+          row.group,
+          row.count,
+          row.avgPay,
+          row.minPay,
+          row.maxPay,
+          row.currency,
+          row.payType,
+          row.avgPayUsd,
+          row.minPayUsd,
+          row.maxPayUsd,
+          row.fxRateDate,
+          row.fxSource,
+        ]) + "\n";
       }
       return csvResponse(csvData, reportType);
     }
