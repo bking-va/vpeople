@@ -23,6 +23,8 @@ export async function GET(request: NextRequest) {
       client,
       store,
       mode: "incremental",
+      // Files, metadata, and compensation-table imports are operator CLI/env
+      // only. Do not pass importMetadata here.
       log: (message) => {
         console.log(message);
       },

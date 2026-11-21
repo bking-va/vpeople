@@ -24,6 +24,7 @@ import {
 } from "./extended";
 import { emptyDatasetCounts } from "./map-extended";
 import {
+  emptyMetadataCounts,
   emptyMetadataPayload,
   fetchMetadataPayload,
   mapMetadataPayload,
@@ -426,6 +427,8 @@ export type RunBambooSyncOptions = {
   concurrency?: number;
   progressEvery?: number;
   writeChunkSize?: number;
+  /** Off by default. Hourly cron must not pass this; use CLI `--metadata`. */
+  importMetadata?: boolean;
 };
 
 const PII_LOG_PATTERN =
@@ -599,7 +602,8 @@ async function fetchHttpPayload(
   log: BambooSyncLogger,
   now: Date,
   concurrency: number,
-  progressEvery: number
+  progressEvery: number,
+  importMetadata: boolean
 ): Promise<SyncFetchPayload> {
   log("Phase fetch: employees");
   const { employees, latestChanged, deletedBambooIds } = await loadEmployees(
@@ -658,7 +662,9 @@ async function fetchHttpPayload(
   }
 
   const extended = await fetchExtendedPayload(client, mode, now, log);
-  const metadata = await fetchMetadataPayload(client, log);
+  const metadata = importMetadata
+    ? await fetchMetadataPayload(client, log)
+    : emptyMetadataPayload();
   log("Phase fetch complete");
 
   return {
@@ -683,6 +689,7 @@ export async function runBambooSync(
     if (opts.log) safeLog(opts.log, message);
   };
   const dryRun = Boolean(opts.dryRun);
+  const importMetadata = Boolean(opts.importMetadata);
   const startedAt = (opts.now ?? new Date()).toISOString();
 
   if (!opts.client) {
@@ -774,7 +781,8 @@ export async function runBambooSync(
         log,
         opts.now ?? new Date(),
         opts.concurrency ?? opts.client.concurrency,
-        opts.progressEvery ?? BAMBOO_PROGRESS_EVERY
+        opts.progressEvery ?? BAMBOO_PROGRESS_EVERY,
+        importMetadata
       );
       try {
         await writeBambooSyncCache(
@@ -795,7 +803,8 @@ export async function runBambooSync(
       log,
       opts.now ?? new Date(),
       opts.concurrency ?? opts.client.concurrency,
-      opts.progressEvery ?? BAMBOO_PROGRESS_EVERY
+      opts.progressEvery ?? BAMBOO_PROGRESS_EVERY,
+      importMetadata
     );
   }
 
@@ -806,7 +815,12 @@ export async function runBambooSync(
       opts.now ?? new Date(),
       log
     );
-    payload.metadata = await fetchMetadataPayload(opts.client, log);
+    payload.metadata = importMetadata
+      ? await fetchMetadataPayload(opts.client, log)
+      : emptyMetadataPayload();
+  }
+  if (!importMetadata) {
+    payload.metadata = emptyMetadataPayload();
   }
 
   mapped = payload.employees
@@ -1149,14 +1163,16 @@ export async function runBambooSync(
       writeProgress,
       log
     );
-    const metadataCounts = await writeMetadataPayload(
-      store,
-      metadata,
-      idByBambooId,
-      opts.mode,
-      writeProgress,
-      log
-    );
+    const metadataCounts = importMetadata
+      ? await writeMetadataPayload(
+          store,
+          metadata,
+          idByBambooId,
+          opts.mode,
+          writeProgress,
+          log
+        )
+      : emptyMetadataCounts();
     const datasetCounts = {
       ...extendedCounts,
       ...metadataCounts,

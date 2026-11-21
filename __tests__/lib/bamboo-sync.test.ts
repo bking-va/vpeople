@@ -2001,6 +2001,7 @@ describe("runBambooSync", () => {
       }),
       store,
       mode: "full",
+      importMetadata: true,
     });
     expect(result.status).toBe("success");
     expect(store.emailsSent).toBe(0);
@@ -2026,6 +2027,50 @@ describe("runBambooSync", () => {
     expect(result.datasetCounts.assets).toBe(1);
     expect(result.datasetCounts.dependents).toBe(1);
     expect(result.datasetCounts.customFields).toBe(1);
+  });
+
+  it("does not import metadata unless importMetadata is enabled", async () => {
+    const requested: string[] = [];
+    const store = new MemoryStore();
+    const inner = mockBambooFetch({
+      report: {
+        employees: [
+          bambooEmployee({
+            id: "101",
+            workEmail: "ada@vendasta.com",
+            customShirtSize: "M",
+          }),
+        ],
+      },
+      timeOffTypes: { timeOffTypes: [] },
+      metaFields: [
+        { alias: "customShirtSize", name: "Shirt Size", type: "list" },
+      ],
+      metaTables: { tables: ["employeeAssets"] },
+      allTables: {
+        employeeAssets: {
+          "101": [{ id: "9", name: "MacBook Pro" }],
+        },
+      },
+    });
+    const result = await runBambooSync({
+      client: new BambooHrClient({
+        apiKey: "test-key",
+        subdomain: "vendasta",
+        fetch: (input, init) => {
+          requested.push(String(input));
+          return inner(input, init);
+        },
+      }),
+      store,
+      mode: "full",
+    });
+    expect(result.status).toBe("success");
+    expect(store.assets).toEqual([]);
+    expect(store.customFields).toEqual([]);
+    expect(result.datasetCounts.assets).toBe(0);
+    expect(result.datasetCounts.customFields).toBe(0);
+    expect(requested.some((url) => url.includes("/meta/fields"))).toBe(false);
   });
 
   it("fails the run instead of wiping job history when a table fetch errors", async () => {
@@ -2447,6 +2492,7 @@ describe("CLI args and demo detection", () => {
       skipResumes: false,
       files: false,
       skipBlobs: false,
+      metadata: false,
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
@@ -2473,6 +2519,7 @@ describe("CLI args and demo detection", () => {
       skipResumes: true,
       files: false,
       skipBlobs: false,
+      metadata: false,
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
@@ -2481,6 +2528,13 @@ describe("CLI args and demo detection", () => {
       dbUrlFile: "/tmp/db_url.txt",
       cacheFile: null,
     });
+  });
+
+  it("parses --metadata off by default and on when passed", () => {
+    expect(parseBambooSyncArgs(["/tmp/db_url.txt"]).metadata).toBe(false);
+    expect(
+      parseBambooSyncArgs(["--metadata", "/tmp/db_url.txt"]).metadata
+    ).toBe(true);
   });
 
   it("parses --files and --skip-blobs", () => {
@@ -2494,6 +2548,7 @@ describe("CLI args and demo detection", () => {
       skipResumes: false,
       files: true,
       skipBlobs: true,
+      metadata: false,
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
@@ -2565,6 +2620,7 @@ describe("CLI args and demo detection", () => {
       skipResumes: false,
       files: false,
       skipBlobs: false,
+      metadata: false,
       onlyMissing: true,
       requeueDetails: false,
       resumeFrom: null,
