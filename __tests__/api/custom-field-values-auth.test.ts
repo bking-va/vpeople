@@ -144,6 +144,34 @@ describe("custom field values authorization", () => {
     ]);
   });
 
+  test("employees cannot read their own imported hr_only Bamboo custom values", async () => {
+    mockedAuth.mockResolvedValue({
+      user: { email: "pat@vendasta.com", employeeId: 2 },
+    } as never);
+    mockedPermissions.mockResolvedValue(emptyPermissions);
+    (db.select as jest.Mock)
+      .mockReturnValueOnce(chain([{ id: 2, accessLevel: "employee" }]))
+      .mockReturnValueOnce(chain([{ id: 2, managerId: 9 }]))
+      .mockReturnValueOnce(
+        chain([
+          {
+            value: { id: 42, customFieldId: 11, entityId: 2, value: "HR note" },
+            field: {
+              id: 11,
+              name: "Internal Note",
+              section: "personal",
+              visibility: "hr_only",
+              bambooId: "customInternalNote",
+            },
+          },
+        ])
+      );
+
+    const res = await getCustomFieldValues(request(2));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ values: [] });
+  });
+
   test("managers without compensation permission cannot read OTE custom values", async () => {
     mockedAuth.mockResolvedValue({
       user: { email: "manager@vendasta.com", employeeId: 3 },

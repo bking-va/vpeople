@@ -217,6 +217,44 @@ describe("metadata access rules", () => {
     ).toBe(true);
   });
 
+  test("imported hr_only custom fields are HR-only even when viewing self", () => {
+    expect(
+      canViewCustomFieldValue({
+        field: {
+          visibility: "hr_only",
+          section: "personal",
+          bambooId: "customInternalNote",
+        },
+        isViewingSelf: true,
+        isManager: false,
+        isHROrAdmin: false,
+        canViewCompensation: false,
+      })
+    ).toBe(false);
+    expect(
+      canViewCustomFieldValue({
+        field: {
+          visibility: "hr_only",
+          section: "personal",
+          bambooId: "customInternalNote",
+        },
+        isViewingSelf: true,
+        isManager: false,
+        isHROrAdmin: true,
+        canViewCompensation: false,
+      })
+    ).toBe(true);
+    expect(
+      canViewCustomFieldValue({
+        field: { visibility: "hr_only", section: "personal" },
+        isViewingSelf: true,
+        isManager: false,
+        isHROrAdmin: false,
+        canViewCompensation: false,
+      })
+    ).toBe(true);
+  });
+
   test("currency compensation fields require canViewCompensation for managers", () => {
     expect(
       canViewCustomFieldValue({

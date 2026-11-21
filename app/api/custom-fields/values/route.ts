@@ -128,6 +128,28 @@ export async function POST(request: NextRequest) {
       .where(eq(customFields.id, customFieldId))
       .limit(1);
 
+    const isViewingSelf = entityId === session.user.employeeId;
+    const [target] = await db
+      .select({ managerId: employees.managerId })
+      .from(employees)
+      .where(eq(employees.id, entityId))
+      .limit(1);
+    if (
+      field &&
+      !canViewCustomFieldValue({
+        field,
+        isViewingSelf,
+        isManager: target?.managerId === session.user.employeeId,
+        isHROrAdmin: permissions.canManageUsers,
+        canViewCompensation: permissions.canViewCompensation,
+        canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+      })
+    ) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 }
+      );
+    }
     const section = (field?.section || field?.entityType || "").toLowerCase();
     if (section === "compensation" && !permissions.canEditCompensation) {
       return NextResponse.json(

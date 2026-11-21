@@ -233,8 +233,9 @@ export function customFieldVisibility(
   _name?: string,
   _type?: string | null
 ): MappedCustomFieldWrite["visibility"] {
-  // Imported Bamboo fields are HR-only until an admin tightens or loosens locally.
-  // Sync does not overwrite visibility, so a local hr_only restriction sticks.
+  // Imported Bamboo fields are HR-only. Sync does not overwrite visibility, so a
+  // local restriction sticks. Readers treat imported hr_only as HR-only even for
+  // the subject unless the alias is in IMPORTED_CUSTOM_FIELDS_SUBJECT_READABLE.
   return "hr_only";
 }
 

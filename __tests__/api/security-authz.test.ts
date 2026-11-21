@@ -218,6 +218,22 @@ describe("field-level authz helpers", () => {
     ).toBe(true);
   });
 
+  test("imported hr_only Bamboo custom fields deny subject self-access", () => {
+    expect(
+      canViewCustomFieldValue({
+        field: {
+          visibility: "hr_only",
+          section: "personal",
+          bambooId: "customInternalNote",
+        },
+        isViewingSelf: true,
+        isManager: false,
+        isHROrAdmin: false,
+        canViewCompensation: false,
+      })
+    ).toBe(false);
+  });
+
   test("EEO custom fields require sensitive-personal permission, not user-management", () => {
     expect(
       canViewCustomFieldValue({

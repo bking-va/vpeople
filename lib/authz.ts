@@ -343,8 +343,15 @@ export function canViewDependents(opts: {
   return opts.isViewingSelf || opts.canViewSensitivePersonalInfo === true;
 }
 
+export const IMPORTED_CUSTOM_FIELDS_SUBJECT_READABLE = new Set<string>();
+
 export function canViewCustomFieldValue(opts: {
-  field: { visibility?: string | null; section?: string | null; entityType?: string | null };
+  field: {
+    visibility?: string | null;
+    section?: string | null;
+    entityType?: string | null;
+    bambooId?: string | null;
+  };
   isViewingSelf: boolean;
   isManager: boolean;
   isHROrAdmin: boolean;
@@ -368,8 +375,16 @@ export function canViewCustomFieldValue(opts: {
       return true;
     case "manager_hr":
       return opts.isViewingSelf || opts.isManager || opts.isHROrAdmin;
-    case "hr_only":
+    case "hr_only": {
+      const importedAlias = field.bambooId?.trim();
+      if (
+        importedAlias &&
+        !IMPORTED_CUSTOM_FIELDS_SUBJECT_READABLE.has(importedAlias)
+      ) {
+        return opts.isHROrAdmin;
+      }
       return opts.isViewingSelf || opts.isHROrAdmin;
+    }
     default:
       return false;
   }
