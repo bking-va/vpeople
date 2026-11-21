@@ -98,7 +98,10 @@ export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
   }
 
   const titled = current.filter((emp) => isCeoJobTitle(emp.jobTitle));
-  let ceoId = titled.length > 0 ? pickTitledCeo(titled) : null;
+  let ceoId =
+    titled.length > 0
+      ? pickTitledCeo(titled, parentOf, adjacency(parentOf))
+      : null;
   if (ceoId != null) parentOf.set(ceoId, null);
 
   const cycleIds = breakCycles(parentOf);
@@ -197,15 +200,52 @@ function ceoTitleRank(jobTitle: string | null | undefined): number {
   return 1;
 }
 
-function pickTitledCeo(titled: OrgChartEmployee[]): number {
-  return [...titled].sort((a, b) => {
-    const rank = ceoTitleRank(b.jobTitle) - ceoTitleRank(a.jobTitle);
-    if (rank !== 0) return rank;
-    const aRoot = a.managerId == null ? 0 : 1;
-    const bRoot = b.managerId == null ? 0 : 1;
-    if (aRoot !== bRoot) return aRoot - bRoot;
-    return a.id - b.id;
-  })[0].id;
+function reportsTo(
+  descendant: number,
+  ancestor: number,
+  parentOf: Map<number, number | null>
+): boolean {
+  const seen = new Set<number>();
+  let current: number | null = parentOf.get(descendant) ?? null;
+  while (current != null && !seen.has(current)) {
+    if (current === ancestor) return true;
+    seen.add(current);
+    current = parentOf.get(current) ?? null;
+  }
+  return false;
+}
+
+function pickTitledCeo(
+  titled: OrgChartEmployee[],
+  parentOf: Map<number, number | null>,
+  childrenByParent: Map<number, number[]>
+): number {
+  if (titled.length === 1) return titled[0].id;
+
+  const ancestorOfAll = titled.find((candidate) =>
+    titled.every(
+      (other) =>
+        other.id === candidate.id || reportsTo(other.id, candidate.id, parentOf)
+    )
+  );
+  if (ancestorOfAll) return ancestorOfAll.id;
+
+  const notUnderAnother = titled.filter(
+    (candidate) =>
+      !titled.some(
+        (other) =>
+          other.id !== candidate.id && reportsTo(candidate.id, other.id, parentOf)
+      )
+  );
+  const pool = notUnderAnother.length > 0 ? notUnderAnother : titled;
+  const sizeMemo = new Map<number, number>();
+  const sizeOf = (id: number) => subtreeSize(id, childrenByParent, sizeMemo);
+  return [...pool].sort(
+    (a, b) =>
+      sizeOf(b.id) - sizeOf(a.id) ||
+      ceoTitleRank(b.jobTitle) - ceoTitleRank(a.jobTitle) ||
+      a.id - b.id
+  )[0].id;
 }
 
 function pickLargestRoot(

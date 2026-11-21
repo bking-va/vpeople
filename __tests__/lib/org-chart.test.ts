@@ -95,6 +95,23 @@ describe("buildOrgChart", () => {
     expect(forest.unmanaged).toEqual([]);
   });
 
+  it("keeps a spelled-out subordinate CEO under an abbreviated company CEO", () => {
+    const forest = buildOrgChart([
+      emp({ id: 1, lastName: "Chief", jobTitle: "CEO" }),
+      emp({
+        id: 2,
+        lastName: "India",
+        jobTitle: "Chief Executive Officer",
+        managerId: 1,
+      }),
+      emp({ id: 3, lastName: "Ic", managerId: 2 }),
+    ]);
+
+    expect(forest.ceo?.id).toBe(1);
+    expect(ids(forest.ceo)).toEqual([1, 2, 3]);
+    expect(forest.unmanaged).toEqual([]);
+  });
+
   it("puts a President and CEO above other managerless people", () => {
     const forest = buildOrgChart([
       emp({
