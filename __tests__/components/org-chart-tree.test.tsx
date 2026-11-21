@@ -21,7 +21,6 @@ function emp(
     preferredName: null,
     jobTitle: "Engineer",
     email: `e${partial.id}@vendasta.com`,
-    employeeNumber: String(partial.id),
     managerId: null,
     employmentStatus: "full_time",
     ...partial,

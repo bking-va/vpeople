@@ -21,7 +21,6 @@ export default async function OrgChartPage() {
       preferredName: employees.preferredName,
       jobTitle: employees.jobTitle,
       email: employees.email,
-      employeeNumber: employees.employeeNumber,
       managerId: employees.managerId,
       employmentStatus: employees.employmentStatus,
     })

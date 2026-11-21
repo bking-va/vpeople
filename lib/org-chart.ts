@@ -8,7 +8,6 @@ export type OrgChartEmployee = {
   preferredName: string | null;
   jobTitle: string | null;
   email: string;
-  employeeNumber: string | null;
   managerId: number | null;
   employmentStatus: string;
 };
@@ -23,8 +22,6 @@ export type OrgChartNode = {
   name: string;
   jobTitle: string | null;
   email: string;
-  employeeNumber: string | null;
-  managerId: number | null;
   orphanReason: OrgChartOrphanReason | null;
   children: OrgChartNode[];
 };
@@ -43,9 +40,17 @@ export function isCurrentEmploymentStatus(status: string): boolean {
 export function isCeoJobTitle(jobTitle: string | null | undefined): boolean {
   if (!jobTitle) return false;
   const normalized = jobTitle.toLowerCase().replace(/[^a-z]+/g, " ").trim();
-  return (
-    normalized === "ceo" || normalized.includes("chief executive officer")
-  );
+  if (!normalized) return false;
+  if (normalized.includes("chief executive officer")) return true;
+  const tokens = normalized.split(" ");
+  if (
+    tokens.includes("assistant") ||
+    tokens.includes("deputy") ||
+    tokens.includes("office")
+  ) {
+    return false;
+  }
+  return tokens.includes("ceo");
 }
 
 export function employeeDisplayName(emp: {
@@ -92,6 +97,15 @@ export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
     linkReason.set(emp.id, classified.reason);
   }
 
+  const titled = current.filter((emp) => isCeoJobTitle(emp.jobTitle));
+  let ceoId: number | null = null;
+  if (titled.length === 1) {
+    ceoId = titled[0].id;
+    parentOf.set(ceoId, null);
+  } else if (titled.length > 1) {
+    for (const emp of titled) parentOf.set(emp.id, null);
+  }
+
   const cycleIds = breakCycles(parentOf);
   for (const id of cycleIds) {
     if (parentOf.get(id) == null && linkReason.get(id) == null) {
@@ -100,9 +114,9 @@ export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
   }
 
   const childrenByParent = adjacency(parentOf);
-  const ceoId = pickCeoId(current, parentOf, childrenByParent);
-  if (ceoId != null) {
-    parentOf.set(ceoId, null);
+  if (ceoId == null) {
+    ceoId = pickCeoId(current, parentOf, childrenByParent, titled);
+    if (ceoId != null) parentOf.set(ceoId, null);
   }
 
   const forestChildren = adjacency(parentOf);
@@ -184,15 +198,14 @@ function adjacency(parentOf: Map<number, number | null>): Map<number, number[]> 
 function pickCeoId(
   current: OrgChartEmployee[],
   parentOf: Map<number, number | null>,
-  childrenByParent: Map<number, number[]>
+  childrenByParent: Map<number, number[]>,
+  titled: OrgChartEmployee[]
 ): number | null {
   if (current.length === 0) return null;
 
   const sizeMemo = new Map<number, number>();
   const sizeOf = (id: number) => subtreeSize(id, childrenByParent, sizeMemo);
 
-  const titled = current.filter((emp) => isCeoJobTitle(emp.jobTitle));
-  if (titled.length === 1) return titled[0].id;
   if (titled.length > 1) {
     return [...titled].sort((a, b) => sizeOf(b.id) - sizeOf(a.id) || a.id - b.id)[0]
       .id;
@@ -239,8 +252,6 @@ function toNode(
     name: employeeDisplayName(emp),
     jobTitle: emp.jobTitle,
     email: emp.email,
-    employeeNumber: emp.employeeNumber,
-    managerId: emp.managerId,
     orphanReason: unmanaged ? linkReason.get(id) ?? "no_manager" : null,
     children: childIds.map((childId) =>
       toNode(childId, byId, childrenByParent, linkReason, false)

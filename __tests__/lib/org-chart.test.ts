@@ -18,7 +18,6 @@ function emp(
     preferredName: null,
     jobTitle: "Engineer",
     email: `e${partial.id}@vendasta.com`,
-    employeeNumber: String(partial.id),
     managerId: null,
     employmentStatus: "full_time",
     ...partial,
@@ -65,13 +64,39 @@ describe("isCeoJobTitle", () => {
     expect(isCeoJobTitle("Chief Executive Officer")).toBe(true);
     expect(isCeoJobTitle("Chief Executive Officer & Founder")).toBe(true);
     expect(isCeoJobTitle("CEO")).toBe(true);
+    expect(isCeoJobTitle("CEO & Co-Founder")).toBe(true);
+    expect(isCeoJobTitle("President and CEO")).toBe(true);
     expect(isCeoJobTitle("ceo")).toBe(true);
     expect(isCeoJobTitle("VP of Sales")).toBe(false);
+    expect(isCeoJobTitle("Assistant to the CEO")).toBe(false);
     expect(isCeoJobTitle(null)).toBe(false);
   });
 });
 
 describe("buildOrgChart", () => {
+  it("puts a President and CEO above other managerless people", () => {
+    const forest = buildOrgChart([
+      emp({
+        id: 2,
+        firstName: "Aaron",
+        lastName: "Aardvark",
+        jobTitle: "Engineer",
+        managerId: null,
+      }),
+      emp({
+        id: 1,
+        firstName: "Brenda",
+        lastName: "Boss",
+        jobTitle: "President and CEO",
+        managerId: null,
+      }),
+      emp({ id: 3, lastName: "Cto", jobTitle: "CTO", managerId: 1 }),
+    ]);
+
+    expect(forest.ceo?.id).toBe(1);
+    expect(forest.unmanaged.map((n) => n.id)).toEqual([2]);
+  });
+
   it("puts the CEO at the apex even when another managerless person sorts first", () => {
     const forest = buildOrgChart([
       emp({
@@ -162,7 +187,6 @@ describe("buildOrgChart", () => {
     expect(forest.ceo?.id).toBe(1);
     expect(forest.ceo?.children).toEqual([]);
     expect(forest.unmanaged[0].id).toBe(8);
-    expect(forest.unmanaged[0].managerId).toBeNull();
     expect(forest.unmanaged[0].orphanReason).toBe("no_manager");
   });
 
@@ -189,6 +213,38 @@ describe("buildOrgChart", () => {
     expect(forest.ceo?.children.map((c) => c.id)).toEqual([3]);
     expect(ids(forest.ceo)).toEqual([1, 3]);
     expect(forest.unmanaged.map((n) => n.id)).toEqual([2]);
+  });
+
+  it("keeps the CEO's reports when the CEO is in a reporting cycle", () => {
+    const forest = buildOrgChart([
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+        managerId: 3,
+      }),
+      emp({ id: 2, lastName: "Vp", managerId: 1 }),
+      emp({ id: 3, lastName: "Dir", managerId: 2 }),
+    ]);
+
+    expect(forest.ceo?.id).toBe(1);
+    expect(ids(forest.ceo).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    expect(forest.unmanaged).toEqual([]);
+    expect(isAcyclic(forest.ceo ? [forest.ceo] : [])).toBe(true);
+  });
+
+  it("does not serialize employee numbers onto the client tree", () => {
+    const forest = buildOrgChart([
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+      }),
+      emp({ id: 2, lastName: "Report", managerId: 1 }),
+    ]);
+    const json = JSON.stringify(forest);
+    expect(json).not.toMatch(/employeeNumber/);
+    expect(Object.keys(forest.ceo || {})).not.toContain("employeeNumber");
   });
 
   it("breaks cycles and keeps everyone visible", () => {
@@ -289,6 +345,7 @@ describe("buildOrgChart", () => {
     expect(src).toMatch(/buildOrgChart\(/);
     expect(src).toMatch(/employmentStatus, "terminated"/);
     expect(src).not.toMatch(/roots\.push/);
+    expect(src).not.toMatch(/employeeNumber/);
   });
 
   it("handles an empty roster", () => {
