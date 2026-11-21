@@ -1,4 +1,5 @@
 import fs from "fs";
+import { parseBoundedConcurrency } from "./client";
 
 export type BambooSyncCliArgs = {
   dryRun: boolean;
@@ -8,9 +9,24 @@ export type BambooSyncCliArgs = {
   skipResumes: boolean;
   files: boolean;
   skipBlobs: boolean;
+  onlyMissing: boolean;
+  requeueDetails: boolean;
+  resumeFrom: string | null;
+  backfillCommentsHistory: boolean;
+  concurrency: number | null;
   dbUrlFile: string | null;
   cacheFile: string | null;
 };
+
+function takeValue(argv: string[], index: number, prefix: string): string | null {
+  const arg = argv[index];
+  if (arg.startsWith(`${prefix}=`)) return arg.slice(prefix.length + 1);
+  if (arg === prefix) {
+    const next = argv[index + 1];
+    if (next && !next.startsWith("-")) return next;
+  }
+  return null;
+}
 
 export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
   const args: BambooSyncCliArgs = {
@@ -21,6 +37,11 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     skipResumes: false,
     files: false,
     skipBlobs: false,
+    onlyMissing: true,
+    requeueDetails: false,
+    resumeFrom: null,
+    backfillCommentsHistory: false,
+    concurrency: null,
     dbUrlFile: null,
     cacheFile: null,
   };
@@ -33,7 +54,29 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     else if (arg === "--skip-resumes") args.skipResumes = true;
     else if (arg === "--files") args.files = true;
     else if (arg === "--skip-blobs") args.skipBlobs = true;
-    else if (arg.startsWith("--cache=")) {
+    else if (arg === "--only-missing") {
+      args.onlyMissing = true;
+      args.requeueDetails = false;
+    } else if (arg === "--requeue-details") {
+      args.requeueDetails = true;
+      args.onlyMissing = false;
+    } else if (arg === "--backfill-comments-history") {
+      args.backfillCommentsHistory = true;
+      args.atsApplications = true;
+      args.skipResumes = true;
+    } else if (arg === "--resume-from" || arg.startsWith("--resume-from=")) {
+      const value = takeValue(argv, i, "--resume-from");
+      if (value) {
+        args.resumeFrom = value;
+        if (arg === "--resume-from") i += 1;
+      }
+    } else if (arg === "--concurrency" || arg.startsWith("--concurrency=")) {
+      const value = takeValue(argv, i, "--concurrency");
+      if (value) {
+        args.concurrency = parseBoundedConcurrency(value, 8);
+        if (arg === "--concurrency") i += 1;
+      }
+    } else if (arg.startsWith("--cache=")) {
       args.cacheFile = arg.slice("--cache=".length);
     } else if (arg === "--cache") {
       const next = argv[i + 1];

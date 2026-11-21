@@ -11,6 +11,7 @@ import {
   BAMBOO_RESUME_UNAVAILABLE,
   type PrivateBlobStore,
 } from "./blob";
+import { asRecord } from "./map-extended";
 import {
   emptyAtsDatasetCounts,
   formatBambooNewSince,
@@ -21,12 +22,13 @@ import {
 } from "./map-ats";
 import type { BambooSyncStore } from "./sync";
 import type { BatchProgress } from "./chunks";
-import type {
-  AtsDatasetCounts,
-  AtsSyncCheckpoint,
-  BambooAtsSyncResult,
-  BambooSyncMode,
-  MappedAtsApplicationWrite,
+import {
+  laterBambooApplicationId,
+  type AtsDatasetCounts,
+  type AtsSyncCheckpoint,
+  type BambooAtsSyncResult,
+  type BambooSyncMode,
+  type MappedAtsApplicationWrite,
 } from "./types";
 
 const PII_LOG_PATTERN =
@@ -41,13 +43,68 @@ export type RunAtsApplicationsSyncOptions = {
   mode: BambooSyncMode;
   dryRun?: boolean;
   importResumes?: boolean;
+  onlyMissing?: boolean;
+  requeueDetails?: boolean;
+  resumeFrom?: string | null;
+  backfillCommentsHistory?: boolean;
   log?: AtsSyncLogger;
   now?: Date;
   concurrency?: number;
+  heartbeatMs?: number;
   maxListPages?: number;
   maxMs?: number;
   writeChunkSize?: number;
 };
+
+export const BAMBOO_ATS_DETAIL_HEARTBEAT_MS = 15_000;
+
+export function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "unknown";
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+export function formatAtsDetailsProgress(input: {
+  processed: number;
+  listed: number;
+  startedAtMs: number;
+  nowMs?: number;
+  inFlight: number;
+  lastId: string | null;
+  heartbeat?: boolean;
+}): string {
+  const elapsedMs = Math.max(0, (input.nowMs ?? Date.now()) - input.startedAtMs);
+  const elapsedMinutes = elapsedMs / 60_000;
+  const rate = elapsedMinutes > 0 ? input.processed / elapsedMinutes : 0;
+  const remaining = Math.max(input.listed - input.processed, 0);
+  const eta =
+    rate > 0 && remaining > 0
+      ? formatDurationMs((remaining / rate) * 60_000)
+      : remaining === 0
+        ? "0s"
+        : "unknown";
+  return [
+    input.heartbeat ? "ATS details heartbeat" : "ATS details",
+    `processed=${input.processed}`,
+    `remaining~${remaining}`,
+    `rate=${rate.toFixed(0)}/min`,
+    `eta=${eta}`,
+    `in-flight=${input.inFlight}`,
+    `lastId=${input.lastId || "none"}`,
+  ].join(" ");
+}
+
+function startHeartbeat(onTick: () => void, ms: number): () => void {
+  if (!(ms > 0)) return () => undefined;
+  const timer = setInterval(onTick, ms);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
 
 function safeLog(log: AtsSyncLogger, message: string) {
   if (PII_LOG_PATTERN.test(message)) {
@@ -73,6 +130,7 @@ function emptyCheckpoint(newSince: string | null): AtsSyncCheckpoint {
     newSince,
     paginationComplete: false,
     detailsRequeued: false,
+    backfillCommentsHistory: false,
   };
 }
 
@@ -100,6 +158,7 @@ function asCheckpoint(value: Record<string, unknown> | null | undefined, fallbac
         : fallbackNewSince,
     paginationComplete: value.paginationComplete === true,
     detailsRequeued: value.detailsRequeued === true,
+    backfillCommentsHistory: value.backfillCommentsHistory === true,
   };
 }
 
@@ -161,11 +220,15 @@ export async function runAtsApplicationsSync(
   const startedAt = (opts.now ?? new Date()).toISOString();
   const deadline = opts.maxMs != null ? Date.now() + opts.maxMs : null;
   const timedOut = () => deadline != null && Date.now() >= deadline;
-  const importResumes = opts.importResumes !== false;
-  const concurrency = Math.max(
-    1,
-    Math.min(opts.concurrency ?? BAMBOO_ATS_DETAIL_CONCURRENCY, 4)
+  const backfillCommentsHistory = Boolean(opts.backfillCommentsHistory);
+  const importResumes = opts.importResumes !== false && !backfillCommentsHistory;
+  const onlyMissing = opts.onlyMissing !== false && opts.requeueDetails !== true;
+  const concurrency = parseBoundedConcurrency(
+    opts.concurrency != null ? String(opts.concurrency) : undefined,
+    BAMBOO_ATS_DETAIL_CONCURRENCY
   );
+  const heartbeatMs = opts.heartbeatMs ?? BAMBOO_ATS_DETAIL_HEARTBEAT_MS;
+  const detailBatchSize = Math.max(concurrency * 4, 24);
 
   const failed = (
     checkpoint: AtsSyncCheckpoint,
@@ -201,14 +264,25 @@ export async function runAtsApplicationsSync(
         )
       : null;
 
-  const incomplete = dryRun ? null : await opts.store.lastIncompleteAtsCheckpoint();
-  const freshFull = opts.mode === "full" && !incomplete;
+  const existingAtsCursor = dryRun ? null : await opts.store.lastSuccessfulAtsCursor();
+  let incomplete = dryRun ? null : await opts.store.lastIncompleteAtsCheckpoint();
   let checkpoint = asCheckpoint(incomplete?.checkpoint, newSince);
-  if (opts.mode === "incremental" && !incomplete) {
+  if (Boolean(checkpoint.backfillCommentsHistory) !== backfillCommentsHistory) {
+    incomplete = null;
+    checkpoint = emptyCheckpoint(backfillCommentsHistory ? null : newSince);
+  }
+  const freshFull = opts.mode === "full" && !incomplete && !backfillCommentsHistory;
+  if (opts.mode === "incremental" && !incomplete && !backfillCommentsHistory) {
     checkpoint = emptyCheckpoint(newSince);
   }
   if (freshFull) {
     checkpoint = emptyCheckpoint(null);
+  }
+  if (backfillCommentsHistory) {
+    checkpoint.backfillCommentsHistory = true;
+    checkpoint.paginationComplete = true;
+    if (checkpoint.phase === "list") checkpoint.phase = "details";
+    if (checkpoint.phase === "resumes") checkpoint.phase = "done";
   }
 
   let runId = incomplete?.id ?? null;
@@ -229,8 +303,9 @@ export async function runAtsApplicationsSync(
     await opts.store.updateSyncRun(runId, {
       status,
       finishedAt: status === "running" ? null : new Date().toISOString(),
-      latestChanged:
-        opts.mode === "incremental"
+      latestChanged: backfillCommentsHistory
+        ? existingAtsCursor
+        : opts.mode === "incremental"
           ? formatBambooNewSince(opts.now ?? new Date())
           : checkpoint.newSince,
       checkpoint,
@@ -342,112 +417,201 @@ export async function runAtsApplicationsSync(
     }
 
     if (checkpoint.phase === "details") {
-      log("Phase details: ATS application Q&A, comments, history");
-      if (!dryRun && opts.mode === "full" && !checkpoint.detailsRequeued) {
+      log(
+        backfillCommentsHistory
+          ? "Phase details: backfill application comments and status history only"
+          : "Phase details: ATS application Q&A, comments, history"
+      );
+      const shouldRequeue =
+        !dryRun &&
+        !backfillCommentsHistory &&
+        opts.mode === "full" &&
+        (opts.requeueDetails === true ||
+          (!onlyMissing && !checkpoint.detailsRequeued));
+      if (shouldRequeue) {
         await opts.store.requeueCandidateDetails();
         checkpoint.detailsRequeued = true;
         await persist("running");
       }
-      while (!dryRun) {
-        if (timedOut()) {
-          await persist("checkpointed");
-          return {
-            status: "checkpointed",
-            dryRun,
-            kind: "ats_applications",
-            mode: opts.mode,
-            datasetCounts: countsFrom(checkpoint),
-            checkpoint,
-          };
-        }
-        const batch = await opts.store.listCandidatesNeedingDetail(25);
-        if (batch.length === 0) break;
-        const details = await mapPool(batch, concurrency, async (row) => {
-          try {
-            const detail = await opts.client!.fetchAtsApplicationDetail(row.bambooId);
-            return { row, detail };
-          } catch (error) {
-            if (error instanceof BambooHrHttpError && error.status === 404) {
-              return { row, detail: { id: row.bambooId } };
+      let afterDetailId = laterBambooApplicationId(
+        opts.resumeFrom,
+        checkpoint.lastDetailId
+      );
+      let inFlight = 0;
+      let lastStartedId = checkpoint.lastDetailId;
+      const detailsStartedAt = Date.now();
+      const logDetailsProgress = (heartbeat = false) => {
+        log(
+          formatAtsDetailsProgress({
+            processed: checkpoint.detailed,
+            listed: checkpoint.listed,
+            startedAtMs: detailsStartedAt,
+            inFlight,
+            lastId: lastStartedId,
+            heartbeat,
+          })
+        );
+      };
+      log(
+        `ATS details concurrency=${concurrency} onlyMissing=${onlyMissing} backfillCommentsHistory=${backfillCommentsHistory} resumeFrom=${afterDetailId || "none"}`
+      );
+      logDetailsProgress();
+      let loggedCommentsGap = false;
+      const stopHeartbeat = startHeartbeat(
+        () => logDetailsProgress(true),
+        heartbeatMs
+      );
+      try {
+        while (!dryRun) {
+          if (timedOut()) {
+            await persist("checkpointed");
+            return {
+              status: "checkpointed",
+              dryRun,
+              kind: "ats_applications",
+              mode: opts.mode,
+              datasetCounts: countsFrom(checkpoint),
+              checkpoint,
+            };
+          }
+          const batch = backfillCommentsHistory
+            ? await opts.store.listCandidatesForCommentsHistoryBackfill(
+                detailBatchSize,
+                afterDetailId
+              )
+            : await opts.store.listCandidatesNeedingDetail(
+                detailBatchSize,
+                afterDetailId
+              );
+          if (batch.length === 0) break;
+          const details = await mapPool(batch, concurrency, async (row) => {
+            inFlight += 1;
+            lastStartedId = laterBambooApplicationId(lastStartedId, row.bambooId);
+            try {
+              const detail = await opts.client!.fetchAtsApplicationDetail(row.bambooId);
+              const fromDetail = mapAtsComments(detail, row.bambooId);
+              let extraComments: Record<string, unknown>[] = [];
+              if (fromDetail.length === 0) {
+                const commentCountRaw = asRecord(detail).commentCount;
+                const commentCount =
+                  typeof commentCountRaw === "number"
+                    ? commentCountRaw
+                    : Number(commentCountRaw);
+                extraComments = await opts.client!.fetchAtsApplicationComments(row.bambooId, {
+                  commentCount: Number.isFinite(commentCount) ? commentCount : null,
+                });
+              }
+              return { row, detail, extraComments };
+            } catch (error) {
+              if (error instanceof BambooHrHttpError && error.status === 404) {
+                return { row, detail: { id: row.bambooId }, extraComments: [] };
+              }
+              throw error;
+            } finally {
+              inFlight -= 1;
             }
-            throw error;
+          });
+          if (!loggedCommentsGap && opts.client?.atsCommentsEndpointAvailable() === false) {
+            loggedCommentsGap = true;
+            log(
+              "Bamboo ATS GET application details returns commentCount only; comment bodies are not on a public GET endpoint"
+            );
           }
-        });
-        const mappedDetails = details.flatMap((item) => {
-          const mapped = mapAtsApplication(item.detail, statusesById);
-          return mapped ? [{ item, mapped }] : [];
-        });
-        jobIds = await ensureJobOpenings(
-          opts.store,
-          mappedDetails.map((row) => row.mapped),
-          jobIds
-        );
-        const nowIso = (opts.now ?? new Date()).toISOString();
-        const candidateRows = mappedDetails.flatMap(({ mapped }) => {
-          const jobOpeningId = jobIds.get(mapped.jobBambooId);
-          if (jobOpeningId == null) return [];
-          return [
-            {
-              bambooId: mapped.bambooId,
-              jobOpeningId,
-              firstName: mapped.firstName,
-              lastName: mapped.lastName,
-              email: mapped.email,
-              phone: mapped.phone,
-              linkedinUrl: mapped.linkedinUrl,
-              source: mapped.source,
-              sourceDetail: mapped.sourceDetail,
-              stage: mapped.stage,
-              bambooStatusId: mapped.bambooStatusId,
-              bambooStatusLabel: mapped.bambooStatusLabel,
-              rating: mapped.rating,
-              appliedAt: mapped.appliedAt,
-              coverLetter: mapped.coverLetter,
-              resumeBambooFileId: mapped.resumeBambooFileId,
-              resumeBlobUrl: null,
-              atsDetailImportedAt: nowIso,
-            },
-          ];
-        });
-        if (candidateRows.length > 0) {
-          await opts.store.upsertCandidatesBatch(
-            candidateRows,
-            progress("candidate_details", opts.writeChunkSize)
+          if (!backfillCommentsHistory) {
+            const mappedDetails = details.flatMap((item) => {
+              const mapped = mapAtsApplication(item.detail, statusesById);
+              return mapped ? [{ item, mapped }] : [];
+            });
+            jobIds = await ensureJobOpenings(
+              opts.store,
+              mappedDetails.map((row) => row.mapped),
+              jobIds
+            );
+            const nowIso = (opts.now ?? new Date()).toISOString();
+            const candidateRows = mappedDetails.flatMap(({ mapped }) => {
+              const jobOpeningId = jobIds.get(mapped.jobBambooId);
+              if (jobOpeningId == null) return [];
+              return [
+                {
+                  bambooId: mapped.bambooId,
+                  jobOpeningId,
+                  firstName: mapped.firstName,
+                  lastName: mapped.lastName,
+                  email: mapped.email,
+                  phone: mapped.phone,
+                  linkedinUrl: mapped.linkedinUrl,
+                  source: mapped.source,
+                  sourceDetail: mapped.sourceDetail,
+                  stage: mapped.stage,
+                  bambooStatusId: mapped.bambooStatusId,
+                  bambooStatusLabel: mapped.bambooStatusLabel,
+                  rating: mapped.rating,
+                  appliedAt: mapped.appliedAt,
+                  coverLetter: mapped.coverLetter,
+                  resumeBambooFileId: mapped.resumeBambooFileId,
+                  resumeBlobUrl: null,
+                  atsDetailImportedAt: nowIso,
+                },
+              ];
+            });
+            if (candidateRows.length > 0) {
+              await opts.store.upsertCandidatesBatch(
+                candidateRows,
+                progress("candidate_details", opts.writeChunkSize)
+              );
+            }
+            await opts.store.markCandidateDetailImported(batch.map((row) => row.bambooId));
+          }
+          const answers: Parameters<BambooSyncStore["upsertCandidateAnswersBatch"]>[0] = [];
+          const comments: Parameters<BambooSyncStore["upsertCandidateCommentsBatch"]>[0] = [];
+          const history: Parameters<BambooSyncStore["upsertCandidateStatusHistoryBatch"]>[0] = [];
+          for (const item of details) {
+            const candidateId = item.row.id;
+            if (!backfillCommentsHistory) {
+              for (const answer of mapAtsAnswers(item.detail, item.row.bambooId)) {
+                answers.push({ candidateId, ...answer });
+              }
+            }
+            const mappedComments = [
+              ...mapAtsComments(item.detail, item.row.bambooId),
+              ...mapAtsComments({ comments: item.extraComments }, item.row.bambooId),
+            ];
+            const seenComments = new Set<string>();
+            for (const comment of mappedComments) {
+              if (seenComments.has(comment.bambooId)) continue;
+              seenComments.add(comment.bambooId);
+              comments.push({ candidateId, ...comment });
+            }
+            for (const event of mapAtsStatusHistory(item.detail, item.row.bambooId)) {
+              history.push({ candidateId, ...event });
+            }
+          }
+          if (!backfillCommentsHistory) {
+            checkpoint.answers += await opts.store.upsertCandidateAnswersBatch(
+              answers,
+              progress("candidate_answers", opts.writeChunkSize)
+            );
+          }
+          checkpoint.comments += await opts.store.upsertCandidateCommentsBatch(
+            comments,
+            progress("candidate_comments", opts.writeChunkSize)
           );
+          checkpoint.history += await opts.store.upsertCandidateStatusHistoryBatch(
+            history,
+            progress("candidate_history", opts.writeChunkSize)
+          );
+          checkpoint.detailed += batch.length;
+          afterDetailId = laterBambooApplicationId(
+            afterDetailId,
+            batch[batch.length - 1]?.bambooId
+          );
+          checkpoint.lastDetailId = afterDetailId;
+          logDetailsProgress();
+          await persist("running");
+          if (batch.length < detailBatchSize) break;
         }
-        await opts.store.markCandidateDetailImported(batch.map((row) => row.bambooId));
-        const answers: Parameters<BambooSyncStore["upsertCandidateAnswersBatch"]>[0] = [];
-        const comments: Parameters<BambooSyncStore["upsertCandidateCommentsBatch"]>[0] = [];
-        const history: Parameters<BambooSyncStore["upsertCandidateStatusHistoryBatch"]>[0] = [];
-        for (const item of details) {
-          const candidateId = item.row.id;
-          for (const answer of mapAtsAnswers(item.detail, item.row.bambooId)) {
-            answers.push({ candidateId, ...answer });
-          }
-          for (const comment of mapAtsComments(item.detail, item.row.bambooId)) {
-            comments.push({ candidateId, ...comment });
-          }
-          for (const event of mapAtsStatusHistory(item.detail, item.row.bambooId)) {
-            history.push({ candidateId, ...event });
-          }
-        }
-        checkpoint.answers += await opts.store.upsertCandidateAnswersBatch(
-          answers,
-          progress("candidate_answers", opts.writeChunkSize)
-        );
-        checkpoint.comments += await opts.store.upsertCandidateCommentsBatch(
-          comments,
-          progress("candidate_comments", opts.writeChunkSize)
-        );
-        checkpoint.history += await opts.store.upsertCandidateStatusHistoryBatch(
-          history,
-          progress("candidate_history", opts.writeChunkSize)
-        );
-        checkpoint.detailed += batch.length;
-        checkpoint.lastDetailId = batch[batch.length - 1]?.bambooId ?? checkpoint.lastDetailId;
-        log(`ATS details processed=${checkpoint.detailed}`);
-        await persist("running");
-        if (batch.length < 25) break;
+      } finally {
+        stopHeartbeat();
       }
       checkpoint.phase = importResumes ? "resumes" : "done";
       await persist("running");

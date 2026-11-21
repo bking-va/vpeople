@@ -169,11 +169,31 @@ export function mapAtsApplication(
   };
 }
 
+function scalarText(value: unknown): string | null {
+  if (typeof value === "string" || typeof value === "number") {
+    return blankToNull(value);
+  }
+  return null;
+}
+
+function personName(value: unknown): string | null {
+  const rec = asRecord(value);
+  const fromParts = [scalarText(rec.firstName), scalarText(rec.lastName)]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    fromParts ||
+    scalarText(rec.name) ||
+    scalarText(rec.label) ||
+    labeledValue(value)
+  );
+}
+
 function questionText(row: Record<string, unknown>): string | null {
   return (
-    blankToNull(row.question) ||
-    blankToNull(row.label) ||
+    scalarText(row.question) ||
     labeledValue(row.question) ||
+    scalarText(row.label) ||
     labeledValue(row)
   );
 }
@@ -206,9 +226,11 @@ export function mapAtsAnswers(
       const question = questionText(rec);
       if (!question) continue;
       const questionId =
-        nestedId(rec.id) ||
+        nestedId(asRecord(rec.question).id) ||
         nestedId(rec.questionId) ||
-        blankToNull(rec.questionId) ||
+        scalarText(rec.questionId) ||
+        nestedId(rec.id) ||
+        scalarText(rec.id) ||
         question.slice(0, 80);
       const key = `${applicationBambooId}:${questionId}`;
       if (seen.has(key)) continue;
@@ -223,50 +245,110 @@ export function mapAtsAnswers(
   return out;
 }
 
+export function commentRecordsFromPayload(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) {
+    return payload.filter(
+      (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+    );
+  }
+  const root = asRecord(payload);
+  const nested = asRecord(root.comments).comments;
+  const list = Array.isArray(root.comments)
+    ? root.comments
+    : Array.isArray(root.data)
+      ? root.data
+      : Array.isArray(nested)
+        ? nested
+        : [];
+  return list.filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object"
+  );
+}
+
 export function mapAtsComments(
   rawInput: Record<string, unknown>,
   applicationBambooId: string
 ): MappedAtsCommentWrite[] {
   const raw = dropSecretFields(rawInput);
-  const nestedComments = asRecord(raw.comments).comments;
-  const list: unknown[] = Array.isArray(raw.comments)
-    ? raw.comments
-    : Array.isArray(nestedComments)
-      ? nestedComments
-      : [];
+  const list = commentRecordsFromPayload(raw);
   const out: MappedAtsCommentWrite[] = [];
   for (const item of list) {
     const rec = dropSecretFields(asRecord(item));
     const content =
-      blankToNull(rec.comment) ||
-      blankToNull(rec.content) ||
-      blankToNull(rec.body) ||
-      blankToNull(rec.text);
+      scalarText(rec.comment) ||
+      scalarText(rec.content) ||
+      scalarText(rec.body) ||
+      scalarText(rec.text);
     if (!content) continue;
-    const author = asRecord(rec.author) || asRecord(rec.user);
+    const author = asRecord(rec.author) || asRecord(rec.user) || asRecord(rec.createdBy);
     const bambooId =
       nestedId(rec.id) ||
-      blankToNull(rec.id) ||
-      `${applicationBambooId}:${blankToNull(rec.created) || content.slice(0, 24)}`;
+      scalarText(rec.id) ||
+      `${applicationBambooId}:${scalarText(rec.created) || content.slice(0, 24)}`;
     out.push({
       bambooId: String(bambooId),
-      authorName:
-        labeledValue(rec.author) ||
-        blankToNull(author.name) ||
-        [blankToNull(author.firstName), blankToNull(author.lastName)]
-          .filter(Boolean)
-          .join(" ") ||
-        null,
+      authorName: personName(rec.author) || personName(author),
       authorBambooId: nestedId(author.id) || nestedId(author.employeeId),
       content,
       commentedAt:
-        blankToNull(rec.created) ||
-        blankToNull(rec.createdDate) ||
-        blankToNull(rec.date) ||
+        scalarText(rec.created) ||
+        scalarText(rec.createdDate) ||
+        scalarText(rec.createdAt) ||
+        scalarText(rec.date) ||
         null,
     });
   }
   return out;
+}
+
+function historyChangedAt(rec: Record<string, unknown>, statusRec: Record<string, unknown>): string | null {
+  return (
+    scalarText(rec.dateChanged) ||
+    scalarText(statusRec.dateChanged) ||
+    scalarText(rec.date) ||
+    scalarText(rec.changedAt) ||
+    scalarText(rec.created) ||
+    scalarText(rec.appliedDate) ||
+    null
+  );
+}
+
+function pushStatusHistoryEvent(
+  out: MappedAtsStatusHistoryWrite[],
+  seen: Set<string>,
+  applicationBambooId: string,
+  rec: Record<string, unknown>
+) {
+  const status = rec.status && typeof rec.status === "object" ? rec.status : rec;
+  const statusRec = asRecord(status);
+  const label =
+    labeledValue(status) ||
+    scalarText(statusRec.label) ||
+    scalarText(rec.label) ||
+    scalarText(rec.statusLabel);
+  if (!label) return;
+  const statusId =
+    nestedId(statusRec.id) ||
+    scalarText(statusRec.id) ||
+    nestedId(rec.statusId) ||
+    scalarText(rec.statusId);
+  const changedAt = historyChangedAt(rec, statusRec);
+  const eventKey = `${applicationBambooId}:${statusId || label}:${changedAt || "unknown"}`;
+  if (seen.has(eventKey)) return;
+  seen.add(eventKey);
+  const user =
+    rec.changedByUser ??
+    rec.user ??
+    rec.changedBy ??
+    statusRec.changedByUser ??
+    statusRec.user;
+  out.push({
+    bambooEventId: eventKey,
+    bambooStatusId: statusId,
+    statusLabel: label,
+    changedAt,
+    changedByName: personName(user),
+  });
 }
 
 export function mapAtsStatusHistory(
@@ -274,42 +356,33 @@ export function mapAtsStatusHistory(
   applicationBambooId: string
 ): MappedAtsStatusHistoryWrite[] {
   const raw = dropSecretFields(rawInput);
-  const list = Array.isArray(raw.statusHistory)
-    ? raw.statusHistory
-    : Array.isArray(raw.history)
-      ? raw.history
-      : [];
   const out: MappedAtsStatusHistoryWrite[] = [];
-  for (const item of list) {
-    const rec = dropSecretFields(asRecord(item));
-    const status = rec.status ?? rec;
-    const label =
-      labeledValue(status) ||
-      blankToNull(asRecord(status).label) ||
-      blankToNull(rec.label);
-    if (!label) continue;
-    const statusId =
-      nestedId(asRecord(status).id) ||
-      blankToNull(asRecord(status).id) ||
-      nestedId(rec.statusId);
-    const changedAt =
-      blankToNull(rec.date) ||
-      blankToNull(rec.changedAt) ||
-      blankToNull(rec.created) ||
-      "unknown";
-    const user = asRecord(rec.user) || asRecord(rec.changedBy);
-    out.push({
-      bambooEventId: `${applicationBambooId}:${statusId || label}:${changedAt}`,
-      bambooStatusId: statusId,
-      statusLabel: label,
-      changedAt: changedAt === "unknown" ? null : changedAt,
-      changedByName:
-        labeledValue(rec.user) ||
-        blankToNull(user.name) ||
-        [blankToNull(user.firstName), blankToNull(user.lastName)]
-          .filter(Boolean)
-          .join(" ") ||
-        null,
+  const seen = new Set<string>();
+  const lists = [raw.statusHistory, raw.history];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      pushStatusHistoryEvent(out, seen, applicationBambooId, dropSecretFields(asRecord(item)));
+    }
+  }
+  if (raw.status && typeof raw.status === "object") {
+    const statusRec = dropSecretFields(asRecord(raw.status));
+    const statusId = nestedId(statusRec.id) || scalarText(statusRec.id);
+    const changedAt = historyChangedAt(statusRec, statusRec);
+    const alreadyRecorded = out.some((event) => {
+      if (!statusId || event.bambooStatusId !== statusId) return false;
+      if (!changedAt) return true;
+      return event.changedAt === changedAt;
+    });
+    if (!alreadyRecorded) {
+      pushStatusHistoryEvent(out, seen, applicationBambooId, statusRec);
+    }
+  }
+  const appliedDate = scalarText(raw.appliedDate) || scalarText(raw.applied);
+  if (appliedDate && !out.some((event) => event.changedAt === appliedDate)) {
+    pushStatusHistoryEvent(out, seen, applicationBambooId, {
+      statusLabel: "Applied",
+      dateChanged: appliedDate,
     });
   }
   return out;

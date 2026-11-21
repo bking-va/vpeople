@@ -1,4 +1,5 @@
 import { bambooBalanceToDays, IMPORTED_EMPLOYEE_FIELDS } from "./map";
+import { commentRecordsFromPayload } from "./map-ats";
 import { mapPool } from "./pool";
 import type { BambooChangedEmployee, BambooEmployeeRecord } from "./types";
 
@@ -7,7 +8,7 @@ export type BambooFetch = (
   init?: RequestInit
 ) => Promise<Response>;
 
-export const BAMBOO_REQUEST_TIMEOUT_MS = 20_000;
+export const BAMBOO_REQUEST_TIMEOUT_MS = 30_000;
 export const BAMBOO_MAX_RETRIES = 4;
 export const BAMBOO_BALANCE_CONCURRENCY = 6;
 export const BAMBOO_MAX_RETRY_AFTER_MS = 60_000;
@@ -38,7 +39,7 @@ const ALLOWED_FULL_TABLES = new Set([
   "employeeVisas",
 ]);
 export const ATS_APPLICATIONS_MAX_PAGES = 2000;
-export const BAMBOO_ATS_DETAIL_CONCURRENCY = 2;
+export const BAMBOO_ATS_DETAIL_CONCURRENCY = 8;
 
 export function assertSafeBambooSubdomain(subdomain: string): string {
   const value = subdomain.trim();
@@ -98,7 +99,7 @@ export function parseRetryAfterMs(
 }
 
 function isRetryableStatus(status: number): boolean {
-  return status === 429 || status === 502 || status === 503;
+  return status === 429 || status >= 500;
 }
 
 function isRetryableAbortOrNetwork(error: unknown): boolean {
@@ -194,6 +195,7 @@ export class BambooHrClient {
   private readonly apiKey: string;
   private readonly subdomain: string;
   private readonly fetchImpl: BambooFetch;
+  private atsCommentsGet: "unknown" | "available" | "unavailable" = "unknown";
   readonly baseUrl: string;
   readonly timeoutMs: number;
   readonly maxRetries: number;
@@ -589,6 +591,45 @@ export class BambooHrClient {
       `/applicant_tracking/applications/${pathSegment(applicationId, "application id")}`
     );
     return asRecord(payload);
+  }
+
+  atsCommentsEndpointAvailable(): boolean | null {
+    if (this.atsCommentsGet === "unknown") return null;
+    return this.atsCommentsGet === "available";
+  }
+
+  async fetchAtsApplicationComments(
+    applicationId: string,
+    opts?: { commentCount?: number | null }
+  ): Promise<Record<string, unknown>[]> {
+    if (this.atsCommentsGet === "unavailable") return [];
+    const commentCount = opts?.commentCount;
+    if (typeof commentCount === "number" && commentCount <= 0) return [];
+    if (this.atsCommentsGet === "unknown" && !(typeof commentCount === "number" && commentCount > 0)) {
+      return [];
+    }
+    try {
+      const payload = await this.request(
+        `/applicant_tracking/applications/${pathSegment(applicationId, "application id")}/comments`
+      );
+      this.atsCommentsGet = "available";
+      return commentRecordsFromPayload(payload);
+    } catch (error) {
+      if (
+        error instanceof BambooHrHttpError &&
+        (error.status === 401 ||
+          error.status === 403 ||
+          error.status === 404 ||
+          error.status === 405 ||
+          error.status === 501)
+      ) {
+        if (this.atsCommentsGet !== "available") {
+          this.atsCommentsGet = "unavailable";
+        }
+        return [];
+      }
+      throw error;
+    }
   }
 
   async fetchFile(

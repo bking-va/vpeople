@@ -73,6 +73,11 @@ async function main() {
         mode: args.incremental ? "incremental" : "full",
         dryRun: args.dryRun,
         importResumes: !args.skipResumes,
+        onlyMissing: args.onlyMissing,
+        requeueDetails: args.requeueDetails,
+        resumeFrom: args.resumeFrom,
+        backfillCommentsHistory: args.backfillCommentsHistory,
+        concurrency: args.concurrency ?? undefined,
         log: (message) => {
           console.log(message);
         },

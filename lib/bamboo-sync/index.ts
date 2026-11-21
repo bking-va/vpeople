@@ -48,7 +48,10 @@ export { formatSyncSummary, runBambooSync } from "./sync";
 export type { BambooSyncStore } from "./sync";
 export type { BambooSyncResult, BambooAtsSyncResult } from "./types";
 export {
+  BAMBOO_ATS_DETAIL_HEARTBEAT_MS,
+  formatAtsDetailsProgress,
   formatAtsSyncSummary,
+  formatDurationMs,
   runAtsApplicationsSync,
 } from "./ats-applications";
 export {

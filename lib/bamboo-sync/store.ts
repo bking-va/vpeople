@@ -49,7 +49,7 @@ import type {
   MappedEmployee,
   SyncEmployeeRow,
 } from "./types";
-import { isResumableAtsRun } from "./types";
+import { isNumericBambooApplicationId, isResumableAtsRun } from "./types";
 
 type DbLike = {
   select: (...args: any[]) => any;
@@ -1510,27 +1510,51 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
 
     async listCandidatesNeedingDetail(limit, afterBambooId) {
       const size = Math.max(1, Math.min(limit, 500));
-      const rows: Array<{ id: number; bambooId: string | null }> = afterBambooId
-        ? await db
-            .select({ id: candidates.id, bambooId: candidates.bambooId })
-            .from(candidates)
-            .where(
-              and(
-                isNotNull(candidates.bambooId),
-                isNull(candidates.atsDetailImportedAt),
-                gt(candidates.bambooId, afterBambooId)
-              )
-            )
-            .orderBy(candidates.bambooId)
-            .limit(size)
-        : await db
-            .select({ id: candidates.id, bambooId: candidates.bambooId })
-            .from(candidates)
-            .where(
-              and(isNotNull(candidates.bambooId), isNull(candidates.atsDetailImportedAt))
-            )
-            .orderBy(candidates.bambooId)
-            .limit(size);
+      const numericCursor =
+        afterBambooId && isNumericBambooApplicationId(afterBambooId)
+          ? afterBambooId
+          : null;
+      const rows: Array<{ id: number; bambooId: string | null }> = await db
+        .select({ id: candidates.id, bambooId: candidates.bambooId })
+        .from(candidates)
+        .where(
+          and(
+            isNotNull(candidates.bambooId),
+            isNull(candidates.atsDetailImportedAt),
+            sql`${candidates.bambooId} ~ '^[0-9]+$'`,
+            numericCursor
+              ? sql`CAST(${candidates.bambooId} AS bigint) > CAST(${numericCursor} AS bigint)`
+              : undefined
+          )
+        )
+        .orderBy(sql`CAST(${candidates.bambooId} AS bigint)`)
+        .limit(size);
+      return rows.flatMap((row) =>
+        row.bambooId ? [{ id: row.id, bambooId: row.bambooId }] : []
+      );
+    },
+
+    async listCandidatesForCommentsHistoryBackfill(limit, afterBambooId) {
+      const size = Math.max(1, Math.min(limit, 500));
+      const numericCursor =
+        afterBambooId && isNumericBambooApplicationId(afterBambooId)
+          ? afterBambooId
+          : null;
+      const rows: Array<{ id: number; bambooId: string | null }> = await db
+        .select({ id: candidates.id, bambooId: candidates.bambooId })
+        .from(candidates)
+        .where(
+          and(
+            isNotNull(candidates.bambooId),
+            isNotNull(candidates.atsDetailImportedAt),
+            sql`${candidates.bambooId} ~ '^[0-9]+$'`,
+            numericCursor
+              ? sql`CAST(${candidates.bambooId} AS bigint) > CAST(${numericCursor} AS bigint)`
+              : undefined
+          )
+        )
+        .orderBy(sql`CAST(${candidates.bambooId} AS bigint)`)
+        .limit(size);
       return rows.flatMap((row) =>
         row.bambooId ? [{ id: row.id, bambooId: row.bambooId }] : []
       );
