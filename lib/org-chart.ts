@@ -98,13 +98,8 @@ export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
   }
 
   const titled = current.filter((emp) => isCeoJobTitle(emp.jobTitle));
-  let ceoId: number | null = null;
-  if (titled.length === 1) {
-    ceoId = titled[0].id;
-    parentOf.set(ceoId, null);
-  } else if (titled.length > 1) {
-    for (const emp of titled) parentOf.set(emp.id, null);
-  }
+  let ceoId = titled.length > 0 ? pickTitledCeo(titled) : null;
+  if (ceoId != null) parentOf.set(ceoId, null);
 
   const cycleIds = breakCycles(parentOf);
   for (const id of cycleIds) {
@@ -115,7 +110,7 @@ export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
 
   const childrenByParent = adjacency(parentOf);
   if (ceoId == null) {
-    ceoId = pickCeoId(current, parentOf, childrenByParent, titled);
+    ceoId = pickLargestRoot(current, parentOf, childrenByParent);
     if (ceoId != null) parentOf.set(ceoId, null);
   }
 
@@ -195,22 +190,32 @@ function adjacency(parentOf: Map<number, number | null>): Map<number, number[]> 
   return children;
 }
 
-function pickCeoId(
+function ceoTitleRank(jobTitle: string | null | undefined): number {
+  if (!jobTitle) return 0;
+  const normalized = jobTitle.toLowerCase().replace(/[^a-z]+/g, " ").trim();
+  if (normalized.includes("chief executive officer")) return 2;
+  return 1;
+}
+
+function pickTitledCeo(titled: OrgChartEmployee[]): number {
+  return [...titled].sort((a, b) => {
+    const rank = ceoTitleRank(b.jobTitle) - ceoTitleRank(a.jobTitle);
+    if (rank !== 0) return rank;
+    const aRoot = a.managerId == null ? 0 : 1;
+    const bRoot = b.managerId == null ? 0 : 1;
+    if (aRoot !== bRoot) return aRoot - bRoot;
+    return a.id - b.id;
+  })[0].id;
+}
+
+function pickLargestRoot(
   current: OrgChartEmployee[],
   parentOf: Map<number, number | null>,
-  childrenByParent: Map<number, number[]>,
-  titled: OrgChartEmployee[]
+  childrenByParent: Map<number, number[]>
 ): number | null {
   if (current.length === 0) return null;
-
   const sizeMemo = new Map<number, number>();
   const sizeOf = (id: number) => subtreeSize(id, childrenByParent, sizeMemo);
-
-  if (titled.length > 1) {
-    return [...titled].sort((a, b) => sizeOf(b.id) - sizeOf(a.id) || a.id - b.id)[0]
-      .id;
-  }
-
   const roots = current.filter((emp) => parentOf.get(emp.id) == null);
   const pool = roots.length > 0 ? roots : current;
   return [...pool].sort((a, b) => sizeOf(b.id) - sizeOf(a.id) || a.id - b.id)[0]
