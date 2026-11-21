@@ -750,10 +750,7 @@ describe("Security authz integration (Real Postgres)", () => {
       `http://localhost/api/custom-fields/values?entityId=${employee.id}`
     );
     const res = await getCustomFieldValues(req);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    const leaked = (body.values || []).some((v: { value: string }) => v.value === "SECRET-BONUS");
-    expect(leaked).toBe(false);
+    expect(res.status).toBe(403);
   });
 
   test("managers cannot assign training outside their reports", async () => {

@@ -5,6 +5,8 @@ import { customFieldValues, customFields, employees } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewCustomFieldValue } from "@/lib/authz";
+import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
+import type { AccessLevel } from "@/lib/authz";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -23,10 +25,31 @@ export async function GET(request: NextRequest) {
     const targetEmployeeId = parseInt(entityId, 10);
     const permissions = await getSessionUserPermissions(session);
 
-    // Check if user can view this employee's data
+    const [viewer] = await db
+      .select({
+        id: employees.id,
+        accessLevel: employees.accessLevel,
+      })
+      .from(employees)
+      .where(eq(employees.id, session.user.employeeId))
+      .limit(1);
+    if (!viewer) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const allowed = await scopedEmployeeIds({
+      employeeId: viewer.id,
+      accessLevel: viewer.accessLevel as AccessLevel,
+      canManageUsers: Boolean(permissions.canManageUsers),
+      canViewCompensation: permissions.canViewCompensation,
+      canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+    });
+    if (!employeeInScope(targetEmployeeId, allowed)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const isViewingSelf = session.user.employeeId === targetEmployeeId;
-    
-    // Get target employee to check manager chain
+
     const [targetEmployee] = await db
       .select()
       .from(employees)
@@ -58,6 +81,7 @@ export async function GET(request: NextRequest) {
         isManager,
         isHROrAdmin,
         canViewCompensation: permissions.canViewCompensation,
+        canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
       });
     });
 
@@ -104,6 +128,28 @@ export async function POST(request: NextRequest) {
       .where(eq(customFields.id, customFieldId))
       .limit(1);
 
+    const isViewingSelf = entityId === session.user.employeeId;
+    const [target] = await db
+      .select({ managerId: employees.managerId })
+      .from(employees)
+      .where(eq(employees.id, entityId))
+      .limit(1);
+    if (
+      field &&
+      !canViewCustomFieldValue({
+        field,
+        isViewingSelf,
+        isManager: target?.managerId === session.user.employeeId,
+        isHROrAdmin: permissions.canManageUsers,
+        canViewCompensation: permissions.canViewCompensation,
+        canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo,
+      })
+    ) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 }
+      );
+    }
     const section = (field?.section || field?.entityType || "").toLowerCase();
     if (section === "compensation" && !permissions.canEditCompensation) {
       return NextResponse.json(

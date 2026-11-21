@@ -24,6 +24,14 @@ import {
 } from "./extended";
 import { emptyDatasetCounts } from "./map-extended";
 import {
+  emptyMetadataCounts,
+  emptyMetadataPayload,
+  fetchMetadataPayload,
+  mapMetadataPayload,
+  writeMetadataPayload,
+  type MetadataFetchPayload,
+} from "./metadata";
+import {
   blankToNull,
   isBrendanWorkEmail,
   mapEmergencyContact,
@@ -210,8 +218,84 @@ export interface BambooSyncStore {
     progress?: BatchProgress
   ): Promise<number>;
   pruneImportedRowsNotIn(
-    kind: "time_off_requests" | "job_openings" | "education" | "visas" | "candidates",
+    kind:
+      | "time_off_requests"
+      | "job_openings"
+      | "education"
+      | "visas"
+      | "candidates"
+      | "assets"
+      | "dependents",
     keepBambooIds: string[],
+    progress?: BatchProgress
+  ): Promise<number>;
+  updateEmployeeExtrasBatch(
+    rows: Array<{
+      bambooId: string;
+      ethnicity: string | null;
+      eeoJobCategory: string | null;
+      payGroup: string | null;
+      flsaExempt: boolean | null;
+      standardHoursPerWeek: string | null;
+      timeTrackingEnabled: boolean | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertCustomFieldsBatch(
+    rows: Array<{
+      bambooId: string;
+      name: string;
+      fieldType: "text" | "number" | "date" | "select" | "textarea" | "checkbox";
+      entityType: string;
+      section: string;
+      options: string | null;
+      isRequired: boolean;
+      orderIndex: number;
+      visibility: "everyone" | "manager_hr" | "hr_only";
+    }>,
+    progress?: BatchProgress
+  ): Promise<Map<string, number>>;
+  upsertCustomFieldValuesBatch(
+    rows: Array<{
+      customFieldId: number;
+      entityId: number;
+      value: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  pruneImportedCustomFieldValues(
+    keep: Array<{ customFieldId: number; entityId: number }>,
+    fieldIds: number[],
+    progress?: BatchProgress
+  ): Promise<number>;
+  listImportedCustomFieldDefinitions(): Promise<
+    Array<{ id: number; bambooId: string | null; name: string }>
+  >;
+  lockDownImportedCustomFields(
+    fieldIds: number[],
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertAssetsBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      name: string;
+      category: string | null;
+      serialNumber: string | null;
+      assignedDate: string | null;
+      notes: string | null;
+    }>,
+    progress?: BatchProgress
+  ): Promise<number>;
+  upsertDependentsBatch(
+    rows: Array<{
+      bambooId: string;
+      employeeId: number;
+      firstName: string;
+      lastName: string | null;
+      relationship: string | null;
+      birthDate: string | null;
+    }>,
     progress?: BatchProgress
   ): Promise<number>;
   applyBrendanCarryOver(opts: BrendanSnapshot): Promise<boolean>;
@@ -343,6 +427,8 @@ export type RunBambooSyncOptions = {
   concurrency?: number;
   progressEvery?: number;
   writeChunkSize?: number;
+  /** Off by default. Hourly cron must not pass this; use CLI `--metadata`. */
+  importMetadata?: boolean;
 };
 
 const PII_LOG_PATTERN =
@@ -397,6 +483,7 @@ type SyncFetchPayload = {
   timeOffTypes: Array<{ id: string; name: string; units?: string }>;
   balancesByBambooId: Map<string, Array<{ name: string; balance: string }>>;
   extended: ExtendedFetchPayload;
+  metadata: MetadataFetchPayload;
 };
 
 function tableKeyCount(table: TableRows | null): number {
@@ -415,6 +502,7 @@ function snapshotToPayload(snapshot: BambooSyncSnapshot): SyncFetchPayload {
     timeOffTypes: snapshot.timeOffTypes,
     balancesByBambooId: new Map(Object.entries(snapshot.balances)),
     extended: snapshot.extended ?? emptyExtendedPayload(),
+    metadata: snapshot.metadata ?? emptyMetadataPayload(),
   };
 }
 
@@ -438,6 +526,7 @@ function payloadToSnapshot(
     timeOffTypes: payload.timeOffTypes,
     balances: Object.fromEntries(payload.balancesByBambooId),
     extended: payload.extended,
+    metadata: payload.metadata,
   };
 }
 
@@ -513,7 +602,8 @@ async function fetchHttpPayload(
   log: BambooSyncLogger,
   now: Date,
   concurrency: number,
-  progressEvery: number
+  progressEvery: number,
+  importMetadata: boolean
 ): Promise<SyncFetchPayload> {
   log("Phase fetch: employees");
   const { employees, latestChanged, deletedBambooIds } = await loadEmployees(
@@ -572,6 +662,9 @@ async function fetchHttpPayload(
   }
 
   const extended = await fetchExtendedPayload(client, mode, now, log);
+  const metadata = importMetadata
+    ? await fetchMetadataPayload(client, log)
+    : emptyMetadataPayload();
   log("Phase fetch complete");
 
   return {
@@ -585,6 +678,7 @@ async function fetchHttpPayload(
     timeOffTypes,
     balancesByBambooId: balances,
     extended,
+    metadata,
   };
 }
 
@@ -595,6 +689,7 @@ export async function runBambooSync(
     if (opts.log) safeLog(opts.log, message);
   };
   const dryRun = Boolean(opts.dryRun);
+  const importMetadata = Boolean(opts.importMetadata);
   const startedAt = (opts.now ?? new Date()).toISOString();
 
   if (!opts.client) {
@@ -666,6 +761,7 @@ export async function runBambooSync(
       timeOffTypes: [],
       balancesByBambooId: new Map(),
       extended: emptyExtendedPayload(),
+      metadata: emptyMetadataPayload(),
     };
   } else if (opts.cachePath) {
     await assertSafeCacheLocation(opts.cachePath);
@@ -685,7 +781,8 @@ export async function runBambooSync(
         log,
         opts.now ?? new Date(),
         opts.concurrency ?? opts.client.concurrency,
-        opts.progressEvery ?? BAMBOO_PROGRESS_EVERY
+        opts.progressEvery ?? BAMBOO_PROGRESS_EVERY,
+        importMetadata
       );
       try {
         await writeBambooSyncCache(
@@ -706,7 +803,8 @@ export async function runBambooSync(
       log,
       opts.now ?? new Date(),
       opts.concurrency ?? opts.client.concurrency,
-      opts.progressEvery ?? BAMBOO_PROGRESS_EVERY
+      opts.progressEvery ?? BAMBOO_PROGRESS_EVERY,
+      importMetadata
     );
   }
 
@@ -717,6 +815,12 @@ export async function runBambooSync(
       opts.now ?? new Date(),
       log
     );
+    payload.metadata = importMetadata
+      ? await fetchMetadataPayload(opts.client, log)
+      : emptyMetadataPayload();
+  }
+  if (!importMetadata) {
+    payload.metadata = emptyMetadataPayload();
   }
 
   mapped = payload.employees
@@ -726,9 +830,10 @@ export async function runBambooSync(
   unmappedFields = uniqueSorted(mapped.flatMap((row) => row.unmappedFields));
   const wouldCreate = mapped.filter((row) => !existingByBambooId.has(row.bambooId)).length;
   const wouldUpdate = mapped.length - wouldCreate;
-  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId, extended } =
+  const { latestChanged, deletedBambooIds, jobInfo, statusInfo, compensation, contacts, timeOffTypes, balancesByBambooId, extended, metadata } =
     payload;
   const mappedExtended = mapExtendedPayload(extended);
+  const mappedMetadata = mapMetadataPayload(metadata);
 
   log(`Fetched ${mapped.length} employees`);
   log(`Bamboo ids: ${bambooIds.join(", ")}`);
@@ -760,10 +865,16 @@ export async function runBambooSync(
       writes: 0,
       latestChanged,
       datasetCounts: {
+        ...emptyDatasetCounts(),
         timeOffRequests: mappedExtended.timeOffRequests.length,
         jobOpenings: mappedExtended.jobOpenings.length,
         education: mappedExtended.education.length,
         visas: mappedExtended.visas.length,
+        assets: mappedMetadata.assets.length,
+        dependents: mappedMetadata.dependents.length,
+        customFields: mappedMetadata.customFields.length,
+        customFieldValues: mappedMetadata.customFieldValues.length,
+        employeeExtras: mappedMetadata.extras.length,
       },
     };
   }
@@ -1044,7 +1155,7 @@ export async function runBambooSync(
       writeProgress("time_off_balances")
     );
 
-    const datasetCounts = await writeExtendedPayload(
+    const extendedCounts = await writeExtendedPayload(
       store,
       extended,
       idByBambooId,
@@ -1052,6 +1163,20 @@ export async function runBambooSync(
       writeProgress,
       log
     );
+    const metadataCounts = importMetadata
+      ? await writeMetadataPayload(
+          store,
+          metadata,
+          idByBambooId,
+          opts.mode,
+          writeProgress,
+          log
+        )
+      : emptyMetadataCounts();
+    const datasetCounts = {
+      ...extendedCounts,
+      ...metadataCounts,
+    };
 
     const deletedExisting = deletedBambooIds.filter((id) =>
       existingByBambooId.has(id)
@@ -1082,7 +1207,7 @@ export async function runBambooSync(
     log(`Upserted ${created} created, ${updated} updated`);
     log(`Reports-to resolved: ${reportsToResolved}`);
     log(
-      `Extended datasets timeOffRequests=${datasetCounts.timeOffRequests} jobOpenings=${datasetCounts.jobOpenings} education=${datasetCounts.education} visas=${datasetCounts.visas}`
+      `Extended datasets timeOffRequests=${datasetCounts.timeOffRequests} jobOpenings=${datasetCounts.jobOpenings} education=${datasetCounts.education} visas=${datasetCounts.visas} assets=${datasetCounts.assets} dependents=${datasetCounts.dependents} customFields=${datasetCounts.customFields}`
     );
     log("Phase write: complete");
 
@@ -1151,5 +1276,8 @@ export function formatSyncSummary(result: BambooSyncResult): string {
     `jobOpenings=${result.datasetCounts.jobOpenings}`,
     `education=${result.datasetCounts.education}`,
     `visas=${result.datasetCounts.visas}`,
+    `assets=${result.datasetCounts.assets}`,
+    `dependents=${result.datasetCounts.dependents}`,
+    `customFields=${result.datasetCounts.customFields}`,
   ].join("\n");
 }

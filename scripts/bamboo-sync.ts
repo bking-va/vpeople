@@ -95,6 +95,11 @@ async function main() {
       dryRun: args.dryRun,
       replaceDemo: args.replaceDemo,
       cachePath: args.cacheFile,
+      importMetadata:
+        args.metadata ||
+        ["1", "true", "yes"].includes(
+          (process.env.BAMBOO_SYNC_METADATA || "").trim().toLowerCase()
+        ),
       log: (message) => {
         console.log(message);
       },
