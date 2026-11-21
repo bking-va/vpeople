@@ -401,9 +401,11 @@ npx tsx scripts/bamboo-sync.ts --ats-applications --cache "$HOME/.cache/vpeople/
 # Resume later with the same command (checkpointed in bamboo_sync_runs.kind=ats_applications)
 npx tsx scripts/bamboo-sync.ts --ats-applications --skip-resumes /tmp/db_url.txt
 npx tsx scripts/bamboo-sync.ts --ats-applications --incremental /tmp/db_url.txt
+npx tsx scripts/bamboo-sync.ts --ats-resumes-only --limit-recent 50 /tmp/db_url.txt
 ```
 
 - **Expected runtime:** a full 88,507-application pass is hours, not minutes (list + per-application detail + optional resume download). Concurrency is 2 for details and 1 for resume files, with 429 backoff. Incremental cron uses `newSince` and at most 20 list pages / 90 seconds and does **not** download resumes.
+- **Résumés-only:** `--ats-resumes-only --limit-recent N` downloads GET `/files/{id}` for the N most recently applied applications whose details are already imported, skipping any that already have a résumé blob or unavailable row. It does not list applications or re-fetch details. Checkpointed in `bamboo_sync_runs.kind=ats_resumes_only`. `--dry-run` prints selected/skipped/pending counts only. Hourly cron does not run this.
 - **Blob storage:** private Vercel Blob; plan for resume files (subset of 88k). Requires `BLOB_READ_WRITE_TOKEN`. Skip with `--skip-resumes` if the token is not provisioned yet.
 - **New env vars:** `BLOB_READ_WRITE_TOKEN` (existing Blob token; now used by the ATS importer). Optional `BAMBOO_SYNC_CONCURRENCY` still caps other Bamboo reads; ATS details stay at 1–4.
 

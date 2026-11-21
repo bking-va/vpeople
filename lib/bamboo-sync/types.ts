@@ -272,6 +272,9 @@ export type MappedAtsStatusHistoryWrite = {
   changedByName: string | null;
 };
 
+export const ATS_RESUMES_ONLY_KIND = "ats_resumes_only";
+export const ATS_RESUMES_ONLY_MAX_LIMIT = 5000;
+
 export type AtsSyncCheckpoint = {
   phase: "list" | "details" | "resumes" | "done";
   listPage: number;
@@ -288,6 +291,12 @@ export type AtsSyncCheckpoint = {
   paginationComplete: boolean;
   detailsRequeued?: boolean;
   backfillCommentsHistory?: boolean;
+  resumesOnly?: boolean;
+  limitRecent?: number;
+  selectedResumeIds?: string[];
+  skippedExistingResume?: number;
+  missingResumeFile?: number;
+  pendingResumes?: number;
 };
 
 export function compareBambooApplicationIds(a: string, b: string): number {
@@ -329,7 +338,7 @@ export function isResumableAtsRun(
 export type BambooAtsSyncResult = {
   status: "success" | "skipped" | "failed" | "checkpointed";
   dryRun: boolean;
-  kind: "ats_applications";
+  kind: "ats_applications" | "ats_resumes_only";
   mode: BambooSyncMode;
   datasetCounts: AtsDatasetCounts;
   checkpoint: AtsSyncCheckpoint;

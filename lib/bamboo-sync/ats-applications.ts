@@ -24,6 +24,8 @@ import type { BambooSyncStore } from "./sync";
 import type { BatchProgress } from "./chunks";
 import {
   laterBambooApplicationId,
+  ATS_RESUMES_ONLY_KIND,
+  ATS_RESUMES_ONLY_MAX_LIMIT,
   type AtsDatasetCounts,
   type AtsSyncCheckpoint,
   type BambooAtsSyncResult,
@@ -47,6 +49,8 @@ export type RunAtsApplicationsSyncOptions = {
   requeueDetails?: boolean;
   resumeFrom?: string | null;
   backfillCommentsHistory?: boolean;
+  resumesOnly?: boolean;
+  limitRecent?: number | null;
   log?: AtsSyncLogger;
   now?: Date;
   concurrency?: number;
@@ -57,6 +61,8 @@ export type RunAtsApplicationsSyncOptions = {
 };
 
 export const BAMBOO_ATS_DETAIL_HEARTBEAT_MS = 15_000;
+export const BAMBOO_ATS_RESUME_CONCURRENCY = 2;
+export { ATS_RESUMES_ONLY_KIND, ATS_RESUMES_ONLY_MAX_LIMIT };
 
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "unknown";
@@ -131,6 +137,7 @@ function emptyCheckpoint(newSince: string | null): AtsSyncCheckpoint {
     paginationComplete: false,
     detailsRequeued: false,
     backfillCommentsHistory: false,
+    resumesOnly: false,
   };
 }
 
@@ -159,6 +166,17 @@ function asCheckpoint(value: Record<string, unknown> | null | undefined, fallbac
     paginationComplete: value.paginationComplete === true,
     detailsRequeued: value.detailsRequeued === true,
     backfillCommentsHistory: value.backfillCommentsHistory === true,
+    resumesOnly: value.resumesOnly === true,
+    limitRecent:
+      Number.isInteger(Number(value.limitRecent)) && Number(value.limitRecent) > 0
+        ? Number(value.limitRecent)
+        : undefined,
+    selectedResumeIds: Array.isArray(value.selectedResumeIds)
+      ? value.selectedResumeIds.filter((id): id is string => typeof id === "string")
+      : undefined,
+    skippedExistingResume: Number(value.skippedExistingResume) || 0,
+    missingResumeFile: Number(value.missingResumeFile) || 0,
+    pendingResumes: Number(value.pendingResumes) || 0,
   };
 }
 
@@ -174,6 +192,256 @@ function countsFrom(checkpoint: AtsSyncCheckpoint): AtsDatasetCounts {
 
 function progress(_label: string, chunkSize?: number): BatchProgress {
   return { chunkSize };
+}
+
+function boundedLimitRecent(value: number | null | undefined): number | null {
+  if (value == null) return null;
+  if (Number.isInteger(value) && value >= 1 && value <= ATS_RESUMES_ONLY_MAX_LIMIT) {
+    return value;
+  }
+  return null;
+}
+
+async function storeResumeFromBamboo(opts: {
+  client: BambooHrClient;
+  blob: PrivateBlobStore;
+  store: BambooSyncStore;
+  row: { bambooId: string; resumeBambooFileId: string };
+  log: AtsSyncLogger;
+}): Promise<"stored" | "unavailable"> {
+  try {
+    const file = await opts.client.fetchFile(opts.row.resumeBambooFileId);
+    const stored = await opts.blob.putPrivate({
+      pathname: atsResumeBlobPath(opts.row.bambooId, file.filename || "resume"),
+      body: file.body,
+      contentType: file.contentType,
+    });
+    await opts.store.setCandidateResumeBlob(opts.row.bambooId, stored.url);
+    return "stored";
+  } catch (error) {
+    if (error instanceof BambooHrHttpError && error.status === 404) {
+      opts.log(`resume file missing bambooFileId=${opts.row.resumeBambooFileId}`);
+      await opts.store.setCandidateResumeBlob(
+        opts.row.bambooId,
+        BAMBOO_RESUME_UNAVAILABLE
+      );
+      return "unavailable";
+    }
+    throw error;
+  }
+}
+
+function classifyResumeWindow(
+  rows: Array<{
+    bambooId: string;
+    resumeBambooFileId: string | null;
+    resumeBlobUrl: string | null;
+  }>,
+  lastResumeId: string | null
+) {
+  const pending: Array<{ bambooId: string; resumeBambooFileId: string }> = [];
+  let skippedExistingResume = 0;
+  let missingResumeFile = 0;
+  let passedCursor = !lastResumeId;
+  for (const row of rows) {
+    if (!passedCursor) {
+      if (row.bambooId === lastResumeId) passedCursor = true;
+      continue;
+    }
+    if (row.resumeBlobUrl) {
+      skippedExistingResume += 1;
+      continue;
+    }
+    if (!row.resumeBambooFileId) {
+      missingResumeFile += 1;
+      continue;
+    }
+    pending.push({
+      bambooId: row.bambooId,
+      resumeBambooFileId: row.resumeBambooFileId,
+    });
+  }
+  return { pending, skippedExistingResume, missingResumeFile };
+}
+
+async function runAtsResumesOnlySync(
+  opts: RunAtsApplicationsSyncOptions
+): Promise<BambooAtsSyncResult> {
+  const log: AtsSyncLogger = (message) => {
+    if (opts.log) safeLog(opts.log, message);
+  };
+  const dryRun = Boolean(opts.dryRun);
+  const startedAt = (opts.now ?? new Date()).toISOString();
+  const deadline = opts.maxMs != null ? Date.now() + opts.maxMs : null;
+  const timedOut = () => deadline != null && Date.now() >= deadline;
+  const concurrency = parseBoundedConcurrency(
+    opts.concurrency != null ? String(opts.concurrency) : undefined,
+    BAMBOO_ATS_RESUME_CONCURRENCY
+  );
+  const limitRecent = boundedLimitRecent(opts.limitRecent ?? null);
+
+  const empty = emptyCheckpoint(null);
+  empty.phase = "resumes";
+  empty.resumesOnly = true;
+  empty.limitRecent = limitRecent ?? undefined;
+
+  const failed = (
+    checkpoint: AtsSyncCheckpoint,
+    message: string
+  ): BambooAtsSyncResult => ({
+    status: "failed",
+    dryRun,
+    kind: ATS_RESUMES_ONLY_KIND,
+    mode: opts.mode,
+    datasetCounts: countsFrom(checkpoint),
+    checkpoint,
+    errorMessage: message,
+  });
+
+  const resultOf = (
+    status: BambooAtsSyncResult["status"],
+    checkpoint: AtsSyncCheckpoint,
+    errorMessage?: string
+  ): BambooAtsSyncResult => ({
+    status,
+    dryRun,
+    kind: ATS_RESUMES_ONLY_KIND,
+    mode: opts.mode,
+    datasetCounts: countsFrom(checkpoint),
+    checkpoint,
+    errorMessage,
+  });
+
+  if (limitRecent == null) {
+    return failed(empty, "--limit-recent is required for --ats-resumes-only (1-5000)");
+  }
+  empty.limitRecent = limitRecent;
+
+  if (!opts.client) {
+    log("BAMBOOHR_API_KEY is unset; ATS resumes-only sync skipped");
+    return resultOf("skipped", empty);
+  }
+
+  let incomplete = dryRun
+    ? null
+    : await opts.store.lastIncompleteKindCheckpoint(ATS_RESUMES_ONLY_KIND);
+  let checkpoint = asCheckpoint(incomplete?.checkpoint, null);
+  if (
+    checkpoint.resumesOnly !== true ||
+    checkpoint.limitRecent !== limitRecent ||
+    !Array.isArray(checkpoint.selectedResumeIds)
+  ) {
+    incomplete = null;
+    checkpoint = empty;
+  }
+
+  let runId = incomplete?.id ?? null;
+  if (!dryRun && runId == null) {
+    runId = await opts.store.startSyncRun({
+      kind: ATS_RESUMES_ONLY_KIND,
+      mode: opts.mode,
+      status: "running",
+      startedAt,
+      checkpoint,
+      datasetCounts: countsFrom(checkpoint),
+    });
+  }
+
+  const persist = async (
+    status: "running" | "checkpointed" | "success" | "failed",
+    errorMessage?: string
+  ) => {
+    if (dryRun || runId == null) return;
+    await opts.store.updateSyncRun(runId, {
+      status,
+      finishedAt: status === "running" ? null : new Date().toISOString(),
+      checkpoint,
+      datasetCounts: countsFrom(checkpoint),
+      errorMessage,
+    });
+  };
+
+  try {
+    if (!checkpoint.selectedResumeIds) {
+      const recent = await opts.store.listRecentDetailedCandidatesForResumes(limitRecent);
+      checkpoint.selectedResumeIds = recent.map((row) => row.bambooId);
+    }
+    checkpoint.listed = checkpoint.selectedResumeIds.length;
+    checkpoint.limitRecent = limitRecent;
+    checkpoint.resumesOnly = true;
+    checkpoint.phase = "resumes";
+
+    const ordered = await opts.store.listCandidatesResumeState(
+      checkpoint.selectedResumeIds
+    );
+    const classified = classifyResumeWindow(ordered, checkpoint.lastResumeId);
+    checkpoint.skippedExistingResume = classified.skippedExistingResume;
+    checkpoint.missingResumeFile = classified.missingResumeFile;
+    checkpoint.pendingResumes = classified.pending.length;
+
+    if (dryRun) {
+      log(
+        `ATS resumes-only dry-run selected=${checkpoint.listed} skippedExistingResume=${classified.skippedExistingResume} missingResumeFile=${classified.missingResumeFile} pending=${classified.pending.length}`
+      );
+      checkpoint.phase = "done";
+      return resultOf("success", checkpoint);
+    }
+
+    if (!opts.blob) {
+      log("BLOB_READ_WRITE_TOKEN unset; skipping resume blobs");
+      checkpoint.phase = "done";
+      await persist("success");
+      return resultOf("success", checkpoint);
+    }
+
+    log(
+      `Phase resumes-only: selected=${checkpoint.listed} pending=${classified.pending.length} concurrency=${concurrency}`
+    );
+
+    const batchSize = Math.max(concurrency, 1);
+    const pending = classified.pending;
+    for (let index = 0; index < pending.length; ) {
+      if (index > 0 && timedOut()) {
+        await persist("checkpointed");
+        return resultOf("checkpointed", checkpoint);
+      }
+      const batch = pending.slice(index, index + batchSize);
+      const outcomes = await mapPool(batch, concurrency, async (row) =>
+        storeResumeFromBamboo({
+          client: opts.client!,
+          blob: opts.blob!,
+          store: opts.store,
+          row,
+          log,
+        })
+      );
+      checkpoint.resumes += outcomes.filter((outcome) => outcome === "stored").length;
+      checkpoint.lastResumeId =
+        batch[batch.length - 1]?.bambooId ?? checkpoint.lastResumeId;
+      checkpoint.pendingResumes = Math.max(pending.length - (index + batch.length), 0);
+      log(
+        `ATS resumes-only stored=${checkpoint.resumes} lastId=${checkpoint.lastResumeId || "none"}`
+      );
+      await persist("running");
+      index += batch.length;
+    }
+
+    checkpoint.phase = "done";
+    checkpoint.pendingResumes = 0;
+    await persist("success");
+    log(
+      `ATS resumes-only selected=${checkpoint.listed} stored=${checkpoint.resumes}`
+    );
+    return resultOf("success", checkpoint);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message.replace(PII_LOG_PATTERN, "[redacted]")
+        : "ATS resumes-only sync failed";
+    log(`ATS resumes-only sync failed: ${message}`);
+    await persist("failed", message);
+    return failed(checkpoint, message);
+  }
 }
 
 async function ensureJobOpenings(
@@ -213,6 +481,9 @@ async function ensureJobOpenings(
 export async function runAtsApplicationsSync(
   opts: RunAtsApplicationsSyncOptions
 ): Promise<BambooAtsSyncResult> {
+  if (opts.resumesOnly) {
+    return runAtsResumesOnlySync(opts);
+  }
   const log: AtsSyncLogger = (message) => {
     if (opts.log) safeLog(opts.log, message);
   };
@@ -640,29 +911,14 @@ export async function runAtsApplicationsSync(
           const batch = await opts.store.listCandidatesNeedingResume(10);
           if (batch.length === 0) break;
           await mapPool(batch, 1, async (row) => {
-            try {
-              const file = await opts.client!.fetchFile(row.resumeBambooFileId);
-              const stored = await opts.blob!.putPrivate({
-                pathname: atsResumeBlobPath(
-                  row.bambooId,
-                  file.filename || "resume"
-                ),
-                body: file.body,
-                contentType: file.contentType,
-              });
-              await opts.store.setCandidateResumeBlob(row.bambooId, stored.url);
-              checkpoint.resumes += 1;
-            } catch (error) {
-              if (error instanceof BambooHrHttpError && error.status === 404) {
-                log(`resume file missing bambooFileId=${row.resumeBambooFileId}`);
-                await opts.store.setCandidateResumeBlob(
-                  row.bambooId,
-                  BAMBOO_RESUME_UNAVAILABLE
-                );
-                return;
-              }
-              throw error;
-            }
+            const outcome = await storeResumeFromBamboo({
+              client: opts.client!,
+              blob: opts.blob!,
+              store: opts.store,
+              row,
+              log,
+            });
+            if (outcome === "stored") checkpoint.resumes += 1;
           });
           checkpoint.lastResumeId = batch[batch.length - 1]?.bambooId ?? checkpoint.lastResumeId;
           log(`ATS resumes stored=${checkpoint.resumes}`);
@@ -711,6 +967,17 @@ export async function runAtsApplicationsSync(
 }
 
 export function formatAtsSyncSummary(result: BambooAtsSyncResult): string {
+  if (result.kind === ATS_RESUMES_ONLY_KIND) {
+    return [
+      `ATS resumes-only ${result.status}`,
+      `mode=${result.mode}`,
+      `selected=${result.datasetCounts.applications}`,
+      `resumes=${result.datasetCounts.resumes}`,
+      `skipped=${result.checkpoint.skippedExistingResume ?? 0}`,
+      `pending=${result.checkpoint.pendingResumes ?? 0}`,
+      `phase=${result.checkpoint.phase}`,
+    ].join(" ");
+  }
   return [
     `ATS applications ${result.status}`,
     `mode=${result.mode}`,

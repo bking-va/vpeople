@@ -77,6 +77,8 @@ async function main() {
         requeueDetails: args.requeueDetails,
         resumeFrom: args.resumeFrom,
         backfillCommentsHistory: args.backfillCommentsHistory,
+        resumesOnly: args.atsResumesOnly,
+        limitRecent: args.limitRecent,
         concurrency: args.concurrency ?? undefined,
         log: (message) => {
           console.log(message);

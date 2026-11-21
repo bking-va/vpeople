@@ -1,5 +1,6 @@
 import fs from "fs";
 import { parseBoundedConcurrency } from "./client";
+import { ATS_RESUMES_ONLY_MAX_LIMIT } from "./types";
 
 export type BambooSyncCliArgs = {
   dryRun: boolean;
@@ -15,10 +16,20 @@ export type BambooSyncCliArgs = {
   requeueDetails: boolean;
   resumeFrom: string | null;
   backfillCommentsHistory: boolean;
+  atsResumesOnly: boolean;
+  limitRecent: number | null;
   concurrency: number | null;
   dbUrlFile: string | null;
   cacheFile: string | null;
 };
+
+function parseLimitRecent(raw: string): number | null {
+  const value = Number(raw);
+  if (Number.isInteger(value) && value >= 1 && value <= ATS_RESUMES_ONLY_MAX_LIMIT) {
+    return value;
+  }
+  return null;
+}
 
 function takeValue(argv: string[], index: number, prefix: string): string | null {
   const arg = argv[index];
@@ -45,6 +56,8 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
     requeueDetails: false,
     resumeFrom: null,
     backfillCommentsHistory: false,
+    atsResumesOnly: false,
+    limitRecent: null,
     concurrency: null,
     dbUrlFile: null,
     cacheFile: null,
@@ -70,6 +83,15 @@ export function parseBambooSyncArgs(argv: string[]): BambooSyncCliArgs {
       args.backfillCommentsHistory = true;
       args.atsApplications = true;
       args.skipResumes = true;
+    } else if (arg === "--ats-resumes-only") {
+      args.atsResumesOnly = true;
+      args.atsApplications = true;
+    } else if (arg === "--limit-recent" || arg.startsWith("--limit-recent=")) {
+      const value = takeValue(argv, i, "--limit-recent");
+      if (value) {
+        args.limitRecent = parseLimitRecent(value);
+        if (arg === "--limit-recent") i += 1;
+      }
     } else if (arg === "--resume-from" || arg.startsWith("--resume-from=")) {
       const value = takeValue(argv, i, "--resume-from");
       if (value) {
