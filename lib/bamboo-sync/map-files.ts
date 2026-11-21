@@ -81,11 +81,24 @@ export function mapDocumentCategory(value: string | null | undefined): DocumentC
   return "other";
 }
 
+function shareWithEmployeesValue(rec: Record<string, unknown>): unknown {
+  return rec.shareWithEmployees ?? rec.sharedWithEmployees ?? rec.shareWithEmployee;
+}
+
+/** Bamboo company files are employee-visible only when explicitly shared. */
+export function isExplicitlySharedWithEmployees(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "yes" || normalized === "true" || normalized === "y" || normalized === "1";
+}
+
 export function mapFileFromCategory(
   file: Record<string, unknown>,
   categoryName: string | null,
   kind: "employee" | "company",
-  employeeBambooId?: string
+  employeeBambooId?: string,
+  categoryShareWithEmployees?: unknown
 ): MappedBambooFile | null {
   const rec = asRecord(file);
   const fileId = nestedId(rec.id) || blankToNull(rec.id);
@@ -100,13 +113,19 @@ export function mapFileFromCategory(
     kind === "employee"
       ? `emp:${employeeBambooId || "unknown"}:${fileId}`
       : `company:${fileId}`;
+  const heuristicRestricted =
+    isRestrictedBambooFileCategory(bambooCategory) || isRestrictedBambooFileCategory(title);
+  const sharedWithEmployees = isExplicitlySharedWithEmployees(
+    shareWithEmployeesValue(rec) ?? categoryShareWithEmployees
+  );
   return {
     bambooId,
     fileId,
     title,
     bambooCategory,
     category: mapDocumentCategory(bambooCategory || title),
-    restricted: isRestrictedBambooFileCategory(bambooCategory) || isRestrictedBambooFileCategory(title),
+    restricted:
+      heuristicRestricted || (kind === "company" && !sharedWithEmployees),
     containsCompensation:
       isCompensationFileCategory(bambooCategory) || isCompensationFileCategory(title),
   };
@@ -127,9 +146,16 @@ export function filesFromViewPayload(
   for (const category of categories) {
     const rec = asRecord(category);
     const name = labeledValue(rec.name) || labeledValue(rec.category) || blankToNull(rec.name);
+    const categoryShare = shareWithEmployeesValue(rec);
     const files = Array.isArray(rec.files) ? rec.files : Array.isArray(rec.documents) ? rec.documents : [];
     for (const file of files) {
-      const mapped = mapFileFromCategory(asRecord(file), name, kind, employeeBambooId);
+      const mapped = mapFileFromCategory(
+        asRecord(file),
+        name,
+        kind,
+        employeeBambooId,
+        categoryShare
+      );
       if (mapped) out.push(mapped);
     }
   }

@@ -199,9 +199,9 @@ export async function runBambooFilesSync(
         }
         const files = filesFromViewPayload(view, "employee", bambooId);
         for (const mapped of files) {
-          if (importedEmployee.has(mapped.bambooId)) continue;
+          const skipBlob = importedEmployee.has(mapped.bambooId);
           let fileUrl: string | null = null;
-          if (!dryRun && blob) {
+          if (!skipBlob && !dryRun && blob) {
             try {
               const file = await opts.client.fetchEmployeeFile(bambooId, mapped.fileId);
               fileUrl = await putFile(blob, "employee", mapped, file);
@@ -230,16 +230,18 @@ export async function runBambooFilesSync(
               },
             ]);
           }
-          checkpoint.employeeFiles += 1;
-          if (mapped.restricted) checkpoint.restricted += 1;
+          if (!skipBlob) {
+            checkpoint.employeeFiles += 1;
+            if (mapped.restricted) checkpoint.restricted += 1;
+            importedEmployee.add(mapped.bambooId);
+            processed += 1;
+            if (processed % 25 === 0) {
+              log(`employee files written=${checkpoint.employeeFiles}`);
+              await persist("running");
+            }
+          }
           checkpoint.lastEmployeeBambooId = bambooId;
           checkpoint.lastEmployeeFileId = mapped.fileId;
-          importedEmployee.add(mapped.bambooId);
-          processed += 1;
-          if (processed % 25 === 0) {
-            log(`employee files written=${checkpoint.employeeFiles}`);
-            await persist("running");
-          }
           if (opts.maxFiles != null && processed >= opts.maxFiles) break;
         }
         checkpoint.lastEmployeeBambooId = bambooId;
@@ -274,21 +276,21 @@ export async function runBambooFilesSync(
             checkpoint,
           };
         }
-        if (importedCompany.has(mapped.bambooId)) continue;
+        const skipBlob = importedCompany.has(mapped.bambooId);
         let fileUrl: string | null = null;
-        if (!dryRun && blob) {
+        if (!skipBlob && !dryRun && blob) {
           try {
             const file = await opts.client.fetchFile(mapped.fileId);
             fileUrl = await putFile(blob, "company", mapped, file);
             if (fileUrl) checkpoint.blobs += 1;
-            } catch (error) {
-              if (error instanceof BambooHrHttpError && error.status === 404) {
-                log(`company file missing bambooFileId=${mapped.fileId}`);
-                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
-              } else {
-                throw error;
-              }
+          } catch (error) {
+            if (error instanceof BambooHrHttpError && error.status === 404) {
+              log(`company file missing bambooFileId=${mapped.fileId}`);
+              fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+            } else {
+              throw error;
             }
+          }
         }
         if (!dryRun) {
           await opts.store.upsertCompanyFilesBatch([
@@ -304,15 +306,17 @@ export async function runBambooFilesSync(
             },
           ]);
         }
-        checkpoint.companyFiles += 1;
-        if (mapped.restricted) checkpoint.restricted += 1;
-        checkpoint.lastCompanyFileId = mapped.fileId;
-        importedCompany.add(mapped.bambooId);
-        processed += 1;
-        if (processed % 25 === 0) {
-          log(`company files written=${checkpoint.companyFiles}`);
-          await persist("running");
+        if (!skipBlob) {
+          checkpoint.companyFiles += 1;
+          if (mapped.restricted) checkpoint.restricted += 1;
+          importedCompany.add(mapped.bambooId);
+          processed += 1;
+          if (processed % 25 === 0) {
+            log(`company files written=${checkpoint.companyFiles}`);
+            await persist("running");
+          }
         }
+        checkpoint.lastCompanyFileId = mapped.fileId;
       }
       checkpoint.phase = "done";
     }

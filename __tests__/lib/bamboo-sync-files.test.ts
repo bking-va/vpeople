@@ -86,6 +86,56 @@ describe("Bamboo file category mapping", () => {
     expect(mapped[0].bambooId).toBe("emp:404:12");
     expect(mapped[0].restricted).toBe(true);
   });
+
+  test("company files are HR-only unless Bamboo explicitly shares them", () => {
+    const [unshared] = filesFromViewPayload(
+      {
+        categories: [
+          {
+            name: "Policies",
+            files: [{ id: 88, name: "handbook.pdf", shareWithEmployees: "no" }],
+          },
+        ],
+      },
+      "company"
+    );
+    expect(unshared.restricted).toBe(true);
+
+    const [unresolved] = filesFromViewPayload(
+      {
+        categories: [{ name: "Policies", files: [{ id: 89, name: "handbook.pdf" }] }],
+      },
+      "company"
+    );
+    expect(unresolved.restricted).toBe(true);
+
+    const [shared] = filesFromViewPayload(
+      {
+        categories: [
+          {
+            name: "Policies",
+            files: [{ id: 90, name: "handbook.pdf", shareWithEmployees: "yes" }],
+          },
+        ],
+      },
+      "company"
+    );
+    expect(shared.restricted).toBe(false);
+
+    const [restrictedShared] = filesFromViewPayload(
+      {
+        categories: [
+          {
+            name: "Compensation Letters",
+            files: [{ id: 91, name: "comp.pdf", shareWithEmployees: "yes" }],
+          },
+        ],
+      },
+      "company"
+    );
+    expect(restrictedShared.restricted).toBe(true);
+    expect(restrictedShared.containsCompensation).toBe(true);
+  });
 });
 
 describe("document access", () => {
@@ -127,6 +177,15 @@ describe("document access", () => {
         accessLevel: "full_admin",
         canManageUsers: true,
         file: { restricted: true, containsCompensation: true },
+      })
+    ).toBe(true);
+  });
+
+  test("shared non-restricted company files remain visible to employees", () => {
+    expect(
+      canViewCompanyFile({
+        accessLevel: "employee",
+        file: { restricted: false, containsCompensation: false },
       })
     ).toBe(true);
   });
@@ -358,5 +417,101 @@ describe("runBambooFilesSync", () => {
     expect(result.status).toBe("success");
     expect(String(store.documents[0].fileUrl)).toContain("blob.vercel-storage.com");
     expect(String(store.company[0].fileUrl)).toContain("blob.vercel-storage.com");
+  });
+
+  test("full resync updates company-file permissions without re-downloading blobs", async () => {
+    const store = {
+      employees: [] as Array<Record<string, unknown>>,
+      documents: [] as Array<Record<string, unknown>>,
+      company: [
+        {
+          bambooId: "company:88",
+          title: "handbook.pdf",
+          bambooCategory: "Policies",
+          restricted: false,
+          containsCompensation: false,
+          fileUrl: "https://blob.vercel-storage.com/bamboo-files/company/existing",
+        },
+      ] as Array<Record<string, unknown>>,
+      syncRuns: [] as Array<Record<string, unknown>>,
+      async listEmployees() {
+        return this.employees;
+      },
+      async lastIncompleteKindCheckpoint() {
+        return null;
+      },
+      async startSyncRun(run: Record<string, unknown>) {
+        this.syncRuns.push({ ...run, id: 1 });
+        return 1;
+      },
+      async updateSyncRun(_id: number, run: Record<string, unknown>) {
+        Object.assign(this.syncRuns[0], run);
+      },
+      async listImportedFileBambooIds(kind: "employee" | "company") {
+        const rows = kind === "company" ? this.company : this.documents;
+        return new Set(
+          rows
+            .filter((row) => row.bambooId && row.fileUrl)
+            .map((row) => String(row.bambooId))
+        );
+      },
+      async upsertEmployeeDocumentsBatch() {
+        return 0;
+      },
+      async upsertCompanyFilesBatch(rows: Array<Record<string, unknown>>) {
+        for (const row of rows) {
+          const existing = this.company.find((item) => item.bambooId === row.bambooId);
+          if (existing) {
+            const next = { ...row };
+            if (next.fileUrl == null) next.fileUrl = existing.fileUrl;
+            Object.assign(existing, next);
+          } else this.company.push(row);
+        }
+        return rows.length;
+      },
+    };
+    const downloaded: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/files/view")) {
+          return jsonResponse({
+            categories: [
+              {
+                name: "Compensation Letters",
+                files: [{ id: 88, name: "handbook.pdf", shareWithEmployees: "no" }],
+              },
+            ],
+          });
+        }
+        if (url.includes("/files/88")) {
+          downloaded.push(url);
+          return new Response(Buffer.from("hb"), { status: 200 });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: {
+        async putPrivate() {
+          downloaded.push("put");
+          return { url: "https://blob.vercel-storage.com/bamboo-files/company/new" };
+        },
+      },
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(downloaded).toEqual([]);
+    expect(store.company[0].restricted).toBe(true);
+    expect(store.company[0].containsCompensation).toBe(true);
+    expect(store.company[0].bambooCategory).toBe("Compensation Letters");
+    expect(store.company[0].fileUrl).toBe(
+      "https://blob.vercel-storage.com/bamboo-files/company/existing"
+    );
   });
 });
