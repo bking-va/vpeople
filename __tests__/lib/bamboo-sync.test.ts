@@ -1309,11 +1309,7 @@ class MemoryStore implements BambooSyncStore {
   async lastIncompleteKindCheckpoint(kind: string) {
     const row = [...this.syncRuns]
       .reverse()
-      .find(
-        (item) =>
-          item.kind === kind &&
-          (item.status === "running" || item.status === "checkpointed")
-      );
+      .find((item) => item.kind === kind && isResumableAtsRun(item.status, item.checkpoint));
     if (!row) return null;
     return {
       id: Number(row.id),

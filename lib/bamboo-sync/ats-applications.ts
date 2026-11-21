@@ -370,6 +370,7 @@ async function runAtsResumesOnlySync(
     checkpoint.limitRecent = limitRecent;
     checkpoint.resumesOnly = true;
     checkpoint.phase = "resumes";
+    await persist("running");
 
     const ordered = await opts.store.listCandidatesResumeState(
       checkpoint.selectedResumeIds

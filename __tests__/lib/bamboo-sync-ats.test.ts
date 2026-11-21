@@ -280,11 +280,7 @@ class FakeAtsStore {
   async lastIncompleteKindCheckpoint(kind: string) {
     const row = [...this.syncRuns]
       .reverse()
-      .find(
-        (item) =>
-          item.kind === kind &&
-          (item.status === "running" || item.status === "checkpointed")
-      );
+      .find((item) => item.kind === kind && isResumableAtsRun(item.status, item.checkpoint));
     if (!row) return null;
     return {
       id: Number(row.id),
@@ -1880,6 +1876,129 @@ describe("ATS resumes-only import", () => {
     );
     expect(store.candidates.find((row) => row.bambooId === "23")?.resumeBlobUrl).toBeNull();
     expect(tracker.urls.some((url) => url.endsWith("/files/223"))).toBe(false);
+  });
+
+  test("persists the selected window before the first résumé GET", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "51",
+      appliedAt: "2026-02-01T00:00:00.000Z",
+      resumeBambooFileId: "511",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "52",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "522",
+    });
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: async (input) => {
+        const run = store.syncRuns[0];
+        expect(run?.status).toBe("running");
+        expect((run?.checkpoint as { selectedResumeIds?: string[] })?.selectedResumeIds).toEqual(
+          ["52", "51"]
+        );
+        const url = String(input);
+        const match = url.match(/\/files\/(\d+)/);
+        if (!match) return jsonResponse({ error: url }, 404);
+        return new Response(Uint8Array.from(Buffer.from("%PDF")), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="resume-${match[1]}.pdf"`,
+          },
+        });
+      },
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+  });
+
+  test("resumes a failed resumes-only run from its saved window", async () => {
+    const store = new FakeAtsStore();
+    seedDetailedCandidate(store, {
+      bambooId: "61",
+      appliedAt: "2026-02-01T00:00:00.000Z",
+      resumeBambooFileId: "611",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "62",
+      appliedAt: "2026-03-01T00:00:00.000Z",
+      resumeBambooFileId: "622",
+      resumeBlobUrl: "https://blob.vercel-storage.com/ats-resumes/62/done.pdf",
+    });
+    seedDetailedCandidate(store, {
+      bambooId: "63",
+      appliedAt: "2026-04-01T00:00:00.000Z",
+      resumeBambooFileId: "633",
+    });
+    store.syncRuns.push({
+      id: 90,
+      kind: "ats_resumes_only",
+      status: "failed",
+      checkpoint: {
+        phase: "resumes",
+        listPage: 1,
+        lastListId: null,
+        lastDetailId: null,
+        lastResumeId: "62",
+        listed: 2,
+        detailed: 0,
+        resumes: 1,
+        answers: 0,
+        comments: 0,
+        history: 0,
+        newSince: null,
+        paginationComplete: false,
+        resumesOnly: true,
+        limitRecent: 2,
+        selectedResumeIds: ["62", "61"],
+      },
+    });
+    const tracker = {
+      urls: [] as string[],
+      methods: [] as string[],
+      inFlight: 0,
+      maxInFlight: 0,
+    };
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      fetch: mockResumeFileFetch({ "611": Buffer.from("%PDF-61") }, tracker),
+    });
+    const result = await runAtsApplicationsSync({
+      client,
+      store: store as unknown as BambooSyncStore,
+      blob: {
+        async putPrivate(input) {
+          return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+        },
+      },
+      mode: "full",
+      resumesOnly: true,
+      limitRecent: 2,
+      log: () => undefined,
+    });
+    expect(result.status).toBe("success");
+    expect(store.syncRuns[0].status).toBe("success");
+    expect(store.candidates.find((row) => row.bambooId === "61")?.resumeBlobUrl).toContain(
+      "blob.vercel-storage.com"
+    );
+    expect(store.candidates.find((row) => row.bambooId === "63")?.resumeBlobUrl).toBeNull();
+    expect(tracker.urls).toEqual([expect.stringMatching(/\/files\/611$/)]);
   });
 
   test("bounds résumé GET concurrency", async () => {

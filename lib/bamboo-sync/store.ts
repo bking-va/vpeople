@@ -2158,6 +2158,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
           id: bambooSyncRuns.id,
           checkpoint: bambooSyncRuns.checkpoint,
           latestChanged: bambooSyncRuns.latestChanged,
+          status: bambooSyncRuns.status,
         })
         .from(bambooSyncRuns)
         .where(
@@ -2165,14 +2166,18 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
             eq(bambooSyncRuns.kind, kind),
             or(
               eq(bambooSyncRuns.status, "running"),
-              eq(bambooSyncRuns.status, "checkpointed")
+              eq(bambooSyncRuns.status, "checkpointed"),
+              and(
+                eq(bambooSyncRuns.status, "failed"),
+                sql`coalesce(${bambooSyncRuns.checkpoint}, '{}'::jsonb) <> '{}'::jsonb`
+              )
             )
           )
         )
         .orderBy(sql`${bambooSyncRuns.id} desc`)
         .limit(1);
       const row = rows[0];
-      if (!row) return null;
+      if (!row || !isResumableAtsRun(row.status, row.checkpoint)) return null;
       return {
         id: row.id,
         checkpoint:
