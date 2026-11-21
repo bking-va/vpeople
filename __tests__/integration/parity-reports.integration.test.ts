@@ -425,6 +425,7 @@ describe("PARITY reports, carryover, and status history (Real Postgres)", () => 
     const denied = await getPayByTitleReport();
     expect(denied).toEqual([]);
     expect(await getSalaryHistoryReport()).toEqual([]);
+    expect(await getSalaryHistoryReport({ canViewCompensation: false })).toEqual([]);
 
     grantCompensation(true);
     const byTitle = await getPayByTitleReport();

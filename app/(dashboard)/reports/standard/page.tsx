@@ -23,8 +23,9 @@ import {
   type PayGroupRow,
 } from "@/lib/reports/standard";
 import { getSessionUserPermissions } from "@/lib/permissions";
-import { formatCurrency } from "@/lib/utils";
 import { formatEmploymentStatus } from "@/lib/utils/formatters";
+import { FxRatesFootnote, PayAmount } from "@/components/pay-amount";
+import { getLatestFxRates } from "@/lib/fx-rates";
 
 export default async function StandardReportsPage({
   searchParams,
@@ -39,6 +40,15 @@ export default async function StandardReportsPage({
   const { type = "additions" } = await searchParams;
   const year = new Date().getUTCFullYear();
   const permissions = await getSessionUserPermissions(session);
+  const canViewPay = Boolean(permissions?.canViewCompensation);
+  const payReport =
+    type === "last-pay-change" ||
+    type === "no-raise" ||
+    type === "pay-by-title" ||
+    type === "pay-by-department" ||
+    type === "pay-by-location" ||
+    type === "salary-history";
+  const fxRates = canViewPay && payReport ? await getLatestFxRates() : new Map();
 
   let title = "Standard Report";
   let body: ReactNode = null;
@@ -137,23 +147,32 @@ export default async function StandardReportsPage({
     );
   } else if (type === "last-pay-change") {
     title = "Last Pay Change";
-    const rows = permissions?.canViewCompensation ? await getLastPayChangeReport() : [];
+    const rows = canViewPay ? await getLastPayChangeReport() : [];
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">
-          {!permissions?.canViewCompensation ? (
+          {!canViewPay ? (
             <p className="text-sm text-muted-foreground">Compensation permission required</p>
           ) : (
-            rows.map((row) => (
-              <div key={row.employeeId} className="text-sm flex justify-between">
-                <Link href={`/people/${row.employeeId}`} className="text-primary hover:underline">
-                  {row.firstName} {row.lastName}
-                </Link>
-                <span>
-                  {row.payRate} · {row.effectiveDate}
-                </span>
-              </div>
-            ))
+            <>
+              {rows.map((row) => (
+                <div key={row.employeeId} className="text-sm flex justify-between">
+                  <Link href={`/people/${row.employeeId}`} className="text-primary hover:underline">
+                    {row.firstName} {row.lastName}
+                  </Link>
+                  <span>
+                    <PayAmount
+                      amount={row.payRate}
+                      currency={row.currency}
+                      visible={canViewPay}
+                      rates={fxRates}
+                    />{" "}
+                    · {row.effectiveDate}
+                  </span>
+                </div>
+              ))}
+              <FxRatesFootnote rates={fxRates} />
+            </>
           )}
         </CardContent>
       </Card>
@@ -234,17 +253,32 @@ export default async function StandardReportsPage({
           {rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">Everyone has a raise in the last 12 months</p>
           ) : (
-            rows.map((row) => (
-              <div key={row.id} className="text-sm flex justify-between">
-                <Link href={`/people/${row.id}`} className="text-primary hover:underline">
-                  {row.firstName} {row.lastName}
-                </Link>
-                <span className="text-muted-foreground">
-                  {row.lastRaiseDate || "no raise on file"}
-                  {permissions?.canViewCompensation && row.lastPayRate ? ` · ${row.lastPayRate}` : ""}
-                </span>
-              </div>
-            ))
+            <>
+              {rows.map((row) => (
+                <div key={row.id} className="text-sm flex justify-between">
+                  <Link href={`/people/${row.id}`} className="text-primary hover:underline">
+                    {row.firstName} {row.lastName}
+                  </Link>
+                  <span className="text-muted-foreground">
+                    {row.lastRaiseDate || "no raise on file"}
+                    {canViewPay && row.lastPayRate ? (
+                      <>
+                        {" · "}
+                        <PayAmount
+                          amount={row.lastPayRate}
+                          currency={row.lastCurrency}
+                          visible={canViewPay}
+                          rates={fxRates}
+                        />
+                      </>
+                    ) : (
+                      ""
+                    )}
+                  </span>
+                </div>
+              ))}
+              {canViewPay ? <FxRatesFootnote rates={fxRates} /> : null}
+            </>
           )}
         </CardContent>
       </Card>
@@ -282,7 +316,6 @@ export default async function StandardReportsPage({
         : type === "pay-by-department"
           ? "Pay by Department"
           : "Pay by Location";
-    const canViewPay = Boolean(permissions?.canViewCompensation);
     const rows: PayGroupRow[] = !canViewPay
       ? []
       : type === "pay-by-title"
@@ -293,7 +326,7 @@ export default async function StandardReportsPage({
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">
-          {!permissions?.canViewCompensation ? (
+          {!canViewPay ? (
             <p className="text-sm text-muted-foreground">Compensation permission required</p>
           ) : (
             <>
@@ -308,11 +341,33 @@ export default async function StandardReportsPage({
                 <div key={row.group} className="text-sm grid grid-cols-5 gap-2">
                   <span>{row.group}</span>
                   <span className="text-right">{row.count}</span>
-                  <span className="text-right">{formatCurrency(row.avgPay)}</span>
-                  <span className="text-right">{formatCurrency(row.minPay)}</span>
-                  <span className="text-right">{formatCurrency(row.maxPay)}</span>
+                  <span className="text-right">
+                    <PayAmount
+                      amount={row.avgPay}
+                      currency={row.currency}
+                      visible={canViewPay}
+                      rates={fxRates}
+                    />
+                  </span>
+                  <span className="text-right">
+                    <PayAmount
+                      amount={row.minPay}
+                      currency={row.currency}
+                      visible={canViewPay}
+                      rates={fxRates}
+                    />
+                  </span>
+                  <span className="text-right">
+                    <PayAmount
+                      amount={row.maxPay}
+                      currency={row.currency}
+                      visible={canViewPay}
+                      rates={fxRates}
+                    />
+                  </span>
                 </div>
               ))}
+              <FxRatesFootnote rates={fxRates} />
             </>
           )}
         </CardContent>
@@ -321,24 +376,33 @@ export default async function StandardReportsPage({
   } else if (type === "salary-history") {
     title = "Salary History";
     const rows = await getSalaryHistoryReport({
-      canViewCompensation: Boolean(permissions?.canViewCompensation),
+      canViewCompensation: canViewPay,
     });
     body = (
       <Card>
         <CardContent className="pt-6 space-y-2">
-          {!permissions?.canViewCompensation ? (
+          {!canViewPay ? (
             <p className="text-sm text-muted-foreground">Compensation permission required</p>
           ) : (
-            rows.map((row) => (
-              <div key={row.id} className="text-sm flex justify-between gap-4">
-                <Link href={`/people/${row.employeeId}`} className="text-primary hover:underline">
-                  {row.firstName} {row.lastName}
-                </Link>
-                <span>
-                  {row.payRate ? formatCurrency(row.payRate, row.currency || "CAD") : "—"} · {row.effectiveDate}
-                </span>
-              </div>
-            ))
+            <>
+              {rows.map((row) => (
+                <div key={row.id} className="text-sm flex justify-between gap-4">
+                  <Link href={`/people/${row.employeeId}`} className="text-primary hover:underline">
+                    {row.firstName} {row.lastName}
+                  </Link>
+                  <span>
+                    <PayAmount
+                      amount={row.payRate}
+                      currency={row.currency || "CAD"}
+                      visible={canViewPay}
+                      rates={fxRates}
+                    />{" "}
+                    · {row.effectiveDate}
+                  </span>
+                </div>
+              ))}
+              <FxRatesFootnote rates={fxRates} />
+            </>
           )}
         </CardContent>
       </Card>

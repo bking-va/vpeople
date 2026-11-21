@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/bamboo-sync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-fx-rates",
+      "schedule": "0 22 * * *"
     }
   ]
 }

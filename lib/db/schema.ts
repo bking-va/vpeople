@@ -1402,6 +1402,25 @@ export const bambooSyncRuns = pgTable("bamboo_sync_runs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/** Latest Bank of Canada Valet daily FX observations, CAD per 1 unit of currency. */
+export const fxDailyRates = pgTable(
+  "fx_daily_rates",
+  {
+    id: serial("id").primaryKey(),
+    currency: text("currency").notNull(),
+    cadPerUnit: decimal("cad_per_unit", { precision: 18, scale: 8 }).notNull(),
+    rateDate: date("rate_date").notNull(),
+    source: text("source").notNull(),
+    fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    currencyRateDate: uniqueIndex("fx_daily_rates_currency_rate_date_uidx").on(
+      table.currency,
+      table.rateDate
+    ),
+  })
+);
+
 export const scheduledReports = pgTable("scheduled_reports", {
   id: serial("id").primaryKey(),
   savedReportId: integer("saved_report_id")
