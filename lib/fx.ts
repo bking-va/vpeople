@@ -24,7 +24,8 @@ export type UsdEquivalent = {
 const SERIES_RE = /^FX([A-Z]{3})CAD$/;
 const MONEY_KEY_RE =
   /(amount|payrate|salary|bonus|commission|allowance|earnings|\bote\b|\bctc\b)/i;
-const MONEY_KEY_EXCLUDE_RE = /(percent|pct|ratio|date|id$|type|status|currency|unit)/i;
+const MONEY_KEY_EXCLUDE_RE =
+  /(percent|pct|ratio|date|id$|type|status|currency|unit|rate$)/i;
 
 export function normalizeCurrency(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -38,7 +39,9 @@ export function parseAmount(value: string | number | null | undefined): number |
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
-  const numeric = String(value).replace(/[^0-9.-]/g, "");
+  const raw = String(value).trim();
+  if (raw.includes("%")) return null;
+  const numeric = raw.replace(/[^0-9.-]/g, "");
   if (!numeric || numeric === "-" || numeric === ".") return null;
   const amount = Number.parseFloat(numeric);
   return Number.isFinite(amount) ? amount : null;
@@ -112,6 +115,17 @@ export function fxRateMapFromRows(rows: FxCadPerUnit[]): FxRateMap {
   return map;
 }
 
+/** Only rates observed on the latest USD/CAD date, so crosses are real daily pairs. */
+export function fxRateMapOnLatestUsdDate(rows: FxCadPerUnit[]): FxRateMap {
+  let usdDate: string | null = null;
+  for (const row of rows) {
+    if (normalizeCurrency(row.currency) !== "USD") continue;
+    if (!usdDate || row.rateDate > usdDate) usdDate = row.rateDate;
+  }
+  if (!usdDate) return new Map();
+  return fxRateMapFromRows(rows.filter((row) => row.rateDate === usdDate));
+}
+
 function usdPerUnitFor(
   fromCurrency: string,
   rates: FxRateMap
@@ -135,12 +149,11 @@ function usdPerUnitFor(
   }
   const fromCad = rates.get(fromCurrency);
   if (!fromCad) return null;
-  const rateDate =
-    fromCad.rateDate <= usdCad.rateDate ? fromCad.rateDate : usdCad.rateDate;
+  if (fromCad.rateDate !== usdCad.rateDate) return null;
   return {
     usdPerUnit: fromCad.cadPerUnit / usdCad.cadPerUnit,
-    rateDate,
-    source: fromCad.source || usdCad.source,
+    rateDate: usdCad.rateDate,
+    source: usdCad.source,
   };
 }
 
@@ -194,8 +207,10 @@ export function csvUsdAmount(usd: UsdEquivalent | null | undefined): string {
 }
 
 export function isCompensationTableMoneyField(key: string): boolean {
+  const compact = key.replace(/[_-\s]/g, "").toLowerCase();
+  if (compact === "payrate") return true;
   if (!MONEY_KEY_RE.test(key)) return false;
-  return !MONEY_KEY_EXCLUDE_RE.test(key);
+  return !MONEY_KEY_EXCLUDE_RE.test(compact);
 }
 
 export function compensationTableFieldCurrency(

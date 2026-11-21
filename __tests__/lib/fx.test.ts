@@ -6,7 +6,9 @@ import {
   convertToUsd,
   csvUsdAmount,
   fxRateMapFromRows,
+  fxRateMapOnLatestUsdDate,
   isCompensationTableMoneyField,
+  parseAmount,
   parseBocDailyRates,
   usdEquivalentAttribution,
   usdEquivalentForVisiblePay,
@@ -94,6 +96,29 @@ describe("USD conversion through CAD", () => {
     expect(convertToUsd(100, "XYZ", rates)).toBeNull();
     expect(convertToUsd("not-a-number", "CAD", rates)).toBeNull();
     expect(convertToUsd(null, "CAD", rates)).toBeNull();
+    expect(parseAmount("5%")).toBeNull();
+    expect(convertToUsd("5%", "CAD", rates)).toBeNull();
+  });
+
+  test("does not cross a stale foreign rate with a newer USD/CAD observation", () => {
+    const mixed = fxRateMapFromRows([
+      { currency: "USD", cadPerUnit: 1.4325, rateDate: "2026-11-20", source: FX_SOURCE },
+      { currency: "INR", cadPerUnit: 0.015, rateDate: "2026-04-30", source: FX_SOURCE },
+    ]);
+    expect(convertToUsd(1_000_000, "INR", mixed)).toBeNull();
+    expect(convertToUsd(143250, "CAD", mixed)?.amountUsd).toBe(100000);
+
+    const aligned = fxRateMapOnLatestUsdDate([
+      { currency: "USD", cadPerUnit: 1.4, rateDate: "2026-11-19", source: FX_SOURCE },
+      { currency: "INR", cadPerUnit: 0.015, rateDate: "2026-11-19", source: FX_SOURCE },
+      { currency: "USD", cadPerUnit: 1.4325, rateDate: "2026-11-20", source: FX_SOURCE },
+      { currency: "INR", cadPerUnit: 0.01546, rateDate: "2026-11-20", source: FX_SOURCE },
+      { currency: "VND", cadPerUnit: 0.000056, rateDate: "2019-12-31", source: FX_SOURCE },
+    ]);
+    expect(aligned.get("USD")?.rateDate).toBe("2026-11-20");
+    expect(aligned.get("INR")?.rateDate).toBe("2026-11-20");
+    expect(aligned.get("VND")).toBeUndefined();
+    expect(convertToUsd(1_000_000, "INR", aligned)?.amountUsd).toBe(10792.32);
   });
 
   test("historical rows use the latest cached rate, not a per-effective-date rate", () => {
@@ -153,8 +178,10 @@ describe("compensation table money fields and currencies in data", () => {
     expect(isCompensationTableMoneyField("customHousingAllowance")).toBe(true);
     expect(isCompensationTableMoneyField("annualBonus")).toBe(true);
     expect(isCompensationTableMoneyField("commissionAmount")).toBe(true);
+    expect(isCompensationTableMoneyField("payRate")).toBe(true);
     expect(isCompensationTableMoneyField("businessUnit")).toBe(false);
     expect(isCompensationTableMoneyField("commissionPercent")).toBe(false);
+    expect(isCompensationTableMoneyField("commissionRate")).toBe(false);
     expect(isCompensationTableMoneyField("currency")).toBe(false);
     expect(isCompensationTableMoneyField("id")).toBe(false);
   });

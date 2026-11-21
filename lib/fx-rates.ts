@@ -5,7 +5,7 @@ import {
   BOC_FX_DAILY_URL,
   FX_SOURCE,
   type FxRateMap,
-  fxRateMapFromRows,
+  fxRateMapOnLatestUsdDate,
   parseBocDailyRates,
 } from "@/lib/fx";
 
@@ -19,7 +19,7 @@ export async function getLatestFxRates(): Promise<FxRateMap> {
     })
     .from(fxDailyRates);
 
-  return fxRateMapFromRows(
+  return fxRateMapOnLatestUsdDate(
     rows.map((row) => ({
       currency: row.currency,
       cadPerUnit: Number.parseFloat(row.cadPerUnit),
