@@ -267,6 +267,13 @@ export interface BambooSyncStore {
     fieldIds: number[],
     progress?: BatchProgress
   ): Promise<number>;
+  listImportedCustomFieldDefinitions(): Promise<
+    Array<{ id: number; bambooId: string | null; name: string }>
+  >;
+  lockDownImportedCustomFields(
+    fieldIds: number[],
+    progress?: BatchProgress
+  ): Promise<number>;
   upsertAssetsBatch(
     rows: Array<{
       bambooId: string;

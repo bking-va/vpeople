@@ -178,6 +178,19 @@ export function isStandardBambooEmployeeField(alias: string): boolean {
   return STANDARD_BAMBOO_FIELD_ALIASES.has(alias);
 }
 
+export function shouldLockDownImportedCustomField(opts: {
+  bambooId?: string | null;
+  name?: string | null;
+}): boolean {
+  const alias = opts.bambooId?.trim();
+  if (!alias) return false;
+  return (
+    isForbiddenBambooField(alias, opts.name) ||
+    isStandardBambooEmployeeField(alias) ||
+    isPrivateEmailBambooField(alias, opts.name)
+  );
+}
+
 export function mapBambooCustomFieldType(
   type: string | null | undefined
 ): MappedCustomFieldWrite["fieldType"] {

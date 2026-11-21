@@ -6,10 +6,12 @@ import {
   mapDependentRow,
   mapEmployeeExtras,
   mapMetaField,
+  shouldLockDownImportedCustomField,
 } from "@/lib/bamboo-sync/map-metadata";
 import {
   fetchMetadataPayload,
   mapMetadataPayload,
+  writeMetadataPayload,
 } from "@/lib/bamboo-sync/metadata";
 import {
   BambooHrClient,
@@ -42,6 +44,12 @@ describe("Bamboo metadata mapping", () => {
     expect(isForbiddenBambooField("businessUnit")).toBe(false);
     expect(isForbiddenBambooField("customTeamName")).toBe(false);
     expect(mapMetaField({ alias: "homeEmail", name: "Home Email", type: "email" })).toBeNull();
+    expect(
+      shouldLockDownImportedCustomField({ bambooId: "homeEmail", name: "Home Email" })
+    ).toBe(true);
+    expect(
+      shouldLockDownImportedCustomField({ bambooId: "customShirtSize", name: "Shirt Size" })
+    ).toBe(false);
     expect(mapMetaField({ alias: "dateOfBirth", name: "Birth Date", type: "date" })).toBeNull();
     expect(mapMetaField({ alias: "address1", name: "Address", type: "text" })).toBeNull();
     expect(
@@ -326,6 +334,89 @@ describe("metadata custom field import", () => {
     const payload = await fetchMetadataPayload(client, () => undefined);
     expect(payload.customValueAliasesFetched).toEqual(["customShirtSize"]);
     expect(payload.customValueAliasesFetched).not.toContain("customRestrictedNote");
+  });
+
+  test("reclassifies leftover public homeEmail copies without restoring them", async () => {
+    const customFields = [
+      {
+        id: 9,
+        bambooId: "homeEmail",
+        name: "Home Email",
+        visibility: "everyone",
+      },
+      {
+        id: 10,
+        bambooId: "customShirtSize",
+        name: "Shirt Size",
+        visibility: "everyone",
+      },
+    ];
+    const customFieldValues = [
+      { customFieldId: 9, entityId: 1, value: "pat@gmail.com" },
+      { customFieldId: 10, entityId: 1, value: "M" },
+    ];
+    const store = {
+      async updateEmployeeExtrasBatch() {
+        return 0;
+      },
+      async listImportedCustomFieldDefinitions() {
+        return customFields.map((row) => ({
+          id: row.id,
+          bambooId: row.bambooId,
+          name: row.name,
+        }));
+      },
+      async lockDownImportedCustomFields(fieldIds: number[]) {
+        const ids = new Set(fieldIds);
+        for (const field of customFields) {
+          if (ids.has(field.id)) field.visibility = "hr_only";
+        }
+        const next = customFieldValues.filter((row) => !ids.has(row.customFieldId));
+        customFieldValues.length = 0;
+        customFieldValues.push(...next);
+        return fieldIds.length;
+      },
+      async upsertCustomFieldsBatch() {
+        return new Map<string, number>();
+      },
+      async upsertCustomFieldValuesBatch() {
+        return 0;
+      },
+      async pruneImportedCustomFieldValues() {
+        return 0;
+      },
+      async upsertAssetsBatch() {
+        return 0;
+      },
+      async upsertDependentsBatch() {
+        return 0;
+      },
+      async pruneImportedRowsNotIn() {
+        return 0;
+      },
+    };
+
+    await writeMetadataPayload(
+      store as never,
+      {
+        metaFields: [],
+        employeeExtras: [],
+        customValues: [],
+        customValueAliasesFetched: [],
+        assets: {},
+        dependents: {},
+        assetsFetched: false,
+        dependentsFetched: false,
+      },
+      new Map(),
+      "full",
+      () => ({}),
+      () => undefined
+    );
+
+    expect(customFields[0].visibility).toBe("hr_only");
+    expect(customFields[1].visibility).toBe("everyone");
+    expect(customFieldValues).toEqual([{ customFieldId: 10, entityId: 1, value: "M" }]);
   });
 });
 

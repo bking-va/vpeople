@@ -267,4 +267,67 @@ describe("BambooHR metadata batched writes (Real Postgres)", () => {
 
     await db.delete(customFields).where(eq(customFields.id, noteId!));
   });
+
+  test("lockdown reclassifies leftover public homeEmail copies", async () => {
+    const store = createBambooSyncStore(db);
+    const [owner] = await db
+      .insert(employees)
+      .values({
+        employeeNumber: `MTHE_${runId}`,
+        bambooId: `META_HOME_${runId}`,
+        firstName: "Home",
+        lastName: "Email",
+        email: `meta.home.${runId}@vendasta.com`,
+        hireDate: "2020-01-15",
+        originalHireDate: "2020-01-15",
+        employmentStatus: "full_time",
+        accessLevel: "employee",
+      })
+      .returning();
+    const created = await store.upsertCustomFieldsBatch(
+      [
+        {
+          bambooId: "homeEmail",
+          name: "Home Email",
+          fieldType: "text",
+          entityType: "employee",
+          section: "personal",
+          options: null,
+          isRequired: false,
+          orderIndex: 1,
+          visibility: "everyone",
+        },
+      ],
+      { chunkSize: 50 }
+    );
+    const homeEmailId = created.get("homeEmail");
+    expect(homeEmailId).toBeDefined();
+    await db
+      .update(customFields)
+      .set({ visibility: "everyone" })
+      .where(eq(customFields.id, homeEmailId!));
+    await store.upsertCustomFieldValuesBatch(
+      [{ customFieldId: homeEmailId!, entityId: owner.id, value: "pat@gmail.com" }],
+      { chunkSize: 50 }
+    );
+
+    const listed = await store.listImportedCustomFieldDefinitions();
+    expect(listed.some((row) => row.bambooId === "homeEmail")).toBe(true);
+    await store.lockDownImportedCustomFields([homeEmailId!], { chunkSize: 50 });
+
+    const [locked] = await db
+      .select({ visibility: customFields.visibility })
+      .from(customFields)
+      .where(eq(customFields.id, homeEmailId!));
+    expect(locked.visibility).toBe("hr_only");
+    expect(
+      await db
+        .select()
+        .from(customFieldValues)
+        .where(eq(customFieldValues.customFieldId, homeEmailId!))
+    ).toHaveLength(0);
+
+    await db.delete(customFields).where(eq(customFields.id, homeEmailId!));
+    await db.delete(employees).where(eq(employees.id, owner.id));
+  });
 });

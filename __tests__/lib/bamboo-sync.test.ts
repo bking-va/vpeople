@@ -999,6 +999,32 @@ class MemoryStore implements BambooSyncStore {
     return rows.length;
   }
 
+  async listImportedCustomFieldDefinitions() {
+    return this.customFields
+      .filter((row) => row.bambooId)
+      .map((row) => ({
+        id: Number(row.id),
+        bambooId: String(row.bambooId),
+        name: String(row.name ?? ""),
+      }));
+  }
+
+  async lockDownImportedCustomFields(
+    fieldIds: number[],
+    progress?: { onProgress?: (done: number, total: number) => void }
+  ): Promise<number> {
+    const ids = new Set(fieldIds);
+    for (const field of this.customFields) {
+      if (ids.has(Number(field.id))) field.visibility = "hr_only";
+    }
+    this.customFieldValues = this.customFieldValues.filter(
+      (row) => !ids.has(Number(row.customFieldId))
+    );
+    progress?.onProgress?.(fieldIds.length, fieldIds.length);
+    if (fieldIds.length > 0) this.writes += 1;
+    return fieldIds.length;
+  }
+
   async pruneImportedCustomFieldValues(
     keep: Array<{ customFieldId: number; entityId: number }>,
     fieldIds: number[],

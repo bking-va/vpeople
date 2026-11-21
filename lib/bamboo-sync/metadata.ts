@@ -6,6 +6,7 @@ import {
   mapDependentRow,
   mapEmployeeExtras,
   mapMetaField,
+  shouldLockDownImportedCustomField,
   type MappedAssetWrite,
   type MappedCustomFieldValueWrite,
   type MappedCustomFieldWrite,
@@ -243,6 +244,18 @@ export async function writeMetadataPayload(
     mapped.extras.filter((row) => idByBambooId.has(row.bambooId)),
     progress("employee extras")
   );
+
+  log("Phase write: lock down leftover private custom fields");
+  const existingFields = await store.listImportedCustomFieldDefinitions();
+  const lockDownIds = existingFields
+    .filter((row) => shouldLockDownImportedCustomField(row))
+    .map((row) => row.id);
+  if (lockDownIds.length > 0) {
+    await store.lockDownImportedCustomFields(
+      lockDownIds,
+      progress("lock down custom_fields")
+    );
+  }
 
   log("Phase write: custom fields");
   const fieldIds = await store.upsertCustomFieldsBatch(

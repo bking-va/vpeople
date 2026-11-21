@@ -1401,6 +1401,37 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
       return rows.length;
     },
 
+    async listImportedCustomFieldDefinitions() {
+      const rows: Array<{ id: number; bambooId: string | null; name: string }> = await db
+        .select({
+          id: customFields.id,
+          bambooId: customFields.bambooId,
+          name: customFields.name,
+        })
+        .from(customFields)
+        .where(isNotNull(customFields.bambooId));
+      return rows;
+    },
+
+    async lockDownImportedCustomFields(fieldIds, progress) {
+      const ids = fieldIds.filter((id) => Number.isInteger(id) && id > 0);
+      if (ids.length === 0) return 0;
+      const size = chunkSizeOf(progress);
+      let done = 0;
+      for (const chunk of chunkRows(ids, size)) {
+        await db
+          .update(customFields)
+          .set({ visibility: "hr_only", updatedAt: new Date() })
+          .where(inArray(customFields.id, chunk));
+        await db
+          .delete(customFieldValues)
+          .where(inArray(customFieldValues.customFieldId, chunk));
+        done += chunk.length;
+        reportChunkProgress(progress, done, ids.length);
+      }
+      return ids.length;
+    },
+
     async pruneImportedCustomFieldValues(keep, fieldIds, progress) {
       const ids = fieldIds.filter((id) => Number.isInteger(id) && id > 0);
       if (ids.length === 0) return 0;
