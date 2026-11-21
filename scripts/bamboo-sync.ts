@@ -100,6 +100,11 @@ async function main() {
         ["1", "true", "yes"].includes(
           (process.env.BAMBOO_SYNC_METADATA || "").trim().toLowerCase()
         ),
+      importCompensationTables:
+        args.compTables ||
+        ["1", "true", "yes"].includes(
+          (process.env.BAMBOO_SYNC_COMP_TABLES || "").trim().toLowerCase()
+        ),
       log: (message) => {
         console.log(message);
       },

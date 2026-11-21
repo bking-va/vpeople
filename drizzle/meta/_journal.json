@@ -253,6 +253,13 @@
       "when": 1795111888676,
       "tag": "0035_bamboo_sync_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795112337845,
+      "tag": "0036_bamboo_sync_comp_tables",
+      "breakpoints": true
     }
   ]
 }

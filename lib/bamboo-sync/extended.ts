@@ -346,6 +346,7 @@ export async function writeExtendedPayload(
     customFields: 0,
     customFieldValues: 0,
     employeeExtras: 0,
+    compensationTableRows: 0,
   };
 }
 
