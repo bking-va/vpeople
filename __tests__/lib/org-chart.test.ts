@@ -2,9 +2,12 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   buildOrgChart,
+  countDownlines,
   employeeDisplayName,
+  formatDownlineSummary,
   isCeoJobTitle,
   isCurrentEmploymentStatus,
+  type DownlineCounts,
   type OrgChartEmployee,
   type OrgChartNode,
 } from "@/lib/org-chart";
@@ -47,6 +50,23 @@ function isAcyclic(nodes: OrgChartNode[], ancestors = new Set<number>()): boolea
     if (!isAcyclic(node.children, next)) return false;
   }
   return true;
+}
+
+function countsOf(
+  node: OrgChartNode | null | undefined
+): Pick<OrgChartNode, "directReportCount" | "totalDownlineCount"> | undefined {
+  if (!node) return undefined;
+  return {
+    directReportCount: node.directReportCount,
+    totalDownlineCount: node.totalDownlineCount,
+  };
+}
+
+function mapCounts(
+  people: OrgChartEmployee[],
+  id: number
+): DownlineCounts | undefined {
+  return countDownlines(people).get(id);
 }
 
 describe("isCurrentEmploymentStatus", () => {
@@ -456,5 +476,249 @@ describe("buildOrgChart", () => {
     expect(unmanagedIds.has(541)).toBe(true);
     expect(unmanagedIds.has(900)).toBe(false);
     expect(ids(forest.ceo).some((id) => id >= 501 && id <= 520)).toBe(false);
+    expect(countsOf(forest.ceo)).toEqual({
+      directReportCount: 10,
+      totalDownlineCount: 499,
+    });
+    expect(mapCounts(people, 1)).toEqual({
+      directReports: 10,
+      totalDownline: 499,
+    });
+    expect(mapCounts(people, 531)).toEqual({
+      directReports: 0,
+      totalDownline: 0,
+    });
+  });
+});
+
+describe("formatDownlineSummary", () => {
+  it("shows both counts for managers and nothing for leaves", () => {
+    expect(
+      formatDownlineSummary({ directReports: 6, totalDownline: 142 })
+    ).toBe("6 directs · 142 total");
+    expect(
+      formatDownlineSummary({ directReports: 1, totalDownline: 1 })
+    ).toBe("1 direct · 1 total");
+    expect(
+      formatDownlineSummary({ directReports: 0, totalDownline: 0 })
+    ).toBeNull();
+  });
+});
+
+describe("countDownlines", () => {
+  it("counts directs and the full current-employee downline", () => {
+    const people = [
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+      }),
+      emp({ id: 2, lastName: "Vp", managerId: 1 }),
+      emp({ id: 3, lastName: "Dir", managerId: 2 }),
+      emp({ id: 4, lastName: "IcA", managerId: 3 }),
+      emp({ id: 5, lastName: "IcB", managerId: 3 }),
+    ];
+
+    const forest = buildOrgChart(people);
+    expect(countsOf(forest.ceo)).toEqual({
+      directReportCount: 1,
+      totalDownlineCount: 4,
+    });
+    expect(countsOf(byId(forest.ceo, 2))).toEqual({
+      directReportCount: 1,
+      totalDownlineCount: 3,
+    });
+    expect(countsOf(byId(forest.ceo, 3))).toEqual({
+      directReportCount: 2,
+      totalDownlineCount: 2,
+    });
+    expect(countsOf(byId(forest.ceo, 4))).toEqual({
+      directReportCount: 0,
+      totalDownlineCount: 0,
+    });
+
+    const counts = countDownlines(people);
+    expect(counts.get(1)).toEqual({ directReports: 1, totalDownline: 4 });
+    expect(counts.get(2)).toEqual({ directReports: 1, totalDownline: 3 });
+    expect(counts.get(3)).toEqual({ directReports: 2, totalDownline: 2 });
+    expect(counts.get(4)).toEqual({ directReports: 0, totalDownline: 0 });
+    expect(counts.get(5)).toEqual({ directReports: 0, totalDownline: 0 });
+  });
+
+  it("excludes terminated employees from both counts", () => {
+    const people = [
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+      }),
+      emp({ id: 2, lastName: "Current", managerId: 1 }),
+      emp({
+        id: 3,
+        lastName: "Alumni",
+        managerId: 1,
+        employmentStatus: "terminated",
+      }),
+      emp({
+        id: 4,
+        lastName: "AlumniReport",
+        managerId: 3,
+      }),
+    ];
+
+    const counts = countDownlines(people);
+    expect(counts.has(3)).toBe(false);
+    expect(counts.get(1)).toEqual({ directReports: 1, totalDownline: 1 });
+    expect(counts.get(4)).toEqual({ directReports: 0, totalDownline: 0 });
+    expect(countsOf(buildOrgChart(people).ceo)).toEqual({
+      directReportCount: 1,
+      totalDownlineCount: 1,
+    });
+  });
+
+  it("does not count people whose manager is missing or former under that manager", () => {
+    const people = [
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+      }),
+      emp({
+        id: 9,
+        lastName: "FormerMgr",
+        employmentStatus: "terminated",
+      }),
+      emp({ id: 4, lastName: "OrphanLead", managerId: 9 }),
+      emp({ id: 5, lastName: "OrphanReport", managerId: 4 }),
+      emp({ id: 8, lastName: "Floater", managerId: null }),
+    ];
+
+    const forest = buildOrgChart(people);
+    const counts = countDownlines(people);
+
+    expect(counts.has(9)).toBe(false);
+    expect(counts.get(1)).toEqual({ directReports: 0, totalDownline: 0 });
+    expect(counts.get(4)).toEqual({ directReports: 1, totalDownline: 1 });
+    expect(counts.get(5)).toEqual({ directReports: 0, totalDownline: 0 });
+    expect(counts.get(8)).toEqual({ directReports: 0, totalDownline: 0 });
+    expect(countsOf(forest.unmanaged.find((n) => n.id === 4))).toEqual({
+      directReportCount: 1,
+      totalDownlineCount: 1,
+    });
+    expect(countsOf(forest.unmanaged.find((n) => n.id === 8))).toEqual({
+      directReportCount: 0,
+      totalDownlineCount: 0,
+    });
+  });
+
+  it("returns finite counts when the manager graph contains a cycle", () => {
+    const people = [
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+      }),
+      emp({ id: 2, lastName: "A", managerId: 3 }),
+      emp({ id: 3, lastName: "B", managerId: 4 }),
+      emp({ id: 4, lastName: "C", managerId: 2 }),
+    ];
+
+    const counts = countDownlines(people);
+    const forest = buildOrgChart(people);
+
+    expect(counts.get(1)).toEqual({ directReports: 0, totalDownline: 0 });
+    const cycleTotals = [2, 3, 4].map((id) => counts.get(id)!);
+    for (const c of cycleTotals) {
+      expect(c.directReports).toBeGreaterThanOrEqual(0);
+      expect(c.totalDownline).toBeGreaterThanOrEqual(c.directReports);
+      expect(c.totalDownline).toBeLessThanOrEqual(2);
+    }
+    expect(cycleTotals.reduce((sum, c) => sum + c.totalDownline, 0)).toBeGreaterThan(0);
+    expect(
+      forest.unmanaged.every(
+        (n) =>
+          n.directReportCount === counts.get(n.id)?.directReports &&
+          n.totalDownlineCount === counts.get(n.id)?.totalDownline
+      )
+    ).toBe(true);
+    expect(isAcyclic(forest.unmanaged)).toBe(true);
+  });
+
+  it("treats a self-cycle as a leaf", () => {
+    const people = [
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+      }),
+      emp({ id: 6, lastName: "Loop", managerId: 6 }),
+    ];
+
+    expect(countDownlines(people).get(6)).toEqual({
+      directReports: 0,
+      totalDownline: 0,
+    });
+    expect(countsOf(buildOrgChart(people).unmanaged[0])).toEqual({
+      directReportCount: 0,
+      totalDownlineCount: 0,
+    });
+  });
+
+  it("keeps CEO downline intact when the CEO record is in a reporting cycle", () => {
+    const people = [
+      emp({
+        id: 1,
+        jobTitle: "Chief Executive Officer",
+        lastName: "Chief",
+        managerId: 3,
+      }),
+      emp({ id: 2, lastName: "Vp", managerId: 1 }),
+      emp({ id: 3, lastName: "Dir", managerId: 2 }),
+    ];
+
+    expect(countDownlines(people).get(1)).toEqual({
+      directReports: 1,
+      totalDownline: 2,
+    });
+    expect(countsOf(buildOrgChart(people).ceo)).toEqual({
+      directReportCount: 1,
+      totalDownlineCount: 2,
+    });
+  });
+
+  it("does not require names or emails — profile counting can omit PII", () => {
+    const counts = countDownlines([
+      {
+        id: 1,
+        jobTitle: "CEO",
+        managerId: null,
+        employmentStatus: "full_time",
+      },
+      {
+        id: 2,
+        jobTitle: "VP",
+        managerId: 1,
+        employmentStatus: "full_time",
+      },
+    ]);
+    expect(counts.get(1)).toEqual({ directReports: 1, totalDownline: 1 });
+  });
+
+  it("counts from the profile page's manager graph helper, not a raw unfiltered query", () => {
+    const src = readFileSync(
+      join(__dirname, "../../app/(dashboard)/people/[id]/page.tsx"),
+      "utf8"
+    );
+    expect(src).toMatch(/countDownlines\(/);
+    expect(src).not.toMatch(/directReports\.length/);
+    const graphSelect = src.slice(
+      src.indexOf("const reportingGraph"),
+      src.indexOf("countDownlines(reportingGraph)")
+    );
+    expect(graphSelect).toMatch(/employees\.id/);
+    expect(graphSelect).toMatch(/employees\.managerId/);
+    expect(graphSelect).toMatch(/employees\.employmentStatus/);
+    expect(graphSelect).not.toMatch(/employees\.email/);
+    expect(graphSelect).not.toMatch(/employees\.firstName/);
   });
 });
