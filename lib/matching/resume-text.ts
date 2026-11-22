@@ -143,6 +143,7 @@ export function extractPdfStringsFallback(bytes: Uint8Array): string {
 }
 
 export function extractDocxText(bytes: Uint8Array): string {
+  const started = Date.now();
   try {
     const xmlBytes = extractBoundedZipEntry(bytes, DOCX_DOCUMENT_ENTRY, {
       maxEntries: MAX_DOCX_ENTRIES,
@@ -150,7 +151,8 @@ export function extractDocxText(bytes: Uint8Array): string {
       maxMs: MAX_DOCX_PARSE_MS,
     });
     if (!xmlBytes) return "";
-    return xmlToResumeText(Buffer.from(xmlBytes).toString("utf8"));
+    const remaining = Math.max(1, MAX_DOCX_PARSE_MS - (Date.now() - started));
+    return xmlToResumeText(Buffer.from(xmlBytes).toString("utf8"), remaining);
   } catch {
     return "";
   }
@@ -233,22 +235,112 @@ export function extractBoundedZipEntry(
   return null;
 }
 
-/** Keep paragraph breaks so labeled protected attributes stay on their own lines. */
-export function xmlToResumeText(xml: string): string {
-  return xml
-    .replace(/<w:tab[^/]*\/>/g, "\t")
-    .replace(/<w:br[^/]*\/?>/g, "\n")
-    .replace(/<w:p[^>]*>/g, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+/**
+ * Linear-time DOCX XML → text. Tags are walked with indexOf, never with
+ * unbounded `[^/]*` replacements that can go quadratic on untrusted XML.
+ * Paragraph/break tags become newlines so labeled protected attributes stay
+ * on their own lines for stripping.
+ */
+export function xmlToResumeText(xml: string, maxMs = MAX_DOCX_PARSE_MS): string {
+  const started = Date.now();
+  const parts: string[] = [];
+  const n = xml.length;
+  let i = 0;
+  while (i < n) {
+    if ((i & 8191) === 0 && Date.now() - started > maxMs) {
+      throw new Error("xml parse timeout");
+    }
+    if (xml.charCodeAt(i) !== 60 /* < */) {
+      const lt = xml.indexOf("<", i);
+      const end = lt < 0 ? n : lt;
+      parts.push(xml.slice(i, end));
+      i = end;
+      continue;
+    }
+    const gt = xml.indexOf(">", i + 1);
+    if (gt < 0) break;
+    let nameStart = i + 1;
+    if (xml.charCodeAt(nameStart) === 47 /* / */) nameStart += 1;
+    let nameEnd = nameStart;
+    while (nameEnd < gt) {
+      const ch = xml.charCodeAt(nameEnd);
+      if (ch === 32 || ch === 9 || ch === 10 || ch === 13 || ch === 47) break;
+      nameEnd += 1;
+    }
+    const name = xml.slice(nameStart, nameEnd);
+    if (name === "w:p" || name === "w:br") parts.push("\n");
+    else if (name === "w:tab") parts.push("\t");
+    else parts.push(" ");
+    i = gt + 1;
+  }
+  return squeezeResumeWhitespace(decodeXmlEntities(parts.join("")));
+}
+
+function decodeXmlEntities(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text.charCodeAt(i) !== 38 /* & */) {
+      const amp = text.indexOf("&", i);
+      if (amp < 0) {
+        out += text.slice(i);
+        break;
+      }
+      out += text.slice(i, amp);
+      i = amp;
+      continue;
+    }
+    if (text.startsWith("&amp;", i)) {
+      out += "&";
+      i += 5;
+    } else if (text.startsWith("&lt;", i)) {
+      out += "<";
+      i += 4;
+    } else if (text.startsWith("&gt;", i)) {
+      out += ">";
+      i += 4;
+    } else if (text.startsWith("&quot;", i)) {
+      out += '"';
+      i += 6;
+    } else if (text.startsWith("&apos;", i)) {
+      out += "'";
+      i += 6;
+    } else {
+      out += "&";
+      i += 1;
+    }
+  }
+  return out;
+}
+
+function squeezeResumeWhitespace(text: string): string {
+  let out = "";
+  let newlineRun = 0;
+  let pendingSpace = false;
+  let atLineStart = true;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    if (ch === 10) {
+      newlineRun += 1;
+      pendingSpace = false;
+      atLineStart = true;
+      if (newlineRun <= 2) out += "\n";
+      continue;
+    }
+    newlineRun = 0;
+    if (ch === 13) continue;
+    if (ch === 32 || ch === 9) {
+      pendingSpace = out.length > 0 && !atLineStart;
+      continue;
+    }
+    if (pendingSpace) {
+      out += " ";
+      pendingSpace = false;
+    }
+    out += text[i];
+    atLineStart = false;
+  }
+  return out.trim();
 }
 
 function findEocd(data: Uint8Array): number {

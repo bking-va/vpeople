@@ -7,6 +7,7 @@ import {
   MAX_DOCX_ENTRIES,
   MAX_DOCX_ENTRY_BYTES,
   MAX_DOCX_PARSE_MS,
+  xmlToResumeText,
 } from "@/lib/matching/resume-text";
 
 function docxXml(paragraphs: string[]): Buffer {
@@ -102,9 +103,18 @@ describe("bounded DOCX extraction", () => {
     expect(stripped).not.toMatch(/Gender/i);
   });
 
+  test("converts unclosed tab tags in linear time", () => {
+    const xml = `${"<w:tab ".repeat(12_000)}${"x".repeat(2_000)}`;
+    const started = Date.now();
+    const text = xmlToResumeText(xml);
+    expect(Date.now() - started).toBeLessThan(250);
+    expect(text.length).toBeLessThan(xml.length);
+  });
+
   test("does not call whole-archive unzipSync", () => {
     const src = readFileSync("lib/matching/resume-text.ts", "utf8");
     expect(src).not.toMatch(/unzipSync/);
+    expect(src).not.toMatch(/\[\^\/\]\*/);
     expect(src).toMatch(/extractBoundedZipEntry/);
   });
 
