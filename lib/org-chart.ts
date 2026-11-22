@@ -1,15 +1,19 @@
 /** CEO plus direct reports; deeper levels stay collapsed until expanded. */
 export const ORG_CHART_DEFAULT_EXPANDED_DEPTH = 1;
 
-export type OrgChartEmployee = {
+/** Fields needed to resolve the manager graph and count downlines. */
+export type OrgChartPerson = {
   id: number;
+  jobTitle: string | null;
+  managerId: number | null;
+  employmentStatus: string;
+};
+
+export type OrgChartEmployee = OrgChartPerson & {
   firstName: string;
   lastName: string;
   preferredName: string | null;
-  jobTitle: string | null;
   email: string;
-  managerId: number | null;
-  employmentStatus: string;
 };
 
 export type OrgChartOrphanReason =
@@ -17,12 +21,19 @@ export type OrgChartOrphanReason =
   | "manager_not_current"
   | "cycle";
 
+export type DownlineCounts = {
+  directReports: number;
+  totalDownline: number;
+};
+
 export type OrgChartNode = {
   id: number;
   name: string;
   jobTitle: string | null;
   email: string;
   orphanReason: OrgChartOrphanReason | null;
+  directReportCount: number;
+  totalDownlineCount: number;
   children: OrgChartNode[];
 };
 
@@ -74,6 +85,30 @@ export function orphanReasonLabel(reason: OrgChartOrphanReason): string {
   }
 }
 
+export function formatDownlineSummary(counts: DownlineCounts): string | null {
+  if (counts.directReports === 0 && counts.totalDownline === 0) return null;
+  const directs =
+    counts.directReports === 1
+      ? "1 direct"
+      : `${counts.directReports} directs`;
+  return `${directs} · ${counts.totalDownline} total`;
+}
+
+/**
+ * Direct reports and recursive current-employee downline for each person.
+ *
+ * Uses the same manager graph as the org chart: current employees only,
+ * missing/former managers become roots, and cycles are broken with the
+ * existing cycle detection before counting.
+ */
+export function countDownlines(people: OrgChartPerson[]): Map<number, DownlineCounts> {
+  const { current, parentOf } = resolveReportingGraph(people);
+  return downlineCountsFromParentOf(
+    current.map((person) => person.id),
+    parentOf
+  );
+}
+
 /**
  * Build a current-employee org chart with the CEO as the single apex.
  *
@@ -84,6 +119,58 @@ export function orphanReasonLabel(reason: OrgChartOrphanReason): string {
  * fabricated manager.
  */
 export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
+  const { current, parentOf, linkReason, ceoId } =
+    resolveReportingGraph(employees);
+  const byId = new Map(current.map((emp) => [emp.id, emp]));
+  const forestChildren = adjacency(parentOf);
+  const counts = downlineCountsFromParentOf(
+    current.map((emp) => emp.id),
+    parentOf
+  );
+
+  const ceo =
+    ceoId == null
+      ? null
+      : toNode(
+          ceoId,
+          byId,
+          forestChildren,
+          linkReason,
+          counts,
+          /* unmanaged */ false
+        );
+
+  const inCeoTree = new Set<number>();
+  if (ceo) collectIds(ceo, inCeoTree);
+
+  const unmanagedRoots = current
+    .filter((emp) => !inCeoTree.has(emp.id) && parentOf.get(emp.id) == null)
+    .sort(compareEmployees)
+    .map((emp) =>
+      toNode(
+        emp.id,
+        byId,
+        forestChildren,
+        linkReason,
+        counts,
+        /* unmanaged */ true
+      )
+    );
+
+  return {
+    ceo,
+    unmanaged: unmanagedRoots,
+    currentCount: current.length,
+    unmanagedCount: current.length - inCeoTree.size,
+  };
+}
+
+function resolveReportingGraph<T extends OrgChartPerson>(employees: T[]): {
+  current: T[];
+  parentOf: Map<number, number | null>;
+  linkReason: Map<number, OrgChartOrphanReason | null>;
+  ceoId: number | null;
+} {
   const current = employees.filter((emp) =>
     isCurrentEmploymentStatus(emp.employmentStatus)
   );
@@ -111,39 +198,17 @@ export function buildOrgChart(employees: OrgChartEmployee[]): OrgChartForest {
     }
   }
 
-  const childrenByParent = adjacency(parentOf);
   if (ceoId == null) {
-    ceoId = pickLargestRoot(current, parentOf, childrenByParent);
+    ceoId = pickLargestRoot(current, parentOf, adjacency(parentOf));
     if (ceoId != null) parentOf.set(ceoId, null);
   }
 
-  const forestChildren = adjacency(parentOf);
-  const ceo =
-    ceoId == null
-      ? null
-      : toNode(ceoId, byId, forestChildren, linkReason, /* unmanaged */ false);
-
-  const inCeoTree = new Set<number>();
-  if (ceo) collectIds(ceo, inCeoTree);
-
-  const unmanagedRoots = current
-    .filter((emp) => !inCeoTree.has(emp.id) && parentOf.get(emp.id) == null)
-    .sort(compareEmployees)
-    .map((emp) =>
-      toNode(emp.id, byId, forestChildren, linkReason, /* unmanaged */ true)
-    );
-
-  return {
-    ceo,
-    unmanaged: unmanagedRoots,
-    currentCount: current.length,
-    unmanagedCount: current.length - inCeoTree.size,
-  };
+  return { current, parentOf, linkReason, ceoId };
 }
 
 function classifyManagerLink(
-  emp: OrgChartEmployee,
-  currentById: Map<number, OrgChartEmployee>
+  emp: OrgChartPerson,
+  currentById: Map<number, OrgChartPerson>
 ): { parentId: number | null; reason: OrgChartOrphanReason | null } {
   if (emp.managerId == null) {
     return { parentId: null, reason: "no_manager" };
@@ -193,6 +258,38 @@ function adjacency(parentOf: Map<number, number | null>): Map<number, number[]> 
   return children;
 }
 
+function downlineCountsFromParentOf(
+  ids: number[],
+  parentOf: Map<number, number | null>
+): Map<number, DownlineCounts> {
+  const childrenByParent = adjacency(parentOf);
+  const memo = new Map<number, number>();
+  const visiting = new Set<number>();
+
+  function totalDownline(id: number): number {
+    const cached = memo.get(id);
+    if (cached != null) return cached;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    let total = 0;
+    for (const child of childrenByParent.get(id) ?? []) {
+      total += 1 + totalDownline(child);
+    }
+    visiting.delete(id);
+    memo.set(id, total);
+    return total;
+  }
+
+  const counts = new Map<number, DownlineCounts>();
+  for (const id of ids) {
+    counts.set(id, {
+      directReports: (childrenByParent.get(id) ?? []).length,
+      totalDownline: totalDownline(id),
+    });
+  }
+  return counts;
+}
+
 function ceoTitleRank(jobTitle: string | null | undefined): number {
   if (!jobTitle) return 0;
   const normalized = jobTitle.toLowerCase().replace(/[^a-z]+/g, " ").trim();
@@ -216,7 +313,7 @@ function reportsTo(
 }
 
 function pickTitledCeo(
-  titled: OrgChartEmployee[],
+  titled: OrgChartPerson[],
   parentOf: Map<number, number | null>,
   childrenByParent: Map<number, number[]>
 ): number {
@@ -249,7 +346,7 @@ function pickTitledCeo(
 }
 
 function pickLargestRoot(
-  current: OrgChartEmployee[],
+  current: OrgChartPerson[],
   parentOf: Map<number, number | null>,
   childrenByParent: Map<number, number[]>
 ): number | null {
@@ -286,20 +383,24 @@ function toNode(
   byId: Map<number, OrgChartEmployee>,
   childrenByParent: Map<number, number[]>,
   linkReason: Map<number, OrgChartOrphanReason | null>,
+  counts: Map<number, DownlineCounts>,
   unmanaged: boolean
 ): OrgChartNode {
   const emp = byId.get(id)!;
   const childIds = [...(childrenByParent.get(id) ?? [])].sort((a, b) =>
     compareEmployees(byId.get(a)!, byId.get(b)!)
   );
+  const downline = counts.get(id) ?? { directReports: 0, totalDownline: 0 };
   return {
     id: emp.id,
     name: employeeDisplayName(emp),
     jobTitle: emp.jobTitle,
     email: emp.email,
     orphanReason: unmanaged ? linkReason.get(id) ?? "no_manager" : null,
+    directReportCount: downline.directReports,
+    totalDownlineCount: downline.totalDownline,
     children: childIds.map((childId) =>
-      toNode(childId, byId, childrenByParent, linkReason, false)
+      toNode(childId, byId, childrenByParent, linkReason, counts, false)
     ),
   };
 }

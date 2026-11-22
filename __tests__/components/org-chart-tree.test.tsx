@@ -59,8 +59,13 @@ describe("OrgChartTree", () => {
     expect(screen.getByText("Vice President")).toBeInTheDocument();
     expect(screen.queryByText("Deep Report")).not.toBeInTheDocument();
 
+    expect(screen.getByText("1 direct · 2 total")).toBeInTheDocument();
+    expect(screen.getByText("1 direct · 1 total")).toBeInTheDocument();
+    expect(screen.queryByText("0 directs · 0 total")).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /expand vice president/i }));
     expect(screen.getByText("Deep Report")).toBeInTheDocument();
+    expect(screen.queryByText("0 directs · 0 total")).not.toBeInTheDocument();
   });
 
   it("labels people whose chain does not reach the CEO", () => {
@@ -85,5 +90,44 @@ describe("OrgChartTree", () => {
     expect(screen.getByRole("heading", { name: "No manager in vPeople" })).toBeInTheDocument();
     expect(screen.getByText("No Manager")).toBeInTheDocument();
     expect(screen.getByText("No manager")).toBeInTheDocument();
+    expect(screen.queryByText("0 directs · 0 total")).not.toBeInTheDocument();
+  });
+
+  it("shows downline counts on collapsed cards", () => {
+    const forest = buildOrgChart([
+      emp({
+        id: 1,
+        firstName: "Apex",
+        lastName: "Leader",
+        jobTitle: "Chief Executive Officer",
+      }),
+      emp({
+        id: 2,
+        firstName: "Vice",
+        lastName: "President",
+        jobTitle: "VP",
+        managerId: 1,
+      }),
+      emp({
+        id: 3,
+        firstName: "Mid",
+        lastName: "Manager",
+        jobTitle: "Director",
+        managerId: 2,
+      }),
+      emp({
+        id: 4,
+        firstName: "Deep",
+        lastName: "Report",
+        jobTitle: "IC",
+        managerId: 3,
+      }),
+    ]);
+
+    render(<OrgChartTree forest={forest} />);
+
+    expect(screen.queryByText("Mid Manager")).not.toBeInTheDocument();
+    expect(screen.getByText("1 direct · 3 total")).toBeInTheDocument();
+    expect(screen.getByText("1 direct · 2 total")).toBeInTheDocument();
   });
 });

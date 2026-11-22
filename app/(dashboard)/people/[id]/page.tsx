@@ -28,7 +28,7 @@ import {
   employeeCompensationTableRows,
   employeeDependents,
 } from "@/lib/db/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, not } from "drizzle-orm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,7 @@ import {
   visibleProfileEmail,
 } from "@/lib/authz";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
+import { countDownlines } from "@/lib/org-chart";
 import { canManageAccessScopes } from "@/lib/access-scopes";
 import { latestRequestsByDocumentIds } from "@/lib/signature-requests";
 import { isVsignConfigured } from "@/lib/vsign/client";
@@ -204,17 +205,19 @@ export default async function EmployeeProfilePage({
       : Promise.resolve([null]),
   ]);
 
-  const directReports = await db
+  const reportingGraph = await db
     .select({
       id: employees.id,
-      firstName: employees.firstName,
-      lastName: employees.lastName,
-      preferredName: employees.preferredName,
-      email: employees.email,
       jobTitle: employees.jobTitle,
+      managerId: employees.managerId,
+      employmentStatus: employees.employmentStatus,
     })
     .from(employees)
-    .where(eq(employees.managerId, employeeId));
+    .where(not(eq(employees.employmentStatus, "terminated")));
+  const downline = countDownlines(reportingGraph).get(employeeId) ?? {
+    directReports: 0,
+    totalDownline: 0,
+  };
 
   const jobHistoryRecords = await db
     .select()
@@ -531,16 +534,20 @@ export default async function EmployeeProfilePage({
               )}
             </div>
             <div>
+              <p className="text-muted-foreground">Direct Reports</p>
+              <p className="font-medium">{downline.directReports}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Total Downline</p>
+              <p className="font-medium">{downline.totalDownline}</p>
+            </div>
+            <div>
               <p className="text-muted-foreground">Hire Date</p>
               <p className="font-medium">{formatDate(employee.hireDate)}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Tenure</p>
               <p className="font-medium">{calculateTenure(employee.hireDate)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Direct Reports</p>
-              <p className="font-medium">{directReports.length}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Email</p>

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   ORG_CHART_DEFAULT_EXPANDED_DEPTH,
+  formatDownlineSummary,
   orphanReasonLabel,
   type OrgChartForest,
   type OrgChartNode,
@@ -140,6 +141,10 @@ function OrgNode({
 }) {
   const hasChildren = node.children.length > 0;
   const isOpen = hasChildren && expanded.has(node.id);
+  const downlineSummary = formatDownlineSummary({
+    directReports: node.directReportCount,
+    totalDownline: node.totalDownlineCount,
+  });
 
   return (
     <div className="relative">
@@ -173,29 +178,27 @@ function OrgNode({
         <Link href={`/people/${node.id}`} className="min-w-0 flex-1 max-w-lg">
           <Card className="transition-shadow hover:shadow-md">
             <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-semibold">{node.name}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {node.jobTitle || "No title"}
+              <div className="min-w-0">
+                <h3 className="font-semibold">{node.name}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {node.jobTitle || "No title"}
+                </p>
+                {downlineSummary ? (
+                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <Users className="h-3 w-3 shrink-0" />
+                    {downlineSummary}
                   </p>
-                  {node.email ? (
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {node.email}
-                    </p>
-                  ) : null}
-                  {node.orphanReason ? (
-                    <Badge variant="outline" className="mt-2 border-amber-300 bg-white">
-                      {orphanReasonLabel(node.orphanReason)}
-                    </Badge>
-                  ) : null}
-                </div>
-                {hasChildren && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Users className="h-3 w-3" />
-                    {node.children.length}
-                  </div>
-                )}
+                ) : null}
+                {node.email ? (
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {node.email}
+                  </p>
+                ) : null}
+                {node.orphanReason ? (
+                  <Badge variant="outline" className="mt-2 border-amber-300 bg-white">
+                    {orphanReasonLabel(node.orphanReason)}
+                  </Badge>
+                ) : null}
               </div>
             </CardContent>
           </Card>
