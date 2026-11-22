@@ -656,6 +656,10 @@ export async function runAtsApplicationsSync(
                 resumeBambooFileId: row.resumeBambooFileId,
                 resumeBlobUrl: null,
                 atsDetailImportedAt: null,
+                addressCity: row.addressCity,
+                addressProvince: row.addressProvince,
+                addressPostalCode: row.addressPostalCode,
+                addressCountry: row.addressCountry,
               },
             ];
           });
@@ -823,6 +827,10 @@ export async function runAtsApplicationsSync(
                   resumeBambooFileId: mapped.resumeBambooFileId,
                   resumeBlobUrl: null,
                   atsDetailImportedAt: nowIso,
+                  addressCity: mapped.addressCity,
+                  addressProvince: mapped.addressProvince,
+                  addressPostalCode: mapped.addressPostalCode,
+                  addressCountry: mapped.addressCountry,
                 },
               ];
             });

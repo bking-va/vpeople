@@ -613,6 +613,14 @@ export const candidateSourceEnum = pgEnum("candidate_source", [
   "other",
 ]);
 
+/** Per-job proximity rule for AI candidate matching. */
+export const locationRequirementEnum = pgEnum("location_requirement", [
+  "none",
+  "near_office",
+  "near_customers",
+  "near_office_or_customers",
+]);
+
 export const jobOpenings = pgTable("job_openings", {
   id: serial("id").primaryKey(),
   bambooId: text("bamboo_id").unique(),
@@ -628,6 +636,11 @@ export const jobOpenings = pgTable("job_openings", {
   requirements: text("requirements"),
   openDate: date("open_date"),
   closeDate: date("close_date"),
+  locationRequirement: locationRequirementEnum("location_requirement")
+    .default("none")
+    .notNull(),
+  locationMaxDistanceKm: integer("location_max_distance_km").default(50).notNull(),
+  locationWeight: integer("location_weight").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -658,6 +671,11 @@ export const candidates = pgTable(
     bambooStatusLabel: text("bamboo_status_label"),
     rating: integer("rating"), // 1-5 stars
     coverLetter: text("cover_letter"),
+    addressCity: text("address_city"),
+    addressProvince: text("address_province"),
+    addressPostalCode: text("address_postal_code"),
+    addressCountry: text("address_country"),
+    resumeContentHash: text("resume_content_hash"),
     atsDetailImportedAt: timestamp("ats_detail_imported_at"),
     appliedAt: timestamp("applied_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -1486,3 +1504,79 @@ export const scheduledReports = pgTable("scheduled_reports", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+/**
+ * Customer location points/regions for proximity matching.
+ * Designed so a later CRM/Lightdash feed can upsert by external_id.
+ */
+export const customerLocations = pgTable(
+  "customer_locations",
+  {
+    id: serial("id").primaryKey(),
+    label: text("label").notNull(),
+    city: text("city"),
+    province: text("province"),
+    country: text("country").notNull(),
+    postalCode: text("postal_code"),
+    latitude: decimal("latitude", { precision: 9, scale: 6 }),
+    longitude: decimal("longitude", { precision: 9, scale: 6 }),
+    source: text("source").default("manual").notNull(),
+    externalId: text("external_id"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    externalIdUidx: uniqueIndex("customer_locations_external_id_uidx").on(
+      table.externalId
+    ),
+  })
+);
+
+/** Cached stripped résumé text + LLM summary, keyed by SHA-256 of the blob bytes. */
+export const resumeSummaries = pgTable("resume_summaries", {
+  contentHash: text("content_hash").primaryKey(),
+  extractedText: text("extracted_text"),
+  summaryJson: jsonb("summary_json").$type<{
+    skills: string[];
+    titles: string[];
+    education: string[];
+    summary: string;
+    location: {
+      city: string | null;
+      province: string | null;
+      country: string | null;
+      postalCode: string | null;
+    } | null;
+  }>(),
+  summaryModel: text("summary_model"),
+  promptTokens: integer("prompt_tokens").default(0).notNull(),
+  completionTokens: integer("completion_tokens").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/** Token usage + search metadata. Does not store résumé text. */
+export const candidateMatchRuns = pgTable(
+  "candidate_match_runs",
+  {
+    id: serial("id").primaryKey(),
+    employeeId: integer("employee_id").references(() => employees.id, {
+      onDelete: "set null",
+    }),
+    jobOpeningId: integer("job_opening_id").references(() => jobOpenings.id, {
+      onDelete: "set null",
+    }),
+    roleQuery: text("role_query").notNull(),
+    filters: jsonb("filters").$type<Record<string, unknown>>(),
+    resultKeys: jsonb("result_keys").$type<string[]>(),
+    model: text("model"),
+    promptTokens: integer("prompt_tokens").default(0).notNull(),
+    completionTokens: integer("completion_tokens").default(0).notNull(),
+    shortlistSize: integer("shortlist_size").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    employeeIdx: index("candidate_match_runs_employee_idx").on(table.employeeId),
+    openingIdx: index("candidate_match_runs_opening_idx").on(table.jobOpeningId),
+  })
+);

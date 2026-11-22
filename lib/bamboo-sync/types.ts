@@ -248,6 +248,10 @@ export type MappedAtsApplicationWrite = {
   appliedAt: string | null;
   coverLetter: string | null;
   resumeBambooFileId: string | null;
+  addressCity: string | null;
+  addressProvince: string | null;
+  addressPostalCode: string | null;
+  addressCountry: string | null;
 };
 
 export type MappedAtsAnswerWrite = {

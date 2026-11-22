@@ -6,7 +6,8 @@ import { eq, desc, sql } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Briefcase, MapPin, Users, Calendar, Edit } from "lucide-react";
+import { Briefcase, MapPin, Users, Calendar, Edit, Search } from "lucide-react";
+import { hiringAccessForEmail } from "@/lib/hiring-access";
 import Link from "next/link";
 
 export default async function JobOpeningDetailPage({
@@ -22,6 +23,9 @@ export default async function JobOpeningDetailPage({
   const { id } = await params;
   const openingId = parseInt(id);
   const isAdmin = session.user.role === "full_admin" || session.user.role === "admin";
+  const canMatch = session.user.email
+    ? (await hiringAccessForEmail(session.user.email, openingId)).allowed
+    : false;
 
   const [opening] = await db
     .select({
@@ -86,14 +90,24 @@ export default async function JobOpeningDetailPage({
             </span>
           </div>
         </div>
-        {isAdmin && (
-          <Button asChild variant="outline">
-            <Link href={`/hiring/openings/${opening.id}/edit`}>
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
-            </Link>
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {canMatch && (
+            <Button asChild>
+              <Link href={`/hiring/openings/${opening.id}/match`}>
+                <Search className="h-4 w-4 mr-2" />
+                Find candidates
+              </Link>
+            </Button>
+          )}
+          {isAdmin && (
+            <Button asChild variant="outline">
+              <Link href={`/hiring/openings/${opening.id}/edit`}>
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">

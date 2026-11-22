@@ -23,6 +23,9 @@ jobs:
       - name: Run org-chart unit tests
         run: npm test -- --testPathPattern=org-chart
 
+      - name: Run matching unit tests
+        run: npm test -- --testPathPattern=matching
+
   test:
     runs-on: ubuntu-latest
 

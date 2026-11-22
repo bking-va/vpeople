@@ -1647,7 +1647,11 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
             ${row.coverLetter},
             ${row.resumeBambooFileId},
             ${row.resumeBlobUrl},
-            CAST(${row.atsDetailImportedAt} AS timestamp)
+            CAST(${row.atsDetailImportedAt} AS timestamp),
+            ${row.addressCity ?? null},
+            ${row.addressProvince ?? null},
+            ${row.addressPostalCode ?? null},
+            ${row.addressCountry ?? null}
           )`
         );
         const result = await executeSql(
@@ -1658,6 +1662,7 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
               linkedin_url, source, source_detail, stage, bamboo_status_id,
               bamboo_status_label, rating, applied_at, cover_letter,
               resume_bamboo_file_id, resume_blob_url, ats_detail_imported_at,
+              address_city, address_province, address_postal_code, address_country,
               created_at, updated_at
             )
             SELECT
@@ -1679,13 +1684,18 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
               v.resume_bamboo_file_id,
               v.resume_blob_url,
               CAST(v.ats_detail_imported_at AS timestamp),
+              v.address_city,
+              v.address_province,
+              v.address_postal_code,
+              v.address_country,
               now(),
               now()
             FROM (VALUES ${sql.join(tuples, sql`, `)}) AS v(
               bamboo_id, job_opening_id, first_name, last_name, email, phone,
               linkedin_url, source, source_detail, stage, bamboo_status_id,
               bamboo_status_label, rating, applied_at, cover_letter,
-              resume_bamboo_file_id, resume_blob_url, ats_detail_imported_at
+              resume_bamboo_file_id, resume_blob_url, ats_detail_imported_at,
+              address_city, address_province, address_postal_code, address_country
             )
             ON CONFLICT (bamboo_id) DO UPDATE SET
               job_opening_id = CAST(EXCLUDED.job_opening_id AS int),
@@ -1708,6 +1718,10 @@ export function createBambooSyncStore(db: DbLike): BambooSyncStore {
                 CAST(EXCLUDED.ats_detail_imported_at AS timestamp),
                 candidates.ats_detail_imported_at
               ),
+              address_city = COALESCE(EXCLUDED.address_city, candidates.address_city),
+              address_province = COALESCE(EXCLUDED.address_province, candidates.address_province),
+              address_postal_code = COALESCE(EXCLUDED.address_postal_code, candidates.address_postal_code),
+              address_country = COALESCE(EXCLUDED.address_country, candidates.address_country),
               updated_at = now()
             RETURNING bamboo_id, id
           `

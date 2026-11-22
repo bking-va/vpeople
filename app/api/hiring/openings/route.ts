@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { jobOpenings } from "@/lib/db/schema";
+import { locationSettingsFromBody } from "@/lib/matching/filters";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -42,6 +43,7 @@ export async function POST(request: NextRequest) {
         description: data.description || null,
         requirements: data.requirements || null,
         openDate: data.openDate || null,
+        ...locationSettingsFromBody(data),
       })
       .returning();
 

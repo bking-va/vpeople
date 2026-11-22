@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { jobOpenings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { locationSettingsFromBody } from "@/lib/matching/filters";
 
 export async function GET(
   request: NextRequest,
@@ -63,6 +64,7 @@ export async function PUT(
         requirements: data.requirements || null,
         openDate: data.openDate || null,
         closeDate: data.closeDate || null,
+        ...locationSettingsFromBody(data),
         updatedAt: new Date(),
       })
       .where(eq(jobOpenings.id, id))
