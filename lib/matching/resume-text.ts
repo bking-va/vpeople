@@ -236,8 +236,8 @@ export function extractBoundedZipEntry(
 }
 
 /**
- * Linear-time DOCX XML → text. Tags are walked with indexOf, never with
- * unbounded `[^/]*` replacements that can go quadratic on untrusted XML.
+ * Linear-time DOCX XML → text. Tags are walked with indexOf so untrusted
+ * markup cannot trigger quadratic regex backtracking.
  * Paragraph/break tags become newlines so labeled protected attributes stay
  * on their own lines for stripping.
  */
