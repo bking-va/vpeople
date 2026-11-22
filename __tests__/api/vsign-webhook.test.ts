@@ -60,4 +60,17 @@ describe("vSign webhook route", () => {
     expect(res.status).toBe(200);
     expect(mockedApply).toHaveBeenCalledWith(payload);
   });
+
+  test("returns 500 when applying the payload fails", async () => {
+    mockedApply.mockRejectedValueOnce(new Error("vSign pdf failed (503)"));
+    const raw = JSON.stringify(payload);
+    const res = await POST(
+      new NextRequest("http://localhost/api/integrations/vsign/webhook", {
+        method: "POST",
+        headers: { "x-vsign-signature": vsignWebhookSignature(raw, secret) },
+        body: raw,
+      })
+    );
+    expect(res.status).toBe(500);
+  });
 });

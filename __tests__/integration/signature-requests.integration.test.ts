@@ -42,6 +42,7 @@ jest.mock("@/lib/vsign/client", () => ({
 
 import { auth } from "@/lib/auth";
 import { POST as preview } from "@/app/api/documents/[id]/signature-requests/route";
+import { DELETE as deleteDocument } from "@/app/api/documents/[id]/route";
 import { POST as sendRoute } from "@/app/api/signature-requests/[id]/send/route";
 import { applyVsignWebhook } from "@/lib/signature-requests";
 import { createVsignClient } from "@/lib/vsign/client";
@@ -225,6 +226,12 @@ describe("vSign signature requests (Real Postgres)", () => {
     const sentBody = await sendRes.json();
     expect(sentBody.sent).toBe(true);
     expect(sentBody.request.status).toBe("sent");
+
+    const blockedDelete = await deleteDocument(
+      new NextRequest(`http://localhost/api/documents/${documentId}`, { method: "DELETE" }),
+      { params: Promise.resolve({ id: String(documentId) }) }
+    );
+    expect(blockedDelete.status).toBe(409);
   });
 
   test("completed webhook stores signed status without calling send", async () => {
@@ -252,6 +259,42 @@ describe("vSign signature requests (Real Postgres)", () => {
       .where(eq(signatureRequests.id, request.id))
       .limit(1);
     expect(updated.status).toBe("signed");
+    expect(updated.signedPdfUrl).toBe("https://blob.vercel-storage.com/signed.pdf");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test("completed webhook does not mark signed when the PDF cannot be fetched", async () => {
+    const [request] = await db
+      .select()
+      .from(signatureRequests)
+      .where(eq(signatureRequests.documentId, documentId))
+      .limit(1);
+    await db
+      .update(signatureRequests)
+      .set({ status: "sent", signedPdfUrl: null, certificateUrl: null, completedAt: null })
+      .where(eq(signatureRequests.id, request.id));
+
+    getPdf.mockRejectedValueOnce(new (jest.requireMock("@/lib/vsign/client").VsignApiError)("vSign pdf failed (503)"));
+
+    await expect(
+      applyVsignWebhook(
+        {
+          event: "envelope.completed",
+          envelopeId: request.vsignEnvelopeId!,
+          status: "completed",
+          signers: [{ email: target.email, status: "signed" }],
+        },
+        { client: createVsignClient() }
+      )
+    ).rejects.toBeTruthy();
+
+    const [updated] = await db
+      .select()
+      .from(signatureRequests)
+      .where(eq(signatureRequests.id, request.id))
+      .limit(1);
+    expect(updated.status).toBe("sent");
+    expect(updated.signedPdfUrl).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 });

@@ -7,19 +7,50 @@ const FONT_SIZE = 11;
 const LINE_HEIGHT = 14;
 const CHARS_PER_LINE = 82;
 
+export class LetterPdfEncodingError extends Error {
+  constructor() {
+    super(
+      "This letter contains characters that cannot go into the generated PDF. Upload a PDF of the letter and send that instead."
+    );
+    this.name = "LetterPdfEncodingError";
+  }
+}
+
 function pdfEscape(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+const PUNCTUATION_FOLDS: Record<string, string> = {
+  "\u2018": "'",
+  "\u2019": "'",
+  "\u201C": '"',
+  "\u201D": '"',
+  "\u2013": "-",
+  "\u2014": "-",
+  "\u2026": "...",
+};
+
+function foldForWinAnsi(ch: string): string {
+  if (Object.prototype.hasOwnProperty.call(PUNCTUATION_FOLDS, ch)) {
+    return PUNCTUATION_FOLDS[ch];
+  }
+  return ch;
 }
 
 function toWinAnsi(text: string): string {
   return Array.from(text)
     .map((ch) => {
-      const code = ch.charCodeAt(0);
-      if (ch === "\t") return "    ";
-      if (code === 10 || code === 13) return ch;
-      if (code >= 32 && code <= 126) return ch;
-      if (code >= 160 && code <= 255) return ch;
-      return "?";
+      const folded = foldForWinAnsi(ch);
+      return Array.from(folded)
+        .map((part) => {
+          const code = part.charCodeAt(0);
+          if (part === "\t") return "    ";
+          if (code === 10 || code === 13) return part;
+          if (code >= 32 && code <= 126) return part;
+          if (code >= 160 && code <= 255) return part;
+          throw new LetterPdfEncodingError();
+        })
+        .join("");
     })
     .join("");
 }
@@ -68,6 +99,7 @@ export function letterBodyToPdf(title: string, body: string): Buffer {
   for (let i = 0; i < lines.length; i += linesPerPage) {
     pages.push(lines.slice(i, i + linesPerPage));
   }
+  pages.push(["Please sign and date below."]);
 
   const objects: string[] = [];
   objects.push("<< /Type /Catalog /Pages 2 0 R >>");

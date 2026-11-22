@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getSessionUserPermissions } from "@/lib/permissions";
-import { sendSignatureRequest } from "@/lib/signature-requests";
+import { sendSignatureRequest, signatureRequestForViewer } from "@/lib/signature-requests";
 import { httpErrorMessage, httpErrorStatus } from "@/lib/http-error";
 import type { AccessLevel } from "@/lib/authz";
 
@@ -26,13 +26,12 @@ export async function POST(
   const [actor] = await db
     .select({
       id: employees.id,
-      email: employees.email,
       accessLevel: employees.accessLevel,
     })
     .from(employees)
     .where(eq(employees.id, session.user.employeeId))
     .limit(1);
-  if (!actor) {
+  if (!actor || !session.user.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -41,14 +40,23 @@ export async function POST(
     const request = await sendSignatureRequest({
       actor: {
         id: actor.id,
-        email: actor.email,
+        email: session.user.email,
         accessLevel: actor.accessLevel as AccessLevel,
         canManageUsers: permissions.canManageUsers,
       },
       permissions,
       requestId,
     });
-    return NextResponse.json({ request, sent: true });
+    return NextResponse.json({
+      request: {
+        ...request,
+        ...signatureRequestForViewer(request, {
+          viewerId: actor.id,
+          canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo === true,
+        }),
+      },
+      sent: true,
+    });
   } catch (error) {
     const status = httpErrorStatus(error);
     return NextResponse.json(

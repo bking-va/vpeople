@@ -5,14 +5,18 @@ import { documents, employees, signatureRequests, auditLogs } from "@/lib/db/sch
 import { canViewEmployeeDocument } from "@/lib/document-access";
 import { canManageAccessScopes } from "@/lib/access-scopes";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
-import { isVendastaWorkEmail, type AccessLevel } from "@/lib/authz";
+import {
+  canViewIssuedLetterBody,
+  isVendastaWorkEmail,
+  visibleProfileEmail,
+  type AccessLevel,
+} from "@/lib/authz";
 import { getStoredPrivateBlob } from "@/lib/bamboo-sync/blob";
-import { letterBodyToPdf } from "@/lib/letter-pdf";
+import { letterBodyToPdf, LetterPdfEncodingError } from "@/lib/letter-pdf";
 import {
   createVsignClient,
   isVsignConfigured,
   vsignCallbackUrl,
-  VsignApiError,
   VsignNotConfiguredError,
   type VsignClient,
 } from "@/lib/vsign/client";
@@ -40,6 +44,42 @@ export function canRequestSignature(actor: SignatureActor, permissions: Permissi
     accessLevel: actor.accessLevel,
     canManageUsers: permissions.canManageUsers,
   });
+}
+
+function assertCanViewCompensationDocument(
+  actor: SignatureActor,
+  permissions: Permissions,
+  document: { employeeId: number; containsCompensation: boolean }
+) {
+  if (
+    !canViewIssuedLetterBody({
+      isRecipient: actor.id === document.employeeId,
+      containsCompensation: Boolean(document.containsCompensation),
+      canViewCompensation: permissions.canViewCompensation === true,
+    })
+  ) {
+    throw Object.assign(new Error("Forbidden"), { status: 403 });
+  }
+}
+
+export function signatureRequestForViewer(
+  request: {
+    employeeId: number;
+    signerEmail: string;
+    senderEmail: string;
+  },
+  opts: { viewerId: number; canViewSensitivePersonalInfo: boolean }
+) {
+  return {
+    signerEmail: visibleProfileEmail(request.signerEmail, {
+      isViewingSelf: opts.viewerId === request.employeeId,
+      canViewSensitivePersonalInfo: opts.canViewSensitivePersonalInfo,
+    }),
+    senderEmail: visibleProfileEmail(request.senderEmail, {
+      isViewingSelf: opts.viewerId === request.employeeId,
+      canViewSensitivePersonalInfo: opts.canViewSensitivePersonalInfo,
+    }),
+  };
 }
 
 export function assertVendastaSender(email: string): string {
@@ -93,10 +133,17 @@ async function documentBytes(document: {
     return { bytes, fileName: safeFileName(document.title, "pdf") };
   }
   if (document.body) {
-    return {
-      bytes: letterBodyToPdf(document.title, document.body),
-      fileName: safeFileName(document.title, "pdf"),
-    };
+    try {
+      return {
+        bytes: letterBodyToPdf(document.title, document.body),
+        fileName: safeFileName(document.title, "pdf"),
+      };
+    } catch (error) {
+      if (error instanceof LetterPdfEncodingError) {
+        throw Object.assign(error, { status: 400 });
+      }
+      throw error;
+    }
   }
   throw Object.assign(new Error("Document has no file or letter body to send"), {
     status: 400,
@@ -150,6 +197,7 @@ export async function previewSignatureRequest(opts: {
   ) {
     throw Object.assign(new Error("Forbidden"), { status: 403 });
   }
+  assertCanViewCompensationDocument(opts.actor, opts.permissions, document);
 
   const allowed = await scopedEmployeeIds({
     employeeId: opts.actor.id,
@@ -190,12 +238,16 @@ export async function previewSignatureRequest(opts: {
     });
   }
   if (active?.status === "draft" && active.vsignEnvelopeId) {
+    const emails = signatureRequestForViewer(active, {
+      viewerId: opts.actor.id,
+      canViewSensitivePersonalInfo: opts.permissions.canViewSensitivePersonalInfo === true,
+    });
     return {
       request: active,
       preview: {
         title: document.title,
-        senderEmail: active.senderEmail,
-        signerEmail: active.signerEmail,
+        senderEmail: emails.senderEmail ?? "",
+        signerEmail: emails.signerEmail ?? "",
         signerName: active.signerName,
         envelopeId: active.vsignEnvelopeId,
         status: "draft",
@@ -252,12 +304,16 @@ export async function previewSignatureRequest(opts: {
     },
   });
 
+  const emails = signatureRequestForViewer(request, {
+    viewerId: opts.actor.id,
+    canViewSensitivePersonalInfo: opts.permissions.canViewSensitivePersonalInfo === true,
+  });
   return {
     request,
     preview: {
       title: document.title,
-      senderEmail,
-      signerEmail: employee.email,
+      senderEmail: emails.senderEmail ?? senderEmail,
+      signerEmail: emails.signerEmail ?? "",
       signerName: displayName(employee),
       envelopeId: envelope.id,
       status: "draft",
@@ -293,6 +349,11 @@ export async function sendSignatureRequest(opts: {
       { status: 409 }
     );
   }
+  if (request.requestedBy !== opts.actor.id) {
+    throw Object.assign(new Error("Send as the HR user who previewed this request"), {
+      status: 403,
+    });
+  }
   if (request.senderEmail.toLowerCase() !== senderEmail) {
     throw Object.assign(new Error("Send as the HR user who previewed this request"), {
       status: 403,
@@ -317,6 +378,7 @@ export async function sendSignatureRequest(opts: {
   ) {
     throw Object.assign(new Error("Forbidden"), { status: 403 });
   }
+  assertCanViewCompensationDocument(opts.actor, opts.permissions, document);
   const allowed = await scopedEmployeeIds({
     employeeId: opts.actor.id,
     accessLevel: opts.actor.accessLevel,
@@ -449,22 +511,16 @@ export async function applyVsignWebhook(
       .from(documents)
       .where(eq(documents.id, request.documentId))
       .limit(1);
-    if (document && request.vsignEnvelopeId) {
-      try {
-        const client = opts?.client ?? createVsignClient();
-        const pdf = await client.getPdf(request.senderEmail, request.vsignEnvelopeId);
-        const stored = await storeCompletedPdf({ request, document, pdf });
-        patch.signedPdfUrl = stored.signedPdfUrl;
-        patch.certificateUrl = stored.certificateUrl;
-      } catch (error) {
-        if (
-          !(error instanceof VsignNotConfiguredError) &&
-          !(error instanceof VsignApiError)
-        ) {
-          throw error;
-        }
-      }
+    if (!document || !request.vsignEnvelopeId) {
+      throw Object.assign(new Error("Completed envelope has no document to store"), {
+        status: 500,
+      });
     }
+    const client = opts?.client ?? createVsignClient();
+    const pdf = await client.getPdf(request.senderEmail, request.vsignEnvelopeId);
+    const stored = await storeCompletedPdf({ request, document, pdf });
+    patch.signedPdfUrl = stored.signedPdfUrl;
+    patch.certificateUrl = stored.certificateUrl;
   }
 
   await db

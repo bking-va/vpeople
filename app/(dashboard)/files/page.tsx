@@ -10,7 +10,7 @@ import { eq, and, count, desc, sql } from "drizzle-orm";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { getSessionUserPermissions } from "@/lib/permissions";
-import { canViewPrivateDocuments } from "@/lib/authz";
+import { canViewPrivateDocuments, visibleProfileEmail } from "@/lib/authz";
 import { latestRequestsByDocumentIds } from "@/lib/signature-requests";
 
 export default async function FilesPage() {
@@ -98,7 +98,12 @@ export default async function FilesPage() {
     return {
       ...doc,
       signingStatus: request?.status ?? null,
-      signerEmail: request?.signerEmail ?? null,
+      signerEmail: request
+        ? visibleProfileEmail(request.signerEmail, {
+            isViewingSelf: doc.employeeId === employee.id,
+            canViewSensitivePersonalInfo: permissions.canViewSensitivePersonalInfo === true,
+          })
+        : null,
     };
   });
 

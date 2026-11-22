@@ -71,7 +71,9 @@ export function isVsignConfigured(env: VsignEnv | NodeJS.ProcessEnv = process.en
   return Boolean(
     values.VSIGN_BASE_URL?.trim() &&
       values.VSIGN_CLIENT_ID?.trim() &&
-      values.VSIGN_CLIENT_SECRET?.trim()
+      values.VSIGN_CLIENT_SECRET?.trim() &&
+      values.VSIGN_WEBHOOK_SECRET?.trim() &&
+      vsignCallbackUrl(values)
   );
 }
 

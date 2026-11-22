@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewEmployeeDocument } from "@/lib/document-access";
 import { getStoredPrivateBlob } from "@/lib/bamboo-sync/blob";
-import type { AccessLevel } from "@/lib/authz";
+import { canViewIssuedLetterBody, type AccessLevel } from "@/lib/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +66,14 @@ export async function GET(
       },
     });
 
-    if (!allowed) {
+    if (
+      !allowed ||
+      !canViewIssuedLetterBody({
+        isRecipient: employee.id === document.employeeId,
+        containsCompensation: Boolean(document.containsCompensation),
+        canViewCompensation: permissions.canViewCompensation === true,
+      })
+    ) {
       return NextResponse.json(
         { error: "You do not have permission to access this document" },
         { status: 403 }

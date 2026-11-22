@@ -1212,8 +1212,22 @@ export default async function EmployeeProfilePage({
                 ? {
                     id: signatureByDocument.get(doc.id)!.id,
                     status: signatureByDocument.get(doc.id)!.status,
-                    signerEmail: signatureByDocument.get(doc.id)!.signerEmail,
-                    senderEmail: signatureByDocument.get(doc.id)!.senderEmail,
+                    signerEmail: visibleProfileEmail(
+                      signatureByDocument.get(doc.id)!.signerEmail,
+                      {
+                        isViewingSelf,
+                        canViewSensitivePersonalInfo:
+                          permissions.canViewSensitivePersonalInfo === true,
+                      }
+                    ),
+                    senderEmail: visibleProfileEmail(
+                      signatureByDocument.get(doc.id)!.senderEmail,
+                      {
+                        isViewingSelf,
+                        canViewSensitivePersonalInfo:
+                          permissions.canViewSensitivePersonalInfo === true,
+                      }
+                    ),
                   }
                 : null,
             }))}

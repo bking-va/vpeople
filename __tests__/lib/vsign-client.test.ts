@@ -1,15 +1,40 @@
 import { createVsignClient, isVsignConfigured, vsignCallbackUrl } from "@/lib/vsign/client";
 
 const env = {
-  VSIGN_BASE_URL: "https://vsign.example.test",
+  VSIGN_BASE_URL: "https://vsign.vendasta-internal.com",
   VSIGN_CLIENT_ID: "vpeople",
   VSIGN_CLIENT_SECRET: "secret",
+  VSIGN_WEBHOOK_SECRET: "whsec",
+  NEXT_PUBLIC_APP_URL: "https://vpeople.example",
 };
 
 describe("vSign client", () => {
   test("is unconfigured without env", () => {
     expect(isVsignConfigured({})).toBe(false);
     expect(isVsignConfigured(env)).toBe(true);
+  });
+
+  test("is unconfigured without a webhook secret or https callback", () => {
+    expect(
+      isVsignConfigured({
+        VSIGN_BASE_URL: env.VSIGN_BASE_URL,
+        VSIGN_CLIENT_ID: env.VSIGN_CLIENT_ID,
+        VSIGN_CLIENT_SECRET: env.VSIGN_CLIENT_SECRET,
+      })
+    ).toBe(false);
+    expect(
+      isVsignConfigured({
+        ...env,
+        VSIGN_WEBHOOK_SECRET: "",
+      })
+    ).toBe(false);
+    expect(
+      isVsignConfigured({
+        ...env,
+        NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+        AUTH_URL: "http://localhost:3000",
+      })
+    ).toBe(false);
   });
 
   test("callback URL is https only", () => {

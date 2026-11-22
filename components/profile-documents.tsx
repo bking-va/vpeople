@@ -9,8 +9,8 @@ import { Upload, Download, FileText, CheckCircle, Trash2, Send } from "lucide-re
 interface SignatureRequest {
   id: number;
   status: string;
-  signerEmail: string;
-  senderEmail: string;
+  signerEmail: string | null;
+  senderEmail: string | null;
 }
 
 interface Document {
@@ -44,7 +44,7 @@ export function ProfileDocuments({
     requestId: number;
     title: string;
     senderEmail: string;
-    signerEmail: string;
+    signerEmail: string | null;
     signerName: string;
   } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -135,7 +135,7 @@ export function ProfileDocuments({
     if (!preview) return;
     if (
       !confirm(
-        `Send “${preview.title}” to ${preview.signerEmail} via vSign as ${preview.senderEmail}? This emails the signer.`
+        `Send “${preview.title}” to ${preview.signerEmail || preview.signerName} via vSign as ${preview.senderEmail}? This emails the signer.`
       )
     ) {
       return;
@@ -252,8 +252,9 @@ export function ProfileDocuments({
           <div className="mb-4 rounded-lg border p-4 space-y-2">
             <p className="font-medium">Preview — nothing has been sent</p>
             <p className="text-sm text-muted-foreground">
-              {preview.title} will be emailed to {preview.signerName} ({preview.signerEmail})
-              from {preview.senderEmail} through vSign. A signature and date field are placed
+              {preview.title} will be emailed to {preview.signerName}
+              {preview.signerEmail ? ` (${preview.signerEmail})` : ""} from {preview.senderEmail}{" "}
+              through vSign. A signature and date field are placed
               on the last page. The signed PDF, including the certificate of completion, is
               stored on this record when they finish.
             </p>
