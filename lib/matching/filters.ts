@@ -1,9 +1,17 @@
+import { stripProtectedText } from "./privacy";
 import {
   DEFAULT_MATCH_FILTERS,
   LOCATION_REQUIREMENTS,
   type LocationRequirement,
   type MatchFilters,
 } from "./types";
+
+export const MIN_ROLE_QUERY_LENGTH = 8;
+export const MAX_ROLE_QUERY_LENGTH = 12_000;
+
+export function normalizeRoleQuery(raw: string): string {
+  return stripProtectedText(raw).slice(0, MAX_ROLE_QUERY_LENGTH);
+}
 
 export function parseLocationRequirement(value: unknown): LocationRequirement {
   if (typeof value === "string" && (LOCATION_REQUIREMENTS as readonly string[]).includes(value)) {

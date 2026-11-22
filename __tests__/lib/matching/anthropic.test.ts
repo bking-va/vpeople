@@ -1,9 +1,8 @@
 import { scoreCandidatesWithClaude, summarizeResumeWithClaude } from "@/lib/matching/anthropic";
 import { lexicalScore, tokenize } from "@/lib/matching/lexical";
 import { parseCustomerLocationCsv } from "@/lib/matching/csv-import";
-import { parseMatchFilters } from "@/lib/matching/filters";
+import { MIN_ROLE_QUERY_LENGTH, normalizeRoleQuery, parseMatchFilters } from "@/lib/matching/filters";
 import { extractDocxText, extractPdfStringsFallback, hashResumeBytes } from "@/lib/matching/resume-text";
-import { unzipSync } from "fflate";
 
 describe("lexical shortlist", () => {
   test("ranks a typescript engineer above an unrelated sales bio", () => {
@@ -25,6 +24,13 @@ describe("filters and CSV", () => {
     expect(parsed.locationRequirement).toBe("near_customers");
     expect(parsed.maxDistanceKm).toBe(20_000);
     expect(parsed.locationWeight).toBe(0);
+  });
+
+  test("rejects short role descriptions before any search work", () => {
+    expect(normalizeRoleQuery("   hi  ").length).toBeLessThan(MIN_ROLE_QUERY_LENGTH);
+    expect(normalizeRoleQuery("Senior TypeScript engineer for a product team").length).toBeGreaterThan(
+      MIN_ROLE_QUERY_LENGTH
+    );
   });
 
   test("parses customer location CSV and ignores street-free formula cells", () => {
@@ -123,7 +129,6 @@ describe("resume bytes", () => {
     const { zipSync } = jest.requireActual("fflate") as typeof import("fflate");
     const bytes = zipSync({ "word/document.xml": xml });
     expect(extractDocxText(bytes)).toContain("Hello TypeScript");
-    expect(unzipSync(bytes)["word/document.xml"]).toBeDefined();
   });
 
   test("PDF fallback reads literal strings", () => {

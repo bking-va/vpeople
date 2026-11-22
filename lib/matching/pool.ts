@@ -8,6 +8,7 @@ import type {
   GeoPlace,
   MatchFilters,
   MatchPerson,
+  ResumeSummary,
   ScoredMatch,
 } from "./types";
 
@@ -62,6 +63,8 @@ function combinePeople(a: MatchPerson, b: MatchPerson): MatchPerson {
     evidenceFacts: facts,
     resumeContentHash: a.resumeContentHash || b.resumeContentHash,
     resumeBlobUrl: a.resumeBlobUrl || b.resumeBlobUrl,
+    resumeEnriched: Boolean(a.resumeEnriched || b.resumeEnriched),
+    resumeSummaryApplied: Boolean(a.resumeSummaryApplied || b.resumeSummaryApplied),
     location: pickLocation(a.location, b.location),
     key: employeeId != null ? `employee:${employeeId}` : a.key,
   };
@@ -81,7 +84,8 @@ export function applyProximity(
   filters: MatchFilters,
   offices: GeoPlace[],
   customers: GeoPlace[],
-  indexes: GeocodeIndexes = loadGeocodeIndexes()
+  indexes: GeocodeIndexes = loadGeocodeIndexes(),
+  options: { keepUnknown?: (person: MatchPerson) => boolean } = {}
 ): Array<MatchPerson & { distance: DistanceHit | null; proximityScore: number | null }> {
   const places = placesForRequirement(filters.locationRequirement, offices, customers);
   const hard = filters.locationRequirement !== "none";
@@ -91,7 +95,10 @@ export function applyProximity(
     const coords = geocodeLocation(person.location, indexes);
     const distance = nearestPlace(coords, places);
     if (hard) {
-      if (!distance || distance.km > filters.maxDistanceKm) continue;
+      const unknown = !distance;
+      const tooFar = Boolean(distance && distance.km > filters.maxDistanceKm);
+      if (tooFar) continue;
+      if (unknown && !options.keepUnknown?.(person)) continue;
     }
     out.push({
       ...person,
@@ -103,6 +110,51 @@ export function applyProximity(
     });
   }
   return out;
+}
+
+export function applyResumeFacts<T extends MatchPerson>(
+  person: T,
+  summary: ResumeSummary | null,
+  extractedText?: string | null
+): T {
+  const next = { ...person };
+  if (summary) {
+    next.searchText = buildSearchText([
+      next.searchText,
+      summary.summary,
+      ...summary.skills,
+      ...summary.titles,
+      ...summary.education,
+    ]);
+    next.evidenceFacts = [
+      ...next.evidenceFacts,
+      summary.summary ? `Résumé summary: ${summary.summary}` : null,
+      ...summary.titles.slice(0, 4).map((t) => `Résumé title: ${t}`),
+      summary.skills.length ? `Résumé skills: ${summary.skills.slice(0, 12).join(", ")}` : null,
+      ...summary.education.slice(0, 3).map((e) => `Résumé education: ${e}`),
+    ].filter((f): f is string => Boolean(f));
+    if (summary.location) {
+      next.location = pickLocation(next.location, summary.location);
+    }
+    next.resumeEnriched = true;
+    next.resumeSummaryApplied = true;
+  } else if (extractedText) {
+    next.searchText = buildSearchText([next.searchText, extractedText.slice(0, 4000)]);
+    next.resumeEnriched = true;
+  }
+  return next;
+}
+
+export function retrievalLimit(
+  maxCandidates: number,
+  maxUncached: number,
+  poolSize: number
+): number {
+  return Math.min(poolSize, Math.max(maxCandidates * 2, maxCandidates + maxUncached));
+}
+
+export function mayGainLocationFromResume(person: MatchPerson): boolean {
+  return Boolean(person.resumeBlobUrl) && !person.resumeEnriched;
 }
 
 export function placesForRequirement(

@@ -28,7 +28,8 @@ export function CustomerLocationsAdmin({ locations }: { locations: LocationRow[]
     e.preventDefault();
     setSaving(true);
     setError(null);
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     try {
       const response = await fetch("/api/settings/customer-locations", {
         method: "POST",
@@ -44,7 +45,7 @@ export function CustomerLocationsAdmin({ locations }: { locations: LocationRow[]
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Save failed");
-      e.currentTarget.reset();
+      formEl.reset();
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");

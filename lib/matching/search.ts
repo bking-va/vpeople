@@ -27,19 +27,22 @@ import {
   employeeIdsVisibleToMatcher,
   type MatchingActor,
 } from "./access";
-import { filtersForAudit } from "./filters";
+import { filtersForAudit, MIN_ROLE_QUERY_LENGTH, normalizeRoleQuery } from "./filters";
 import { formatDistance } from "./distance";
 import { geocodeLocation, loadGeocodeIndexes } from "./geocode";
 import { toTsQueryInput } from "./lexical";
 import {
   applyProximity,
+  applyResumeFacts,
   buildSearchText,
+  mayGainLocationFromResume,
   mergePeople,
   officePlaceFromLocation,
   rankShortlist,
+  retrievalLimit,
   toScoredMatches,
 } from "./pool";
-import { coarseLocation, formatCoarseLocation, isSensitiveQuestion, stripProtectedText } from "./privacy";
+import { coarseLocation, formatCoarseLocation, isSensitiveQuestion, sanitizeResumeSummary, stripProtectedText } from "./privacy";
 import { extractResumeText, hashResumeBytes, readStreamWithLimit } from "./resume-text";
 import {
   MATCHING_ADVISORY,
@@ -69,6 +72,12 @@ export async function runCandidateMatch(input: SearchInput): Promise<
   if (!cfg.apiKey && !input.transport) {
     return { ok: false, status: 503, error: "ANTHROPIC_API_KEY is not configured" };
   }
+
+  const roleQuery = normalizeRoleQuery(input.roleQuery);
+  if (roleQuery.length < MIN_ROLE_QUERY_LENGTH) {
+    return { ok: false, status: 400, error: "Role description is too short" };
+  }
+
   const rate = await checkRateLimit(
     `match:${input.actor.employeeId}`,
     "/api/hiring/match",
@@ -76,11 +85,6 @@ export async function runCandidateMatch(input: SearchInput): Promise<
   );
   if (!rate.success) {
     return { ok: false, status: 429, error: "Too many matching searches. Try again later." };
-  }
-
-  const roleQuery = stripProtectedText(input.roleQuery).slice(0, 12_000);
-  if (roleQuery.length < 8) {
-    return { ok: false, status: 400, error: "Role description is too short" };
   }
 
   if (input.saveFiltersToJob && input.jobOpeningId && input.actor.canManageAllHiring) {
@@ -96,17 +100,29 @@ export async function runCandidateMatch(input: SearchInput): Promise<
   }
 
   const people = await loadMatchPool(input.actor, input.jobOpeningId, input.filters);
+  const withCachedResumes = await applyCachedResumeSummaries(people);
   const { offices, customers } = await loadReferencePlaces();
   const indexed = loadGeocodeIndexes();
-  const withDistance = applyProximity(people, input.filters, offices, customers, indexed);
+  const withDistance = applyProximity(
+    withCachedResumes,
+    input.filters,
+    offices,
+    customers,
+    indexed,
+    { keepUnknown: mayGainLocationFromResume }
+  );
   const ftsBoosted = await applyPostgresFtsBoost(withDistance, roleQuery);
-  const shortlist = rankShortlist(ftsBoosted, roleQuery, cfg.maxCandidates);
+  const firstCut = rankShortlist(
+    ftsBoosted,
+    roleQuery,
+    retrievalLimit(cfg.maxCandidates, cfg.maxUncachedResumes, ftsBoosted.length)
+  );
 
   let promptTokens = 0;
   let completionTokens = 0;
   let uncachedResumes = 0;
   const resumeFacts = await attachResumeSummaries({
-    people: shortlist,
+    people: firstCut,
     model: cfg.model,
     apiKey: cfg.apiKey,
     maxOutputTokens: cfg.maxOutputTokens,
@@ -120,7 +136,14 @@ export async function runCandidateMatch(input: SearchInput): Promise<
     },
   });
 
-  const reranked = rankShortlist(resumeFacts, roleQuery, cfg.maxCandidates);
+  const afterResumeProximity = applyProximity(
+    resumeFacts,
+    input.filters,
+    offices,
+    customers,
+    indexed
+  );
+  const reranked = rankShortlist(afterResumeProximity, roleQuery, cfg.maxCandidates);
   let truncated = false;
   const llmByKey = new Map<string, { score: number; reasons: string[] }>();
   if (reranked.length > 0 && (cfg.apiKey || input.transport)) {
@@ -490,6 +513,36 @@ async function applyPostgresFtsBoost<T extends MatchPerson>(
   return people;
 }
 
+async function applyCachedResumeSummaries<T extends MatchPerson>(people: T[]): Promise<T[]> {
+  const hashes = [
+    ...new Set(
+      people
+        .map((person) => person.resumeContentHash)
+        .filter((hash): hash is string => Boolean(hash))
+    ),
+  ];
+  if (hashes.length === 0) return people;
+  const rows = await db
+    .select({
+      contentHash: resumeSummaries.contentHash,
+      summaryJson: resumeSummaries.summaryJson,
+      extractedText: resumeSummaries.extractedText,
+    })
+    .from(resumeSummaries)
+    .where(inArray(resumeSummaries.contentHash, hashes));
+  const byHash = new Map(rows.map((row) => [row.contentHash, row]));
+  return people.map((person) => {
+    if (!person.resumeContentHash) return person;
+    const cached = byHash.get(person.resumeContentHash);
+    if (!cached) return person;
+    return applyResumeFacts(
+      person,
+      cached.summaryJson ? sanitizeResumeSummary(cached.summaryJson) : null,
+      cached.extractedText
+    );
+  });
+}
+
 async function attachResumeSummaries<T extends MatchPerson>(opts: {
   people: T[];
   model: string;
@@ -503,9 +556,8 @@ async function attachResumeSummaries<T extends MatchPerson>(opts: {
   let remaining = opts.maxUncached;
   const out: T[] = [];
   for (const person of opts.people) {
-    const next = { ...person };
-    if (!person.resumeBlobUrl && !person.resumeContentHash) {
-      out.push(next);
+    if (person.resumeSummaryApplied || (!person.resumeBlobUrl && !person.resumeContentHash)) {
+      out.push(person);
       continue;
     }
     try {
@@ -514,57 +566,16 @@ async function attachResumeSummaries<T extends MatchPerson>(opts: {
         : null;
       let summary = cached?.summary ?? null;
       let extracted = cached?.extractedText ?? null;
+      let hash = person.resumeContentHash;
       if (!summary && person.resumeBlobUrl && remaining > 0 && opts.blobToken) {
         const stored = await getStoredPrivateBlob(person.resumeBlobUrl, opts.blobToken);
         if (stored) {
           const bytes = await readStreamWithLimit(stored.stream);
-          const hash = hashResumeBytes(bytes);
+          hash = hashResumeBytes(bytes);
           const already = await loadCachedSummary(hash);
           extracted = already?.extractedText || (await extractResumeText(bytes, stored.contentType));
           if (already?.summary) {
             summary = already.summary;
-          } else if (extracted && (opts.apiKey || opts.transport)) {
-            const result = await summarizeResumeWithClaude({
-              strippedResumeText: extracted,
-              model: opts.model,
-              apiKey: opts.apiKey,
-              maxOutputTokens: opts.maxOutputTokens,
-              transport: opts.transport,
-            });
-            summary = result.summary;
-            opts.onUsage(result.usage, 1);
-            remaining -= 1;
-            await db
-              .insert(resumeSummaries)
-              .values({
-                contentHash: hash,
-                extractedText: extracted.slice(0, 50_000),
-                summaryJson: summary,
-                summaryModel: opts.model,
-                promptTokens: result.usage.promptTokens,
-                completionTokens: result.usage.completionTokens,
-                updatedAt: new Date(),
-              })
-              .onConflictDoUpdate({
-                target: resumeSummaries.contentHash,
-                set: {
-                  extractedText: extracted.slice(0, 50_000),
-                  summaryJson: summary,
-                  summaryModel: opts.model,
-                  promptTokens: result.usage.promptTokens,
-                  completionTokens: result.usage.completionTokens,
-                  updatedAt: new Date(),
-                },
-              });
-          } else if (extracted) {
-            await db
-              .insert(resumeSummaries)
-              .values({
-                contentHash: hash,
-                extractedText: extracted.slice(0, 50_000),
-                updatedAt: new Date(),
-              })
-              .onConflictDoNothing();
           }
           if (person.candidateId) {
             await db
@@ -574,39 +585,59 @@ async function attachResumeSummaries<T extends MatchPerson>(opts: {
           }
         }
       }
-      if (summary) {
-        next.searchText = buildSearchText([
-          next.searchText,
-          summary.summary,
-          ...summary.skills,
-          ...summary.titles,
-          ...summary.education,
-        ]);
-        next.evidenceFacts = [
-          ...next.evidenceFacts,
-          summary.summary ? `Résumé summary: ${summary.summary}` : null,
-          ...summary.titles.slice(0, 4).map((t) => `Résumé title: ${t}`),
-          summary.skills.length ? `Résumé skills: ${summary.skills.slice(0, 12).join(", ")}` : null,
-          ...summary.education.slice(0, 3).map((e) => `Résumé education: ${e}`),
-        ].filter((f): f is string => Boolean(f));
-        if (summary.location) {
-          next.location = {
-            city: next.location.city || summary.location.city,
-            province: next.location.province || summary.location.province,
-            country: next.location.country || summary.location.country,
-            postalCode: next.location.postalCode || summary.location.postalCode,
-          };
+      if (!summary && extracted && remaining > 0 && (opts.apiKey || opts.transport)) {
+        const result = await summarizeResumeWithClaude({
+          strippedResumeText: extracted,
+          model: opts.model,
+          apiKey: opts.apiKey,
+          maxOutputTokens: opts.maxOutputTokens,
+          transport: opts.transport,
+        });
+        summary = result.summary;
+        opts.onUsage(result.usage, 1);
+        remaining -= 1;
+        if (hash) {
+          await db
+            .insert(resumeSummaries)
+            .values({
+              contentHash: hash,
+              extractedText: extracted.slice(0, 50_000),
+              summaryJson: summary,
+              summaryModel: opts.model,
+              promptTokens: result.usage.promptTokens,
+              completionTokens: result.usage.completionTokens,
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: resumeSummaries.contentHash,
+              set: {
+                extractedText: extracted.slice(0, 50_000),
+                summaryJson: summary,
+                summaryModel: opts.model,
+                promptTokens: result.usage.promptTokens,
+                completionTokens: result.usage.completionTokens,
+                updatedAt: new Date(),
+              },
+            });
         }
-      } else if (extracted) {
-        next.searchText = buildSearchText([next.searchText, extracted.slice(0, 4000)]);
+      } else if (extracted && hash) {
+        await db
+          .insert(resumeSummaries)
+          .values({
+            contentHash: hash,
+            extractedText: extracted.slice(0, 50_000),
+            updatedAt: new Date(),
+          })
+          .onConflictDoNothing();
       }
+      out.push(applyResumeFacts({ ...person, resumeContentHash: hash ?? person.resumeContentHash }, summary, extracted));
     } catch (error) {
       console.error(
         "resume summary failed:",
         error instanceof Error ? error.message : "unknown"
       );
+      out.push(person);
     }
-    out.push(next);
   }
   return out;
 }
@@ -625,7 +656,7 @@ async function loadCachedSummary(hash: string): Promise<{
     .limit(1);
   if (!row) return null;
   return {
-    summary: row.summaryJson ?? null,
+    summary: row.summaryJson ? sanitizeResumeSummary(row.summaryJson) : null,
     extractedText: row.extractedText,
   };
 }

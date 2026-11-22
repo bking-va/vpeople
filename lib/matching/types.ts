@@ -65,6 +65,8 @@ export type MatchPerson = {
   evidenceFacts: string[];
   resumeContentHash: string | null;
   resumeBlobUrl: string | null;
+  resumeEnriched?: boolean;
+  resumeSummaryApplied?: boolean;
 };
 
 export type ScoredMatch = {

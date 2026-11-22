@@ -4,7 +4,13 @@ import {
   loadGeocodeIndexes,
   postalLookupKeys,
 } from "@/lib/matching/geocode";
-import { applyProximity, mergePeople } from "@/lib/matching/pool";
+import {
+  applyProximity,
+  applyResumeFacts,
+  mayGainLocationFromResume,
+  mergePeople,
+  rankShortlist,
+} from "@/lib/matching/pool";
 import type { MatchPerson } from "@/lib/matching/types";
 
 const indexes = loadGeocodeIndexes();
@@ -123,5 +129,101 @@ describe("matching pool", () => {
     );
     expect(kept.map((p) => p.firstName)).toEqual(["Local"]);
     expect(kept[0].distance?.label).toBe("Saskatoon HQ");
+  });
+
+  test("uses cached résumé location before the proximity hard filter", () => {
+    const saskatoon = geocodeLocation({ city: "Saskatoon", province: "SK", country: "CA", postalCode: null }, indexes)!;
+    const fromResume = applyResumeFacts(
+      person({
+        key: "applicant:9",
+        firstName: "RésuméLocal",
+        candidateId: 9,
+        kinds: ["applicant"],
+        location: { city: null, province: null, country: null, postalCode: null },
+        searchText: "applicant",
+      }),
+      {
+        skills: ["TypeScript"],
+        titles: ["Staff Engineer"],
+        education: [],
+        summary: "TypeScript engineer in Saskatoon",
+        location: { city: "Saskatoon", province: "SK", country: "Canada", postalCode: "S7K" },
+      }
+    );
+    const kept = applyProximity(
+      [fromResume],
+      {
+        locationRequirement: "near_office",
+        maxDistanceKm: 100,
+        locationWeight: 80,
+        includeTerminatedEmployees: true,
+        includeRejectedApplicants: true,
+      },
+      [{ ...saskatoon, label: "Saskatoon HQ", kind: "office" }],
+      [],
+      indexes
+    );
+    expect(kept).toHaveLength(1);
+    expect(kept[0].distance?.label).toBe("Saskatoon HQ");
+  });
+
+  test("keeps unknown locations only while a résumé blob may still supply one", () => {
+    const saskatoon = geocodeLocation({ city: "Saskatoon", province: "SK", country: "CA", postalCode: null }, indexes)!;
+    const pending = person({
+      key: "applicant:8",
+      firstName: "Pending",
+      candidateId: 8,
+      kinds: ["applicant"],
+      resumeBlobUrl: "blob://resume",
+    });
+    const filters = {
+      locationRequirement: "near_office" as const,
+      maxDistanceKm: 100,
+      locationWeight: 80,
+      includeTerminatedEmployees: true,
+      includeRejectedApplicants: true,
+    };
+    const offices = [{ ...saskatoon, label: "Saskatoon HQ", kind: "office" as const }];
+    expect(
+      applyProximity([pending], filters, offices, [], indexes, {
+        keepUnknown: mayGainLocationFromResume,
+      })
+    ).toHaveLength(1);
+    expect(applyProximity([pending], filters, offices, [], indexes)).toHaveLength(0);
+  });
+
+  test("shortlists résumé-only skills after cached facts are applied", () => {
+    const withResume = applyResumeFacts(
+      person({
+        key: "applicant:1",
+        firstName: "Zed",
+        candidateId: 1,
+        kinds: ["applicant"],
+        currentTitle: "Applicant",
+        searchText: "applicant",
+      }),
+      {
+        skills: ["TypeScript", "Postgres"],
+        titles: ["Staff Engineer"],
+        education: [],
+        summary: "Built TypeScript services",
+        location: null,
+      }
+    );
+    const filler = ["Ann", "Bob", "Cam"].map((firstName, i) =>
+      person({
+        key: `employee:${i + 1}`,
+        firstName,
+        employeeId: i + 1,
+        currentTitle: "Coordinator",
+        searchText: "office coordinator scheduling",
+      })
+    );
+    const ranked = rankShortlist(
+      [withResume, ...filler].map((p) => ({ ...p, distance: null, proximityScore: null })),
+      "Senior TypeScript engineer Postgres",
+      2
+    );
+    expect(ranked[0].firstName).toBe("Zed");
   });
 });
