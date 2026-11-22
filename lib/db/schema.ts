@@ -1174,6 +1174,52 @@ export const documents = pgTable("documents", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const signatureRequestStatusEnum = pgEnum("signature_request_status", [
+  "draft",
+  "sent",
+  "viewed",
+  "signed",
+  "declined",
+  "voided",
+]);
+
+/** vSign envelope tracked against an employee document. Send is never implicit. */
+export const signatureRequests = pgTable(
+  "signature_requests",
+  {
+    id: serial("id").primaryKey(),
+    documentId: integer("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    requestedBy: integer("requested_by")
+      .notNull()
+      .references(() => employees.id),
+    vsignEnvelopeId: text("vsign_envelope_id").unique(),
+    status: signatureRequestStatusEnum("status").default("draft").notNull(),
+    senderEmail: text("sender_email").notNull(),
+    signerEmail: text("signer_email").notNull(),
+    signerName: text("signer_name").notNull(),
+    signedPdfUrl: text("signed_pdf_url"),
+    certificateUrl: text("certificate_url"),
+    previewedAt: timestamp("previewed_at"),
+    sentAt: timestamp("sent_at"),
+    viewedAt: timestamp("viewed_at"),
+    completedAt: timestamp("completed_at"),
+    lastEventType: text("last_event_type"),
+    lastEventAt: timestamp("last_event_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    documentIdx: index("signature_requests_document_idx").on(table.documentId),
+    employeeIdx: index("signature_requests_employee_idx").on(table.employeeId),
+    statusIdx: index("signature_requests_status_idx").on(table.status),
+  })
+);
+
 export const companyFiles = pgTable("company_files", {
   id: serial("id").primaryKey(),
   bambooId: text("bamboo_id").notNull().unique(),

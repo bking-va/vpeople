@@ -45,11 +45,15 @@ import {
   canViewPrivateDocuments,
   canViewTerminationDetails,
   canViewTimeOffLedger,
+  isVendastaWorkEmail,
   redactTerminationDetails,
   redactVisaDocumentNumber,
   visibleProfileEmail,
 } from "@/lib/authz";
 import { employeeInScope, scopedEmployeeIds } from "@/lib/employee-scope";
+import { canManageAccessScopes } from "@/lib/access-scopes";
+import { latestRequestsByDocumentIds } from "@/lib/signature-requests";
+import { isVsignConfigured } from "@/lib/vsign/client";
 import Link from "next/link";
 import {
   compensationTableLabel,
@@ -150,7 +154,11 @@ export default async function EmployeeProfilePage({
     redirect("/auth/signin");
   }
   const [actor] = await db
-    .select({ id: employees.id, accessLevel: employees.accessLevel })
+    .select({
+      id: employees.id,
+      email: employees.email,
+      accessLevel: employees.accessLevel,
+    })
     .from(employees)
     .where(eq(employees.id, session.user.employeeId))
     .limit(1);
@@ -383,6 +391,17 @@ export default async function EmployeeProfilePage({
         .where(eq(documents.employeeId, employeeId))
         .orderBy(desc(documents.createdAt))
     : [];
+  const signatureByDocument = await latestRequestsByDocumentIds(
+    employeeDocs.map((doc) => doc.id)
+  );
+  const canRequestSignature =
+    isVsignConfigured() &&
+    canManageAccessScopes({
+      employeeId: actor.id,
+      accessLevel: actor.accessLevel,
+      canManageUsers: permissions.canManageUsers,
+    }) &&
+    isVendastaWorkEmail(actor.email);
 
   const educationRows = await db
     .select()
@@ -1189,8 +1208,31 @@ export default async function EmployeeProfilePage({
                 : null,
               fileUrl: doc.fileUrl,
               bambooId: doc.bambooId,
+              signatureRequest: signatureByDocument.get(doc.id)
+                ? {
+                    id: signatureByDocument.get(doc.id)!.id,
+                    status: signatureByDocument.get(doc.id)!.status,
+                    signerEmail: visibleProfileEmail(
+                      signatureByDocument.get(doc.id)!.signerEmail,
+                      {
+                        isViewingSelf,
+                        canViewSensitivePersonalInfo:
+                          permissions.canViewSensitivePersonalInfo === true,
+                      }
+                    ),
+                    senderEmail: visibleProfileEmail(
+                      signatureByDocument.get(doc.id)!.senderEmail,
+                      {
+                        isViewingSelf,
+                        canViewSensitivePersonalInfo:
+                          permissions.canViewSensitivePersonalInfo === true,
+                      }
+                    ),
+                  }
+                : null,
             }))}
             canUpload={canViewCompensation}
+            canRequestSignature={canRequestSignature}
           />
         </TabsContent>
 

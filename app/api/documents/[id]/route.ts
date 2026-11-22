@@ -4,6 +4,7 @@ import { documents, auditLogs } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { getSessionUserPermissions } from "@/lib/permissions";
+import { latestRequestsByDocumentIds } from "@/lib/signature-requests";
 
 export async function DELETE(
   request: NextRequest,
@@ -48,6 +49,18 @@ export async function DELETE(
     if (document.bambooId) {
       return NextResponse.json(
         { error: "BambooHR is the system of record for this document" },
+        { status: 409 }
+      );
+    }
+
+    const latest = await latestRequestsByDocumentIds([documentId]);
+    const signatureRequest = latest.get(documentId);
+    if (signatureRequest?.status === "sent" || signatureRequest?.status === "viewed") {
+      return NextResponse.json(
+        {
+          error:
+            "This document has an outstanding vSign request. It cannot be deleted until that request completes.",
+        },
         { status: 409 }
       );
     }

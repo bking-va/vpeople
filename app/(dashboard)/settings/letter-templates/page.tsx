@@ -39,6 +39,8 @@ export default async function LetterTemplatesPage() {
         <h1 className="text-3xl font-bold">Letter templates</h1>
         <p className="text-muted-foreground">
           Merge fields: {LETTER_MERGE_FIELDS.map((field) => `{{${field}}}`).join(", ")}
+          Issuing stores the letter on the employee record. It does not email anyone.
+          Open their Documents tab, preview, then send through vSign.
         </p>
       </div>
       <div className="space-y-4">

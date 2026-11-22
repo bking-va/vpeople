@@ -24,7 +24,9 @@ export function LetterIssueForm({ templateId }: { templateId: number }) {
       if (!response.ok) {
         throw new Error(body.error || "Issue failed");
       }
-      setMessage(`Issued document #${body.document?.id} (pending signature)`);
+      setMessage(
+        `Issued document #${body.document?.id}. Open the employee Documents tab to preview, then send through vSign. Nothing was emailed.`
+      );
       setEmployeeId("");
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "Issue failed");

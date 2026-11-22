@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { documents, employees, auditLogs } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { documents, employees, auditLogs, signatureRequests } from "@/lib/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 
 export async function POST(
   request: NextRequest,
@@ -16,7 +16,7 @@ export async function POST(
   try {
     const { id: idStr } = await params;
     const id = parseInt(idStr);
-    const data = await request.json();
+    await request.json().catch(() => ({}));
 
     const [document] = await db
       .select()
@@ -57,6 +57,23 @@ export async function POST(
       return NextResponse.json(
         { error: "You do not have permission to sign this document" },
         { status: 403 }
+      );
+    }
+
+    const [outstanding] = await db
+      .select({ id: signatureRequests.id })
+      .from(signatureRequests)
+      .where(
+        and(
+          eq(signatureRequests.documentId, document.id),
+          inArray(signatureRequests.status, ["sent", "viewed"])
+        )
+      )
+      .limit(1);
+    if (outstanding) {
+      return NextResponse.json(
+        { error: "This document was sent through vSign. Sign it from the email link." },
+        { status: 409 }
       );
     }
 

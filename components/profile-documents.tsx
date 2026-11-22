@@ -4,7 +4,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Download, FileText, CheckCircle, Clock, Trash2 } from "lucide-react";
+import { Upload, Download, FileText, CheckCircle, Trash2, Send } from "lucide-react";
+
+interface SignatureRequest {
+  id: number;
+  status: string;
+  signerEmail: string | null;
+  senderEmail: string | null;
+}
 
 interface Document {
   id: number;
@@ -16,18 +23,31 @@ interface Document {
   body?: string | null;
   fileUrl?: string | null;
   bambooId?: string | null;
+  signatureRequest?: SignatureRequest | null;
 }
 
 export function ProfileDocuments({
   employeeId,
   documents,
   canUpload,
+  canRequestSignature,
 }: {
   employeeId: number;
   documents: Document[];
   canUpload: boolean;
+  canRequestSignature: boolean;
 }) {
   const [isUploading, setIsUploading] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [preview, setPreview] = useState<{
+    documentId: number;
+    requestId: number;
+    title: string;
+    senderEmail: string;
+    signerEmail: string | null;
+    signerName: string;
+  } | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -60,7 +80,6 @@ export function ProfileDocuments({
   };
 
   const handleDownload = async (docId: number) => {
-    // Open download URL directly - server streams the file
     window.location.href = `/api/documents/${docId}/download`;
   };
 
@@ -77,11 +96,64 @@ export function ProfileDocuments({
       if (response.ok) {
         window.location.reload();
       } else {
-        alert("Signing failed");
+        const body = await response.json().catch(() => ({}));
+        alert(body.error || "Signing failed");
       }
     } catch (error) {
       console.error("Signing failed:", error);
       alert("Signing failed");
+    }
+  };
+
+  const handlePreview = async (docId: number) => {
+    setBusyId(docId);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/documents/${docId}/signature-requests`, {
+        method: "POST",
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "Preview failed");
+      }
+      setPreview({
+        documentId: docId,
+        requestId: body.request.id,
+        title: body.preview.title,
+        senderEmail: body.preview.senderEmail,
+        signerEmail: body.preview.signerEmail,
+        signerName: body.preview.signerName,
+      });
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!preview) return;
+    if (
+      !confirm(
+        `Send “${preview.title}” to ${preview.signerEmail || preview.signerName} via vSign as ${preview.senderEmail}? This emails the signer.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(preview.requestId);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/signature-requests/${preview.requestId}/send`, {
+        method: "POST",
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "Send failed");
+      }
+      window.location.reload();
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "Send failed");
+      setBusyId(null);
     }
   };
 
@@ -105,18 +177,23 @@ export function ProfileDocuments({
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "signed":
-        return <Badge variant="default">Signed</Badge>;
-      case "pending_signature":
-        return <Badge variant="outline">Pending Signature</Badge>;
-      case "draft":
-        return <Badge variant="secondary">Draft</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
+  const getStatusBadge = (doc: Document) => {
+    const signing = doc.signatureRequest?.status;
+    if (signing === "sent") return <Badge variant="outline">Sent via vSign</Badge>;
+    if (signing === "viewed") return <Badge variant="outline">Viewed</Badge>;
+    if (signing === "signed" || doc.status === "signed") return <Badge variant="default">Signed</Badge>;
+    if (signing === "declined") return <Badge variant="secondary">Declined</Badge>;
+    if (signing === "voided") return <Badge variant="secondary">Voided</Badge>;
+    if (signing === "draft") return <Badge variant="outline">Preview ready</Badge>;
+    if (doc.status === "pending_signature") {
+      return <Badge variant="outline">Pending Signature</Badge>;
     }
+    if (doc.status === "draft") return <Badge variant="secondary">Draft</Badge>;
+    return <Badge variant="secondary">{doc.status}</Badge>;
   };
+
+  const vsignOutstanding = (doc: Document) =>
+    doc.signatureRequest?.status === "sent" || doc.signatureRequest?.status === "viewed";
 
   return (
     <Card>
@@ -143,6 +220,55 @@ export function ProfileDocuments({
         )}
       </CardHeader>
       <CardContent>
+        {message && (
+          <p className="text-sm text-destructive mb-3">{message}</p>
+        )}
+        {documents.some(
+          (doc) =>
+            doc.signatureRequest?.status === "sent" ||
+            doc.signatureRequest?.status === "viewed"
+        ) && (
+          <div className="mb-4 rounded-lg border p-4 space-y-2">
+            <p className="font-medium">Pending signatures</p>
+            <ul className="text-sm text-muted-foreground space-y-1">
+              {documents
+                .filter(
+                  (doc) =>
+                    doc.signatureRequest?.status === "sent" ||
+                    doc.signatureRequest?.status === "viewed"
+                )
+                .map((doc) => (
+                  <li key={doc.id}>
+                    {doc.title} — {doc.signatureRequest?.status} via vSign
+                    {doc.signatureRequest?.signerEmail
+                      ? ` (${doc.signatureRequest.signerEmail})`
+                      : ""}
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+        {preview && (
+          <div className="mb-4 rounded-lg border p-4 space-y-2">
+            <p className="font-medium">Preview — nothing has been sent</p>
+            <p className="text-sm text-muted-foreground">
+              {preview.title} will be emailed to {preview.signerName}
+              {preview.signerEmail ? ` (${preview.signerEmail})` : ""} from {preview.senderEmail}{" "}
+              through vSign. A signature and date field are placed
+              on the last page. The signed PDF, including the certificate of completion, is
+              stored on this record when they finish.
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleSend} disabled={busyId === preview.requestId}>
+                <Send className="mr-1 h-4 w-4" />
+                {busyId === preview.requestId ? "Sending…" : "Send via vSign"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
         {documents.length === 0 ? (
           <p className="text-muted-foreground text-center py-8">
             No documents yet
@@ -169,8 +295,22 @@ export function ProfileDocuments({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {getStatusBadge(doc.status)}
-                  {doc.status === "pending_signature" && !doc.bambooId && (
+                  {getStatusBadge(doc)}
+                  {canRequestSignature &&
+                    !doc.bambooId &&
+                    doc.status !== "signed" &&
+                    !vsignOutstanding(doc) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePreview(doc.id)}
+                        disabled={busyId === doc.id}
+                      >
+                        <Send className="mr-1 h-4 w-4" />
+                        {busyId === doc.id ? "Preparing…" : "Send for signature"}
+                      </Button>
+                    )}
+                  {doc.status === "pending_signature" && !doc.bambooId && !vsignOutstanding(doc) && (
                     <Button size="sm" onClick={() => handleSign(doc.id)}>
                       <CheckCircle className="mr-1 h-4 w-4" />
                       Sign

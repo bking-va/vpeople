@@ -56,9 +56,20 @@ export async function updateEmployeeProfile(
     return { success: false, error: "Employee not found" };
   }
 
-  let safeData = data;
+  const allowed: typeof data = {
+    firstName: data.firstName,
+    lastName: data.lastName,
+    workPhone: data.workPhone,
+    extension: data.extension,
+    birthDate: data.birthDate,
+    gender: data.gender,
+  };
+  const picked = Object.fromEntries(
+    Object.entries(allowed).filter(([, value]) => value !== undefined)
+  ) as typeof data;
+  let safeData = picked;
   try {
-    safeData = sanitizePersonNameFields(data as Record<string, unknown>) as typeof data;
+    safeData = sanitizePersonNameFields(picked as Record<string, unknown>) as typeof data;
   } catch {
     return { success: false, error: UNSAFE_PERSON_NAME_MESSAGE };
   }
