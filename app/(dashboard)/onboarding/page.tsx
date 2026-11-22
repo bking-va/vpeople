@@ -144,6 +144,23 @@ export default async function OnboardingPage() {
         </CardContent>
       </Card>
 
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Policy acknowledgements</CardTitle>
+            <CardDescription>
+              Onboarding checklists do not send documents. Upload or issue a policy on
+              the employee&apos;s Documents tab, preview it, then send through vSign.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline">
+              <Link href="/files">Open pending signatures</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {isAdmin && templates.length > 0 && (
         <Card>
           <CardHeader>

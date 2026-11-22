@@ -267,6 +267,13 @@
       "when": 1795300348040,
       "tag": "0037_fx_daily_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795308316825,
+      "tag": "0038_signature_requests",
+      "breakpoints": true
     }
   ]
 }

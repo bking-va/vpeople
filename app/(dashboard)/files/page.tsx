@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { getSessionUserPermissions } from "@/lib/permissions";
 import { canViewPrivateDocuments } from "@/lib/authz";
+import { latestRequestsByDocumentIds } from "@/lib/signature-requests";
 
 export default async function FilesPage() {
   const session = await auth();
@@ -70,7 +71,7 @@ export default async function FilesPage() {
     .orderBy(desc(documents.createdAt))
     .limit(10);
 
-  const pendingSignatureDocs = await db
+  const pendingSignatureDocsRaw = await db
     .select({
       id: documents.id,
       title: documents.title,
@@ -89,6 +90,17 @@ export default async function FilesPage() {
     )
     .orderBy(desc(documents.createdAt))
     .limit(10);
+  const pendingRequests = await latestRequestsByDocumentIds(
+    pendingSignatureDocsRaw.map((doc) => doc.id)
+  );
+  const pendingSignatureDocs = pendingSignatureDocsRaw.map((doc) => {
+    const request = pendingRequests.get(doc.id);
+    return {
+      ...doc,
+      signingStatus: request?.status ?? null,
+      signerEmail: request?.signerEmail ?? null,
+    };
+  });
 
   const categoryCounts = await db
     .select({
@@ -204,7 +216,9 @@ export default async function FilesPage() {
         <Card>
           <CardHeader>
             <CardTitle>E-Signature Requests</CardTitle>
-            <CardDescription>Documents requiring signature</CardDescription>
+            <CardDescription>
+              Pending signatures. vSign status is shown when HR sent a request after preview.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {pendingSignatureDocs.length === 0 ? (
@@ -233,11 +247,15 @@ export default async function FilesPage() {
                         </Link>
                         <p className="text-sm text-muted-foreground">
                           {doc.category} • {formatDate(doc.createdAt)}
+                          {doc.signingStatus ? ` • vSign ${doc.signingStatus}` : ""}
+                          {doc.signerEmail ? ` • ${doc.signerEmail}` : ""}
                         </p>
                       </div>
                     </div>
-                    <Button size="sm" variant="default">
-                      Sign
+                    <Button size="sm" variant="default" asChild>
+                      <Link href={`/people/${doc.employeeId}?tab=documents`}>
+                        Open
+                      </Link>
                     </Button>
                   </div>
                 ))}
