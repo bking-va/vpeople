@@ -339,6 +339,10 @@ export interface BambooSyncStore {
       resumeBambooFileId: string | null;
       resumeBlobUrl: string | null;
       atsDetailImportedAt: string | null;
+      addressCity?: string | null;
+      addressProvince?: string | null;
+      addressPostalCode?: string | null;
+      addressCountry?: string | null;
     }>,
     progress?: BatchProgress
   ): Promise<Map<string, number>>;

@@ -24,6 +24,9 @@ interface JobOpeningFormProps {
     description: string | null;
     requirements: string | null;
     openDate: string | null;
+    locationRequirement?: string | null;
+    locationMaxDistanceKm?: number | null;
+    locationWeight?: number | null;
   };
 }
 
@@ -48,6 +51,13 @@ export function JobOpeningForm({ departments, locations, hiringLeads, opening }:
       description: formData.get("description") as string,
       requirements: formData.get("requirements") as string,
       openDate: formData.get("openDate") as string || null,
+      locationRequirement: formData.get("locationRequirement") as string,
+      locationMaxDistanceKm: formData.get("locationMaxDistanceKm")
+        ? parseInt(formData.get("locationMaxDistanceKm") as string, 10)
+        : 50,
+      locationWeight: formData.get("locationWeight")
+        ? parseInt(formData.get("locationWeight") as string, 10)
+        : 0,
     };
 
     try {
@@ -206,6 +216,47 @@ export function JobOpeningForm({ departments, locations, hiringLeads, opening }:
               rows={6}
               placeholder="List required skills, experience, education, certifications..."
             />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="locationRequirement">Location requirement</Label>
+              <Select
+                name="locationRequirement"
+                defaultValue={opening?.locationRequirement || "none"}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="near_office">Near office</SelectItem>
+                  <SelectItem value="near_customers">Near customers</SelectItem>
+                  <SelectItem value="near_office_or_customers">Near office or customers</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="locationMaxDistanceKm">Max distance (km)</Label>
+              <Input
+                id="locationMaxDistanceKm"
+                name="locationMaxDistanceKm"
+                type="number"
+                min={1}
+                defaultValue={opening?.locationMaxDistanceKm ?? 50}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="locationWeight">Proximity weight (0–100)</Label>
+              <Input
+                id="locationWeight"
+                name="locationWeight"
+                type="number"
+                min={0}
+                max={100}
+                defaultValue={opening?.locationWeight ?? 0}
+              />
+            </div>
           </div>
 
           {error && (

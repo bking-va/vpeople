@@ -108,6 +108,10 @@ export default async function SettingsPage() {
                 <p className="font-medium">Regional access allowlists</p>
                 <p className="text-sm text-muted-foreground">Location and country scopes for regional_view (fail closed)</p>
               </Link>
+              <Link href="/settings/customer-locations" className="block p-2 hover:bg-accent rounded">
+                <p className="font-medium">Customer locations</p>
+                <p className="text-sm text-muted-foreground">City/region points for candidate proximity matching (CSV import)</p>
+              </Link>
             </div>
           </CardContent>
         </Card>

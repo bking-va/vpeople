@@ -86,12 +86,21 @@ export default async function HiringPage() {
           <h1 className="text-3xl font-bold">Hiring & Recruiting</h1>
           <p className="text-muted-foreground">Manage job openings and candidates</p>
         </div>
-        {isAdmin && (
-          <Button>
-            <Briefcase className="h-4 w-4 mr-2" />
-            New Job Opening
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {hiringAccess.allowed && (
+            <Button asChild variant="outline">
+              <Link href="/hiring/match">Find candidates</Link>
+            </Button>
+          )}
+          {isAdmin && (
+            <Button asChild>
+              <Link href="/hiring/openings/new">
+                <Briefcase className="h-4 w-4 mr-2" />
+                New Job Opening
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -158,7 +167,9 @@ export default async function HiringPage() {
                 Create your first job opening to start receiving applications
               </p>
               {isAdmin && (
-                <Button>Create Job Opening</Button>
+                <Button asChild>
+                  <Link href="/hiring/openings/new">Create Job Opening</Link>
+                </Button>
               )}
             </div>
           ) : (

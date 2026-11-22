@@ -166,6 +166,23 @@ export function mapAtsApplication(
       blankToNull(asRecord(raw.resume).id) ||
       nestedId(applicant.resumeFileId) ||
       blankToNull(applicant.resumeFileId),
+    addressCity:
+      blankToNull(applicant.city) ||
+      blankToNull(applicant.addressCity) ||
+      blankToNull(raw.city),
+    addressProvince:
+      blankToNull(applicant.state) ||
+      blankToNull(applicant.province) ||
+      blankToNull(applicant.region) ||
+      blankToNull(raw.state),
+    addressPostalCode:
+      blankToNull(applicant.zip) ||
+      blankToNull(applicant.zipcode) ||
+      blankToNull(applicant.postalCode) ||
+      blankToNull(raw.zipcode),
+    addressCountry:
+      blankToNull(applicant.country) ||
+      blankToNull(raw.country),
   };
 }
 
