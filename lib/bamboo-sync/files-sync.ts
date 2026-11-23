@@ -28,6 +28,7 @@ export type BambooFilesSyncResult = {
   kind: "bamboo_files";
   mode: BambooSyncMode;
   checkpoint: FilesCheckpoint;
+  transientSkipped: number;
   errorMessage?: string;
 };
 
@@ -133,6 +134,7 @@ export async function runBambooFilesSync(
   const blob = importBlobs ? opts.blob ?? null : null;
   let processed = 0;
   let debugStep = "init";
+  let transientSkipped = 0;
 
   if (!opts.client) {
     log("BAMBOOHR_API_KEY is unset; Bamboo files sync skipped");
@@ -142,6 +144,7 @@ export async function runBambooFilesSync(
       kind: "bamboo_files",
       mode: opts.mode,
       checkpoint: emptyCheckpoint(),
+      transientSkipped: 0,
     };
   }
 
@@ -174,6 +177,7 @@ export async function runBambooFilesSync(
         companyFiles: checkpoint.companyFiles,
         restricted: checkpoint.restricted,
         blobs: checkpoint.blobs,
+        transientSkipped,
       },
       errorMessage,
     });
@@ -207,6 +211,7 @@ export async function runBambooFilesSync(
             kind: "bamboo_files",
             mode: opts.mode,
             checkpoint,
+            transientSkipped,
           };
         }
         debugStep = `view employee=${bambooId}`;
@@ -236,11 +241,15 @@ export async function runBambooFilesSync(
                 log(`employee file missing bambooFileId=${mapped.fileId}`);
                 fileUrl = BAMBOO_BLOB_UNAVAILABLE;
               } else if (error instanceof BambooHrHttpError && error.status >= 500) {
-                log(`file download failed status=${error.status} bambooFileId=${mapped.fileId}`);
-                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+                log(
+                  `file download failed status=${error.status} bambooFileId=${mapped.fileId}; will retry later`
+                );
+                transientSkipped += 1;
               } else if (debugStep.startsWith("download") && isTruncatedDownloadError(error)) {
-                log(`file download truncated after retries bambooFileId=${mapped.fileId}`);
-                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+                log(
+                  `file download truncated after retries bambooFileId=${mapped.fileId}; will retry later`
+                );
+                transientSkipped += 1;
               } else {
                 throw error;
               }
@@ -287,6 +296,7 @@ export async function runBambooFilesSync(
           kind: "bamboo_files",
           mode: opts.mode,
           checkpoint,
+          transientSkipped,
         };
       }
       checkpoint.phase = "company";
@@ -307,6 +317,7 @@ export async function runBambooFilesSync(
             kind: "bamboo_files",
             mode: opts.mode,
             checkpoint,
+            transientSkipped,
           };
         }
         const skipBlob = importedCompany.has(mapped.bambooId);
@@ -323,11 +334,15 @@ export async function runBambooFilesSync(
               log(`company file missing bambooFileId=${mapped.fileId}`);
               fileUrl = BAMBOO_BLOB_UNAVAILABLE;
             } else if (error instanceof BambooHrHttpError && error.status >= 500) {
-              log(`file download failed status=${error.status} bambooFileId=${mapped.fileId}`);
-              fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+              log(
+                `file download failed status=${error.status} bambooFileId=${mapped.fileId}; will retry later`
+              );
+              transientSkipped += 1;
             } else if (debugStep.startsWith("download") && isTruncatedDownloadError(error)) {
-              log(`file download truncated after retries bambooFileId=${mapped.fileId}`);
-              fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+              log(
+                `file download truncated after retries bambooFileId=${mapped.fileId}; will retry later`
+              );
+              transientSkipped += 1;
             } else {
               throw error;
             }
@@ -364,7 +379,7 @@ export async function runBambooFilesSync(
 
     await persist("success");
     log(
-      `Bamboo files employee=${checkpoint.employeeFiles} company=${checkpoint.companyFiles} blobs=${checkpoint.blobs}`
+      `Bamboo files employee=${checkpoint.employeeFiles} company=${checkpoint.companyFiles} blobs=${checkpoint.blobs} transientSkipped=${transientSkipped}`
     );
     return {
       status: "success",
@@ -372,6 +387,7 @@ export async function runBambooFilesSync(
       kind: "bamboo_files",
       mode: opts.mode,
       checkpoint,
+      transientSkipped,
     };
   } catch (error) {
     const message =
@@ -392,6 +408,7 @@ export async function runBambooFilesSync(
       kind: "bamboo_files",
       mode: opts.mode,
       checkpoint,
+      transientSkipped,
       errorMessage: message,
     };
   }
@@ -404,6 +421,7 @@ export function formatFilesSyncSummary(result: BambooFilesSyncResult): string {
     `company=${result.checkpoint.companyFiles}`,
     `restricted=${result.checkpoint.restricted}`,
     `blobs=${result.checkpoint.blobs}`,
+    `transientSkipped=${result.transientSkipped}`,
     `phase=${result.checkpoint.phase}`,
   ].join(" ");
 }

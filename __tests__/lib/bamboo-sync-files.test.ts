@@ -1,10 +1,5 @@
 import { BambooHrClient } from "@/lib/bamboo-sync/client";
-import {
-  BAMBOO_BLOB_UNAVAILABLE,
-  isStoredBlobUrl,
-  storedBlobGetUrl,
-  storedBlobPathname,
-} from "@/lib/bamboo-sync/blob";
+import { isStoredBlobUrl, storedBlobGetUrl, storedBlobPathname } from "@/lib/bamboo-sync/blob";
 import { runBambooFilesSync } from "@/lib/bamboo-sync/files-sync";
 import {
   filesFromViewPayload,
@@ -567,16 +562,22 @@ describe("runBambooFilesSync", () => {
       async upsertEmployeeDocumentsBatch(rows: Array<Record<string, unknown>>) {
         for (const row of rows) {
           const existing = this.documents.find((item) => item.bambooId === row.bambooId);
-          if (existing) Object.assign(existing, row);
-          else this.documents.push(row);
+          if (existing) {
+            const next = { ...row };
+            if (next.fileUrl == null) next.fileUrl = existing.fileUrl;
+            Object.assign(existing, next);
+          } else this.documents.push(row);
         }
         return rows.length;
       },
       async upsertCompanyFilesBatch(rows: Array<Record<string, unknown>>) {
         for (const row of rows) {
           const existing = this.company.find((item) => item.bambooId === row.bambooId);
-          if (existing) Object.assign(existing, row);
-          else this.company.push(row);
+          if (existing) {
+            const next = { ...row };
+            if (next.fileUrl == null) next.fileUrl = existing.fileUrl;
+            Object.assign(existing, next);
+          } else this.company.push(row);
         }
         return rows.length;
       },
@@ -589,9 +590,10 @@ describe("runBambooFilesSync", () => {
     },
   };
 
-  test("marks a terminated employee file download unavailable and continues", async () => {
+  test("leaves a truncated employee file download null so a later run can retry", async () => {
     const store = filesSyncStore();
     const logs: string[] = [];
+    let failTruncated = true;
     const client = new BambooHrClient({
       apiKey: "test-key",
       subdomain: "vendasta",
@@ -612,7 +614,8 @@ describe("runBambooFilesSync", () => {
           });
         }
         if (url.endsWith("/employees/404/files/12")) {
-          throw new TypeError("terminated");
+          if (failTruncated) throw new TypeError("terminated");
+          return new Response(Buffer.from("i9"), { status: 200 });
         }
         if (url.endsWith("/employees/404/files/13")) {
           return new Response(Buffer.from("w4"), { status: 200 });
@@ -636,17 +639,33 @@ describe("runBambooFilesSync", () => {
       log: (message) => logs.push(message),
     });
     expect(result.status).toBe("success");
+    expect(result.transientSkipped).toBe(1);
     expect(store.documents).toHaveLength(2);
-    expect(store.documents[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(store.documents[0].fileUrl).toBeNull();
     expect(String(store.documents[1].fileUrl)).toContain("blob.vercel-storage.com");
     expect(store.company).toHaveLength(1);
     expect(String(store.company[0].fileUrl)).toContain("blob.vercel-storage.com");
-    expect(logs.some((line) => line.includes("file download truncated after retries bambooFileId=12"))).toBe(
-      true
-    );
+    expect(
+      logs.some((line) =>
+        line.includes("file download truncated after retries bambooFileId=12; will retry later")
+      )
+    ).toBe(true);
+    expect((await store.listImportedFileBambooIds("employee")).has("emp:404:12")).toBe(false);
+
+    failTruncated = false;
+    const retry = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: privateBlob,
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(retry.status).toBe("success");
+    expect(retry.transientSkipped).toBe(0);
+    expect(String(store.documents[0].fileUrl)).toContain("blob.vercel-storage.com");
   });
 
-  test("marks a 5xx employee file download unavailable and continues", async () => {
+  test("leaves a 5xx employee file download null and continues", async () => {
     const store = filesSyncStore();
     const logs: string[] = [];
     const client = new BambooHrClient({
@@ -693,17 +712,21 @@ describe("runBambooFilesSync", () => {
       log: (message) => logs.push(message),
     });
     expect(result.status).toBe("success");
-    expect(store.documents[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(result.transientSkipped).toBe(1);
+    expect(store.documents[0].fileUrl).toBeNull();
     expect(String(store.documents[1].fileUrl)).toContain("blob.vercel-storage.com");
     expect(store.company).toHaveLength(1);
-    expect(logs.some((line) => line.includes("file download failed status=500 bambooFileId=12"))).toBe(
-      true
-    );
+    expect(
+      logs.some((line) =>
+        line.includes("file download failed status=500 bambooFileId=12; will retry later")
+      )
+    ).toBe(true);
   });
 
-  test("marks a terminated company file download unavailable and continues", async () => {
+  test("leaves a truncated company file download null so a later run can retry", async () => {
     const store = filesSyncStore({ employees: [] });
     const logs: string[] = [];
+    let failTruncated = true;
     const client = new BambooHrClient({
       apiKey: "test-key",
       subdomain: "vendasta",
@@ -724,7 +747,8 @@ describe("runBambooFilesSync", () => {
           });
         }
         if (url.endsWith("/files/88")) {
-          throw new TypeError("terminated");
+          if (failTruncated) throw new TypeError("terminated");
+          return new Response(Buffer.from("hb"), { status: 200 });
         }
         if (url.endsWith("/files/89")) {
           return new Response(Buffer.from("code"), { status: 200 });
@@ -740,15 +764,31 @@ describe("runBambooFilesSync", () => {
       log: (message) => logs.push(message),
     });
     expect(result.status).toBe("success");
+    expect(result.transientSkipped).toBe(1);
     expect(store.company).toHaveLength(2);
-    expect(store.company[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(store.company[0].fileUrl).toBeNull();
     expect(String(store.company[1].fileUrl)).toContain("blob.vercel-storage.com");
-    expect(logs.some((line) => line.includes("file download truncated after retries bambooFileId=88"))).toBe(
-      true
-    );
+    expect(
+      logs.some((line) =>
+        line.includes("file download truncated after retries bambooFileId=88; will retry later")
+      )
+    ).toBe(true);
+    expect((await store.listImportedFileBambooIds("company")).has("company:88")).toBe(false);
+
+    failTruncated = false;
+    const retry = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: privateBlob,
+      mode: "full",
+      log: () => undefined,
+    });
+    expect(retry.status).toBe("success");
+    expect(retry.transientSkipped).toBe(0);
+    expect(String(store.company[0].fileUrl)).toContain("blob.vercel-storage.com");
   });
 
-  test("marks a 5xx company file download unavailable and continues", async () => {
+  test("leaves a 5xx company file download null and continues", async () => {
     const store = filesSyncStore({ employees: [] });
     const logs: string[] = [];
     const client = new BambooHrClient({
@@ -787,10 +827,13 @@ describe("runBambooFilesSync", () => {
       log: (message) => logs.push(message),
     });
     expect(result.status).toBe("success");
-    expect(store.company[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(result.transientSkipped).toBe(1);
+    expect(store.company[0].fileUrl).toBeNull();
     expect(String(store.company[1].fileUrl)).toContain("blob.vercel-storage.com");
-    expect(logs.some((line) => line.includes("file download failed status=503 bambooFileId=88"))).toBe(
-      true
-    );
+    expect(
+      logs.some((line) =>
+        line.includes("file download failed status=503 bambooFileId=88; will retry later")
+      )
+    ).toBe(true);
   });
 });
