@@ -1,5 +1,10 @@
 import { BambooHrClient } from "@/lib/bamboo-sync/client";
-import { isStoredBlobUrl, storedBlobGetUrl, storedBlobPathname } from "@/lib/bamboo-sync/blob";
+import {
+  BAMBOO_BLOB_UNAVAILABLE,
+  isStoredBlobUrl,
+  storedBlobGetUrl,
+  storedBlobPathname,
+} from "@/lib/bamboo-sync/blob";
 import { runBambooFilesSync } from "@/lib/bamboo-sync/files-sync";
 import {
   filesFromViewPayload,
@@ -512,6 +517,280 @@ describe("runBambooFilesSync", () => {
     expect(store.company[0].bambooCategory).toBe("Compensation Letters");
     expect(store.company[0].fileUrl).toBe(
       "https://blob.vercel-storage.com/bamboo-files/company/existing"
+    );
+  });
+
+  function filesSyncStore(opts?: {
+    employees?: Array<Record<string, unknown>>;
+    documents?: Array<Record<string, unknown>>;
+    company?: Array<Record<string, unknown>>;
+  }) {
+    return {
+      employees: opts?.employees ?? [
+        {
+          id: 7,
+          bambooId: "404",
+          email: "pat@vendasta.com",
+          employeeNumber: "E7",
+          firstName: "Pat",
+          lastName: "Lee",
+          accessLevel: "employee" as const,
+          vendastaSub: null,
+          userId: null,
+          managerId: null,
+        },
+      ],
+      documents: opts?.documents ?? ([] as Array<Record<string, unknown>>),
+      company: opts?.company ?? ([] as Array<Record<string, unknown>>),
+      syncRuns: [] as Array<Record<string, unknown>>,
+      async listEmployees() {
+        return this.employees;
+      },
+      async lastIncompleteKindCheckpoint() {
+        return null;
+      },
+      async startSyncRun(run: Record<string, unknown>) {
+        this.syncRuns.push({ ...run, id: 1 });
+        return 1;
+      },
+      async updateSyncRun(_id: number, run: Record<string, unknown>) {
+        Object.assign(this.syncRuns[0], run);
+      },
+      async listImportedFileBambooIds(kind: "employee" | "company") {
+        const rows = kind === "company" ? this.company : this.documents;
+        return new Set(
+          rows
+            .filter((row) => row.bambooId && row.fileUrl)
+            .map((row) => String(row.bambooId))
+        );
+      },
+      async upsertEmployeeDocumentsBatch(rows: Array<Record<string, unknown>>) {
+        for (const row of rows) {
+          const existing = this.documents.find((item) => item.bambooId === row.bambooId);
+          if (existing) Object.assign(existing, row);
+          else this.documents.push(row);
+        }
+        return rows.length;
+      },
+      async upsertCompanyFilesBatch(rows: Array<Record<string, unknown>>) {
+        for (const row of rows) {
+          const existing = this.company.find((item) => item.bambooId === row.bambooId);
+          if (existing) Object.assign(existing, row);
+          else this.company.push(row);
+        }
+        return rows.length;
+      },
+    };
+  }
+
+  const privateBlob = {
+    async putPrivate(input: { pathname: string }) {
+      return { url: `https://blob.vercel-storage.com/${input.pathname}` };
+    },
+  };
+
+  test("marks a terminated employee file download unavailable and continues", async () => {
+    const store = filesSyncStore();
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      maxRetries: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/employees/404/files/view")) {
+          return jsonResponse({
+            categories: [
+              {
+                name: "I-9",
+                files: [
+                  { id: 12, name: "i9.pdf" },
+                  { id: 13, name: "w4.pdf" },
+                ],
+              },
+            ],
+          });
+        }
+        if (url.endsWith("/employees/404/files/12")) {
+          throw new TypeError("terminated");
+        }
+        if (url.endsWith("/employees/404/files/13")) {
+          return new Response(Buffer.from("w4"), { status: 200 });
+        }
+        if (url.endsWith("/files/view")) {
+          return jsonResponse({
+            categories: [{ name: "Policies", files: [{ id: 88, name: "handbook.pdf" }] }],
+          });
+        }
+        if (url.endsWith("/files/88")) {
+          return new Response(Buffer.from("hb"), { status: 200 });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: privateBlob,
+      mode: "full",
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(store.documents).toHaveLength(2);
+    expect(store.documents[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(String(store.documents[1].fileUrl)).toContain("blob.vercel-storage.com");
+    expect(store.company).toHaveLength(1);
+    expect(String(store.company[0].fileUrl)).toContain("blob.vercel-storage.com");
+    expect(logs.some((line) => line.includes("file download truncated after retries bambooFileId=12"))).toBe(
+      true
+    );
+  });
+
+  test("marks a 5xx employee file download unavailable and continues", async () => {
+    const store = filesSyncStore();
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      maxRetries: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/employees/404/files/view")) {
+          return jsonResponse({
+            categories: [
+              {
+                name: "I-9",
+                files: [
+                  { id: 12, name: "i9.pdf" },
+                  { id: 13, name: "w4.pdf" },
+                ],
+              },
+            ],
+          });
+        }
+        if (url.endsWith("/employees/404/files/12")) {
+          return new Response("", { status: 500, headers: { "Retry-After": "0" } });
+        }
+        if (url.endsWith("/employees/404/files/13")) {
+          return new Response(Buffer.from("w4"), { status: 200 });
+        }
+        if (url.endsWith("/files/view")) {
+          return jsonResponse({
+            categories: [{ name: "Policies", files: [{ id: 88, name: "handbook.pdf" }] }],
+          });
+        }
+        if (url.endsWith("/files/88")) {
+          return new Response(Buffer.from("hb"), { status: 200 });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: privateBlob,
+      mode: "full",
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(store.documents[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(String(store.documents[1].fileUrl)).toContain("blob.vercel-storage.com");
+    expect(store.company).toHaveLength(1);
+    expect(logs.some((line) => line.includes("file download failed status=500 bambooFileId=12"))).toBe(
+      true
+    );
+  });
+
+  test("marks a terminated company file download unavailable and continues", async () => {
+    const store = filesSyncStore({ employees: [] });
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      maxRetries: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/files/view")) {
+          return jsonResponse({
+            categories: [
+              {
+                name: "Policies",
+                files: [
+                  { id: 88, name: "handbook.pdf" },
+                  { id: 89, name: "code.pdf" },
+                ],
+              },
+            ],
+          });
+        }
+        if (url.endsWith("/files/88")) {
+          throw new TypeError("terminated");
+        }
+        if (url.endsWith("/files/89")) {
+          return new Response(Buffer.from("code"), { status: 200 });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: privateBlob,
+      mode: "full",
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(store.company).toHaveLength(2);
+    expect(store.company[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(String(store.company[1].fileUrl)).toContain("blob.vercel-storage.com");
+    expect(logs.some((line) => line.includes("file download truncated after retries bambooFileId=88"))).toBe(
+      true
+    );
+  });
+
+  test("marks a 5xx company file download unavailable and continues", async () => {
+    const store = filesSyncStore({ employees: [] });
+    const logs: string[] = [];
+    const client = new BambooHrClient({
+      apiKey: "test-key",
+      subdomain: "vendasta",
+      maxRetries: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/files/view")) {
+          return jsonResponse({
+            categories: [
+              {
+                name: "Policies",
+                files: [
+                  { id: 88, name: "handbook.pdf" },
+                  { id: 89, name: "code.pdf" },
+                ],
+              },
+            ],
+          });
+        }
+        if (url.endsWith("/files/88")) {
+          return new Response("", { status: 503, headers: { "Retry-After": "0" } });
+        }
+        if (url.endsWith("/files/89")) {
+          return new Response(Buffer.from("code"), { status: 200 });
+        }
+        return jsonResponse({ error: url }, 404);
+      },
+    });
+    const result = await runBambooFilesSync({
+      client,
+      store: store as never,
+      blob: privateBlob,
+      mode: "full",
+      log: (message) => logs.push(message),
+    });
+    expect(result.status).toBe("success");
+    expect(store.company[0].fileUrl).toBe(BAMBOO_BLOB_UNAVAILABLE);
+    expect(String(store.company[1].fileUrl)).toContain("blob.vercel-storage.com");
+    expect(logs.some((line) => line.includes("file download failed status=503 bambooFileId=88"))).toBe(
+      true
     );
   });
 });

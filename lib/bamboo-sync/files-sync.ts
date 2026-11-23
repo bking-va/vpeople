@@ -83,6 +83,27 @@ function safeLog(log: (message: string) => void, message: string) {
   log(message);
 }
 
+function isTruncatedDownloadError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "TimeoutError" || error.name === "AbortError") return true;
+  if (
+    error instanceof TypeError &&
+    (error.message === "terminated" || error.message === "fetch failed")
+  ) {
+    return true;
+  }
+  const cause = error.cause;
+  if (
+    cause &&
+    typeof cause === "object" &&
+    "code" in cause &&
+    (cause as { code?: unknown }).code === "UND_ERR_SOCKET"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function putFile(
   blob: PrivateBlobStore | null,
   kind: "employee" | "company",
@@ -111,6 +132,7 @@ export async function runBambooFilesSync(
   const importBlobs = opts.importBlobs !== false;
   const blob = importBlobs ? opts.blob ?? null : null;
   let processed = 0;
+  let debugStep = "init";
 
   if (!opts.client) {
     log("BAMBOOHR_API_KEY is unset; Bamboo files sync skipped");
@@ -187,6 +209,7 @@ export async function runBambooFilesSync(
             checkpoint,
           };
         }
+        debugStep = `view employee=${bambooId}`;
         let view: unknown;
         try {
           view = await opts.client.fetchEmployeeFilesView(bambooId);
@@ -203,12 +226,20 @@ export async function runBambooFilesSync(
           let fileUrl: string | null = null;
           if (!skipBlob && !dryRun && blob) {
             try {
+              debugStep = `download employee=${bambooId} fileId=${mapped.fileId}`;
               const file = await opts.client.fetchEmployeeFile(bambooId, mapped.fileId);
+              debugStep = `blobput employee=${bambooId} fileId=${mapped.fileId} bytes=${file.body.length}`;
               fileUrl = await putFile(blob, "employee", mapped, file);
               if (fileUrl) checkpoint.blobs += 1;
             } catch (error) {
               if (error instanceof BambooHrHttpError && error.status === 404) {
                 log(`employee file missing bambooFileId=${mapped.fileId}`);
+                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+              } else if (error instanceof BambooHrHttpError && error.status >= 500) {
+                log(`file download failed status=${error.status} bambooFileId=${mapped.fileId}`);
+                fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+              } else if (debugStep.startsWith("download") && isTruncatedDownloadError(error)) {
+                log(`file download truncated after retries bambooFileId=${mapped.fileId}`);
                 fileUrl = BAMBOO_BLOB_UNAVAILABLE;
               } else {
                 throw error;
@@ -216,6 +247,7 @@ export async function runBambooFilesSync(
             }
           }
           if (!dryRun) {
+            debugStep = `dbupsert employee=${bambooId} fileId=${mapped.fileId}`;
             await opts.store.upsertEmployeeDocumentsBatch([
               {
                 bambooId: mapped.bambooId,
@@ -263,6 +295,7 @@ export async function runBambooFilesSync(
 
     if (checkpoint.phase === "company") {
       log("Phase company files");
+      debugStep = "view company";
       const view = await opts.client.fetchCompanyFilesView();
       const files = filesFromViewPayload(view, "company");
       for (const mapped of files) {
@@ -280,12 +313,20 @@ export async function runBambooFilesSync(
         let fileUrl: string | null = null;
         if (!skipBlob && !dryRun && blob) {
           try {
+            debugStep = `download company fileId=${mapped.fileId}`;
             const file = await opts.client.fetchFile(mapped.fileId);
+            debugStep = `blobput company fileId=${mapped.fileId} bytes=${file.body.length}`;
             fileUrl = await putFile(blob, "company", mapped, file);
             if (fileUrl) checkpoint.blobs += 1;
           } catch (error) {
             if (error instanceof BambooHrHttpError && error.status === 404) {
               log(`company file missing bambooFileId=${mapped.fileId}`);
+              fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+            } else if (error instanceof BambooHrHttpError && error.status >= 500) {
+              log(`file download failed status=${error.status} bambooFileId=${mapped.fileId}`);
+              fileUrl = BAMBOO_BLOB_UNAVAILABLE;
+            } else if (debugStep.startsWith("download") && isTruncatedDownloadError(error)) {
+              log(`file download truncated after retries bambooFileId=${mapped.fileId}`);
               fileUrl = BAMBOO_BLOB_UNAVAILABLE;
             } else {
               throw error;
@@ -337,7 +378,13 @@ export async function runBambooFilesSync(
       error instanceof Error
         ? error.message.replace(PII_LOG_PATTERN, "[redacted]")
         : "Bamboo files sync failed";
-    log(`Bamboo files sync failed: ${message}`);
+    const cause =
+      error instanceof Error && typeof error.cause === "object" && error.cause
+        ? (error.cause as { name?: unknown; code?: unknown })
+        : {};
+    log(
+      `Bamboo files sync failed: ${message} name=${error instanceof Error ? error.name : typeof error} cause=${cause.name}/${cause.code} step=${debugStep}`
+    );
     await persist("failed", message);
     return {
       status: "failed",
