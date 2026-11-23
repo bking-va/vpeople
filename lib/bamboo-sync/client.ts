@@ -62,6 +62,14 @@ export function assertSafeBambooSubdomain(subdomain: string): string {
   return value;
 }
 
+export function safeDecodeFilename(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 function pathSegment(value: string, label: string): string {
   const trimmed = value.trim();
   if (!SAFE_PATH_SEGMENT.test(trimmed)) {
@@ -330,7 +338,7 @@ export class BambooHrClient {
           body: Buffer.from(bytes),
           contentType: response.headers.get("content-type"),
           filename: filenameMatch
-            ? decodeURIComponent(filenameMatch[1].replace(/"/g, "").trim())
+            ? safeDecodeFilename(filenameMatch[1].replace(/"/g, "").trim())
             : null,
         };
       } catch (error) {

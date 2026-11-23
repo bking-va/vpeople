@@ -4,6 +4,7 @@ export {
   assertSafeBambooSubdomain,
   createBambooHrClientFromEnv,
   parseRetryAfterMs,
+  safeDecodeFilename,
   BAMBOO_BALANCE_CONCURRENCY,
   BAMBOO_REQUEST_TIMEOUT_MS,
 } from "./client";
