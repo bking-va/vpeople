@@ -26,6 +26,9 @@ jobs:
       - name: Run matching unit tests
         run: npm test -- --testPathPattern=matching
 
+      - name: Run bamboo filename decode unit tests
+        run: npm test -- --testPathPattern=bamboo-filename-decode
+
   test:
     runs-on: ubuntu-latest
 
